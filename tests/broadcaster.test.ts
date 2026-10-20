@@ -115,6 +115,28 @@ describe('broadcaster tick', () => {
     expect(isChatDue({ ...chat, lastPostedAt: t0 }, 1, dueAt)).toBe(true);
   });
 
+  it('does not retry a failing chat before the interval passes', async () => {
+    const { db, engine, broadcaster, acc1 } = setup();
+    engine.resolveMap.set('@a', makeChat(401));
+    const b = await broadcaster.create({
+      name: 'X', text: 'Post', accountIds: [acc1.id], chatLinks: ['@a'], intervalHours: 1, spin: false,
+    });
+    db.updateBroadcast(b.id, { enabled: true });
+    let attempts = 0;
+    engine.sendToChat = async () => {
+      attempts++;
+      throw new Error('CHAT_SEND_PLAIN_FORBIDDEN');
+    };
+    const t0 = 1_700_000_000_000;
+    await broadcaster.tick(t0);
+    await broadcaster.tick(t0 + 60_000);
+    await broadcaster.tick(t0 + 120_000);
+    expect(attempts).toBe(1);
+    expect(db.getBroadcast(b.id).chats[0].lastError).toBe('CHAT_SEND_PLAIN_FORBIDDEN');
+    await broadcaster.tick(t0 + 3_600_000 + Math.floor(0.15 * 3_600_000) + 1);
+    expect(attempts).toBe(2);
+  });
+
   it('rotates across two accounts', async () => {
     const { db, engine, broadcaster, acc1, acc2 } = setup();
     engine.resolveMap.set('@a', makeChat(401));

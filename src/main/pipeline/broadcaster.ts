@@ -101,6 +101,9 @@ function isJoinRetryError(message: string): boolean {
 
 export function createBroadcaster(deps: BroadcasterDeps): Broadcaster {
   const rotation = new Map<number, number>();
+  // Last failed attempt per `${broadcastId}:${chatId}`: a failing chat waits a full interval like a posted one,
+  // instead of hitting Telegram and the LLM on every tick.
+  const failedAt = new Map<string, number>();
   let timer: ReturnType<typeof setInterval> | null = null;
 
   function rotationIndex(broadcastId: number): number {
@@ -165,7 +168,9 @@ export function createBroadcaster(deps: BroadcasterDeps): Broadcaster {
     let current = deps.db.getBroadcast(broadcast.id);
 
     for (const chat of current.chats) {
-      if (!isChatDue(chat, current.intervalHours, now)) {
+      const failed = failedAt.get(`${current.id}:${chat.tgChatId}`);
+      const lastAttempt = Math.max(chat.lastPostedAt ?? 0, failed ?? 0) || null;
+      if (!isChatDue({ ...chat, lastPostedAt: lastAttempt }, current.intervalHours, now)) {
         result.skipped++;
         continue;
       }
@@ -200,6 +205,7 @@ export function createBroadcaster(deps: BroadcasterDeps): Broadcaster {
         result.posted++;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        failedAt.set(`${current.id}:${chat.tgChatId}`, now);
         current = deps.db.updateBroadcastChat(current.id, chat.tgChatId, { lastError: error });
         deps.emit({ type: 'broadcast:update', broadcast: current });
         result.errors++;
