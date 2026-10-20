@@ -67,14 +67,32 @@ describe('createRealtime', () => {
     rt.stop();
   });
 
-  it('ignores unknown chats and short text', async () => {
-    setupSource(200);
+  it('listens to every chat the account is in: first message adds the chat as a source', async () => {
+    const projectId = setupSource(200);
+    engine.chats.set(999, makeChat(999, 'Новый чат'));
     const rt = createRealtime({ db, engine, ai, emit: (e) => events.push(e) });
     rt.start();
     engine.emitChat(1, makeMsg(999, 1, 'короткий'));
-    engine.emitChat(1, makeMsg(999, 2, 'длинное сообщение но чат неизвестен'));
+    engine.emitChat(1, makeMsg(999, 2, 'длинное сообщение из чата, которого ещё нет в источниках'));
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(ai.qualifyCalls).toBe(1);
+    const src = db.findSource(projectId, 999)!;
+    expect(src.foundBy).toBe('member');
+    expect(src.status).toBe('active');
+    rt.stop();
+  });
+
+  it('ignores rejected chats and accounts outside the project', async () => {
+    const projectId = setupSource(200);
+    db.updateSource(db.findSource(projectId, 200)!.id, { status: 'rejected' });
+    engine.chats.set(500, makeChat(500));
+    const rt = createRealtime({ db, engine, ai, emit: (e) => events.push(e) });
+    rt.start();
+    engine.emitChat(1, makeMsg(200, 1, 'сообщение из отклонённого чата, длинное'));
+    engine.emitChat(42, makeMsg(500, 2, 'сообщение от аккаунта не из проекта'));
     await vi.advanceTimersByTimeAsync(3000);
     expect(ai.qualifyCalls).toBe(0);
+    expect(db.findSource(projectId, 500)).toBeUndefined();
     rt.stop();
   });
 

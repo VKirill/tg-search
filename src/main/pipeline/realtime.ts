@@ -1,3 +1,4 @@
+import type { Source } from '../../shared/types';
 import type { TgMessage } from '../telegram/types';
 import {
   filterIncomingMessages,
@@ -63,29 +64,59 @@ export function createRealtime(deps: ScannerDeps) {
     );
   }
 
-  function onChatMessage(_accountId: number, msg: TgMessage) {
+  // Every group, supergroup and channel the account is in is a source of each project the account works for.
+  // A chat becomes a source with its first message; a source the user rejected is not listened to.
+  const pendingChats = new Map<string, Promise<Source | null>>();
+
+  async function sourceFor(projectId: number, accountId: number, chatId: number): Promise<Source | null> {
+    const existing = deps.db.findSource(projectId, chatId);
+    if (existing) return existing.status === 'rejected' ? null : existing;
+    const key = `${projectId}:${chatId}`;
+    let pending = pendingChats.get(key);
+    if (!pending) {
+      pending = deps.engine
+        .getChat(accountId, chatId)
+        .then((chat) => {
+          const source = deps.db.addSource({
+            projectId, tgChatId: chat.chatId, title: chat.title, username: chat.username, kind: chat.kind,
+            memberCount: chat.memberCount, foundBy: 'member', accountId, status: 'active',
+          });
+          deps.emit({ type: 'source:update', source });
+          return source.status === 'rejected' ? null : source;
+        })
+        .finally(() => pendingChats.delete(key));
+      pendingChats.set(key, pending);
+    }
+    return pending;
+  }
+
+  async function onChatMessage(accountId: number, msg: TgMessage) {
     if (msg.isOutgoing) return;
     if (msg.text.trim().length < 15) return;
-    const sources = deps.db.findActiveSourcesByChat(msg.chatId);
-    if (sources.length === 0) return;
+    const projects = deps.db
+      .listProjects()
+      .filter((p) => p.accountIds.length === 0 || p.accountIds.includes(accountId));
 
     const key = `${msg.chatId}:${msg.messageId}`;
-    for (const source of sources) {
-      const projectId = source.projectId;
-      let buf = buffers.get(projectId);
+    for (const project of projects) {
+      const source = await sourceFor(project.id, accountId, msg.chatId);
+      if (!source) continue;
+      let buf = buffers.get(project.id);
       if (!buf) {
         buf = new Map();
-        buffers.set(projectId, buf);
+        buffers.set(project.id, buf);
       }
       if (!buf.has(key)) buf.set(key, { msg, sourceId: source.id });
-      if (buf.size >= FLUSH_MAX) flush(projectId);
-      else scheduleFlush(projectId);
+      if (buf.size >= FLUSH_MAX) flush(project.id);
+      else scheduleFlush(project.id);
     }
   }
 
   return {
     start() {
-      deps.engine.onChatMessage(onChatMessage);
+      deps.engine.onChatMessage((accountId, msg) => {
+        onChatMessage(accountId, msg).catch((err) => console.error('realtime message', msg.chatId, err));
+      });
     },
     stop() {
       for (const projectId of timers.keys()) clearTimer(projectId);

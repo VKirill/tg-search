@@ -59,6 +59,7 @@ interface AccountSlot {
   pendingSends: Map<number, PendingSend>;
   // Send results that arrived before waitForSend registered (keyed by temporary message id).
   earlySends: Map<number, { message?: message; error?: error }>;
+  noPostSearch?: boolean; // Telegram answered PREMIUM_ACCOUNT_REQUIRED: global post search is off for this account
 }
 
 function parseFloodWaitSeconds(message: string): number {
@@ -242,6 +243,7 @@ export class TdlEngine implements TelegramEngine {
 
   async searchPublicPosts(accountId: number, query: string, limit: number): Promise<TgMessage[]> {
     const slot = await this.requireAuthorizedSlot(accountId);
+    if (slot.noPostSearch) return [];
     try {
       const limits = await this.invoke(slot, { _: 'getPublicPostSearchLimits', query });
       // is_current_query_free means "already paid for"; free daily queries come from remaining_free_query_count.
@@ -255,7 +257,12 @@ export class TdlEngine implements TelegramEngine {
       });
       return await this.mapMessages(slot, found.messages);
     } catch (err) {
-      console.error('searchPublicPosts failed:', err);
+      if (err instanceof Error && err.message.includes('PREMIUM_ACCOUNT_REQUIRED')) {
+        slot.noPostSearch = true;
+        console.warn(`account ${accountId}: public post search needs Telegram Premium, skipping it`);
+      } else {
+        console.error('searchPublicPosts failed:', err);
+      }
       return [];
     }
   }

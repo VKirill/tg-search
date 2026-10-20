@@ -351,11 +351,6 @@ export class Db {
     return toMessage(this.one('SELECT * FROM messages WHERE id = ?', Number(res.lastInsertRowid))!);
   }
 
-  // Active sources of all projects that watch this chat (real-time monitoring)
-  findActiveSourcesByChat(tgChatId: number): Source[] {
-    return this.all("SELECT * FROM sources WHERE tg_chat_id = ? AND status = 'active'", tgChatId).map(toSource);
-  }
-
   // Broadcasts
   listBroadcasts(): Broadcast[] {
     return this.all('SELECT * FROM broadcasts ORDER BY id').map(toBroadcast);
