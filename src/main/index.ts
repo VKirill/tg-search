@@ -8,6 +8,7 @@ import { LlmSpinner } from './ai/spinner';
 import { JevQualifier } from './ai/jev';
 import { createLeadAi } from './ai/hybrid';
 import { OpenAiManagerAi } from './ai/manager';
+import { OpenAiCrmAi } from './ai/crm';
 import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
@@ -60,11 +61,13 @@ app.whenReady().then(async () => {
   const ai = createLeadAi(getSettings, llm, new JevQualifier(getSettings));
   const spinner = new LlmSpinner(getSettings);
   const managerAi = new OpenAiManagerAi(getSettings);
+  const crmAi = new OpenAiCrmAi(getSettings);
   const handlers = createApp({
     db,
     engine,
     ai,
     manager: managerAi,
+    crmAi,
     spinner,
     emit,
     openExternal: (url) => shell.openExternal(url),
