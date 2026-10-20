@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
 import { createApp } from '../src/main/app';
 import { createAutopilot } from '../src/main/pipeline/autopilot';
