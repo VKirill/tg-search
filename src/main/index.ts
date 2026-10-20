@@ -10,8 +10,10 @@ import { createLeadAi } from './ai/hybrid';
 import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
+import { startControlServer, pushControlEvent } from './control';
 
 let win: BrowserWindow | null = null;
+let control: { stop(): void } | null = null;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -47,7 +49,10 @@ app.whenReady().then(async () => {
     jevApiKey: s.jevApiKey || process.env.OPENLUX_API_KEY || '',
   });
 
-  const emit = (e: AppEvent) => win?.webContents.send(EVENT_CHANNEL, e);
+  const emit = (e: AppEvent) => {
+    win?.webContents.send(EVENT_CHANNEL, e);
+    pushControlEvent(e);
+  };
   const engine = new TdlEngine(join(dataDir, 'tdlib'), () => db.getSettings());
   const getSettings = () => db.getSettings();
   const llm = new OpenAiLeadAi(getSettings);
@@ -62,9 +67,20 @@ app.whenReady().then(async () => {
     }
   }
 
+  control = await startControlServer({
+    handlers,
+    dataDir,
+    version: app.getVersion(),
+  });
+
   createWindow();
   await handlers.start();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
+});
+
+app.on('before-quit', async () => {
+  control?.stop();
+  control = null;
 });
 
 app.on('window-all-closed', () => {
