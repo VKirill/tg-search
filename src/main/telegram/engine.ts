@@ -11,6 +11,7 @@ import type {
   $FunctionResultByName,
   AuthorizationState,
   ChatMemberStatus,
+  InputMessageContent$Input,
   chat,
   error,
   message,
@@ -394,6 +395,36 @@ export class TdlEngine implements TelegramEngine {
     return await this.sendText(slot, chatId, text);
   }
 
+  async sendVoice(
+    accountId: number,
+    chatId: number,
+    filePath: string,
+    durationSec: number,
+    replyToMessageId?: number,
+  ): Promise<TgMessage> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    return await this.sendContent(
+      slot,
+      chatId,
+      {
+        _: 'inputMessageVoiceNote',
+        voice_note: {
+          _: 'inputVoiceNote',
+          voice_note: { _: 'inputFileLocal', path: filePath },
+          duration: Math.max(1, Math.round(durationSec)),
+        },
+      },
+      replyToMessageId,
+    );
+  }
+
+  async downloadFile(accountId: number, fileId: number): Promise<string> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const file = await this.invoke(slot, { _: 'downloadFile', file_id: fileId, priority: 1, offset: 0, limit: 0, synchronous: true });
+    if (!file.local.is_downloading_completed) throw new Error('Не удалось скачать файл из Telegram');
+    return file.local.path;
+  }
+
   // ——— internals ———
 
   private requireApiCredentials(): void {
@@ -732,13 +763,24 @@ export class TdlEngine implements TelegramEngine {
     text: string,
     replyToMessageId?: number,
   ): Promise<TgMessage> {
+    return this.sendContent(
+      slot,
+      chatId,
+      { _: 'inputMessageText', text: { _: 'formattedText', text, entities: [] } },
+      replyToMessageId,
+    );
+  }
+
+  private async sendContent(
+    slot: AccountSlot,
+    chatId: number,
+    content: InputMessageContent$Input,
+    replyToMessageId?: number,
+  ): Promise<TgMessage> {
     const input = {
       _: 'sendMessage' as const,
       chat_id: chatId,
-      input_message_content: {
-        _: 'inputMessageText' as const,
-        text: { _: 'formattedText' as const, text, entities: [] },
-      },
+      input_message_content: content,
       ...(replyToMessageId
         ? { reply_to: { _: 'inputMessageReplyToMessage' as const, message_id: replyToMessageId } }
         : {}),

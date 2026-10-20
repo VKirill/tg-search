@@ -56,7 +56,7 @@ vi.mock('tdl', () => ({
 
 const { TdlEngine } = await import('../src/main/telegram/engine');
 
-const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '', handoffNotifyTo: '' });
+const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '' });
 const dataDir = join(import.meta.dirname, '../tmp/tdlib-fake');
 mkdirSync(dataDir, { recursive: true });
 

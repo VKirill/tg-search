@@ -108,6 +108,12 @@ export function replyToMessageId(msg: message): number | null {
   return null;
 }
 
+function voiceOf(msg: message): TgMessage['voice'] {
+  if (msg.content._ !== 'messageVoiceNote') return null;
+  const note = msg.content.voice_note;
+  return { fileId: note.voice.id, durationSec: note.duration };
+}
+
 export function mapMessage(
   msg: message,
   opts: {
@@ -130,6 +136,7 @@ export function mapMessage(
     senderName: opts.senderName ?? null,
     senderUsername: opts.senderUsername ?? null,
     senderIsBot: opts.senderIsBot ?? false,
+    voice: voiceOf(msg),
     replyToMessageId: replyToMessageId(msg),
     link: buildPublicMessageLink(chatUsername, msg.id),
     isOutgoing: msg.is_outgoing,

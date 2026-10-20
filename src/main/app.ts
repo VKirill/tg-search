@@ -168,6 +168,43 @@ export function createApp(deps: AppDeps): AppHandlers {
       runNow: (projectId) => autopilot.runNow(projectId),
     },
 
+    crm: {
+      get: async (leadId) => db.getCard(leadId),
+      update: async (leadId, patch) => {
+        const card = db.updateCard(leadId, patch);
+        emit({ type: 'crm:update', card });
+        return card;
+      },
+      refresh: async () => {
+        throw new Error('not implemented'); // CRM worker
+      },
+      generateBrief: async () => {
+        throw new Error('not implemented'); // CRM worker
+      },
+      addNote: async (leadId, text) => {
+        const lead = db.getLead(leadId);
+        const message = db.addMessage({
+          leadId, accountId: null, direction: 'out', where: 'dm', kind: 'note', text,
+          tgChatId: lead.tgChatId, tgMessageId: null, date: Date.now(), auto: false,
+        });
+        emit({ type: 'message:new', message });
+        return message;
+      },
+      board: async (projectId) => db.listCardLeads(projectId).map((lead) => ({ lead, card: db.getCard(lead.id) })),
+    },
+    voice: {
+      send: async () => {
+        throw new Error('not implemented'); // voice worker
+      },
+      preview: async () => {
+        throw new Error('not implemented'); // voice worker
+      },
+    },
+    calls: {
+      save: async () => {
+        throw new Error('not implemented'); // voice worker
+      },
+    },
     manager: {
       test: async () => {
         throw new Error('not implemented'); // manager worker

@@ -7,8 +7,10 @@ import {
   DEFAULT_MANAGER,
   type Account,
   type ManagerSettings,
+  type Anamnesis,
   type Broadcast,
   type BroadcastChat,
+  type ClientCard,
   type AutopilotSettings,
   type ChatMessage,
   type Lead,
@@ -71,6 +73,12 @@ CREATE TABLE IF NOT EXISTS messages (
   tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER, date INTEGER NOT NULL, auto INTEGER NOT NULL DEFAULT 0
 );
 -- Every message already evaluated per project, so rescans never pay the LLM twice.
+CREATE TABLE IF NOT EXISTS cards (
+  lead_id INTEGER PRIMARY KEY REFERENCES leads(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL DEFAULT 'new', summary TEXT NOT NULL DEFAULT '', anamnesis TEXT NOT NULL DEFAULT '{}',
+  brief TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', completeness INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL, brief_updated_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS broadcasts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL, text TEXT NOT NULL, account_ids TEXT NOT NULL DEFAULT '[]', chats TEXT NOT NULL DEFAULT '[]',
@@ -134,9 +142,23 @@ function toLead(r: Row): Lead {
   };
 }
 
+export const EMPTY_ANAMNESIS: Anamnesis = {
+  task: '', goal: '', audience: '', features: [], integrations: [], stack: [], deadline: '', budget: '',
+  references: [], contacts: '', openQuestions: [],
+};
+
+function toCard(r: Row): ClientCard {
+  return {
+    leadId: r.lead_id, stage: r.stage, summary: r.summary,
+    anamnesis: { ...EMPTY_ANAMNESIS, ...parse<Partial<Anamnesis>>(r.anamnesis, {}) },
+    brief: r.brief, notes: r.notes, completeness: r.completeness, updatedAt: r.updated_at, briefUpdatedAt: r.brief_updated_at,
+  };
+}
+
 function toMessage(r: Row): ChatMessage {
   return {
-    id: r.id, leadId: r.lead_id, accountId: r.account_id, direction: r.direction, where: r.where, text: r.text,
+    id: r.id, leadId: r.lead_id, accountId: r.account_id, direction: r.direction, where: r.where, kind: r.kind,
+    mediaPath: r.media_path, durationSec: r.duration_sec, text: r.text,
     tgChatId: r.tg_chat_id, tgMessageId: r.tg_message_id, date: r.date, auto: !!r.auto,
   };
 }
@@ -151,6 +173,14 @@ export const SETTINGS_DEFAULTS: Settings = {
   jevApiKey: '',
   jevModel: 'jev-1.14.0',
   handoffNotifyTo: '',
+  ownerName: 'Кирилл',
+  sttBaseUrl: 'https://api.openai.com/v1',
+  sttApiKey: '',
+  sttModel: 'gpt-4o-transcribe',
+  ttsBaseUrl: 'https://api.openai.com/v1',
+  ttsApiKey: '',
+  ttsModel: 'gpt-4o-mini-tts',
+  ttsVoice: 'nova',
 };
 
 export class Db {
@@ -165,6 +195,12 @@ export class Db {
     if (!projectCols.includes('criteria')) this.raw.exec("ALTER TABLE projects ADD COLUMN criteria TEXT NOT NULL DEFAULT ''");
     if (!projectCols.includes('sequence')) this.raw.exec("ALTER TABLE projects ADD COLUMN sequence TEXT NOT NULL DEFAULT '[]'");
     if (!projectCols.includes('manager')) this.raw.exec("ALTER TABLE projects ADD COLUMN manager TEXT NOT NULL DEFAULT '{}'");
+    const messageCols = this.all('PRAGMA table_info(messages)').map((c) => c.name);
+    if (!messageCols.includes('kind')) {
+      this.raw.exec(`ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
+        ALTER TABLE messages ADD COLUMN media_path TEXT;
+        ALTER TABLE messages ADD COLUMN duration_sec REAL;`);
+    }
     const leadCols = this.all('PRAGMA table_info(leads)').map((c) => c.name);
     if (!leadCols.includes('sequence_step')) {
       this.raw.exec(`ALTER TABLE leads ADD COLUMN sequence_step INTEGER NOT NULL DEFAULT 0;
@@ -362,11 +398,13 @@ export class Db {
   listMessages(leadId: number): ChatMessage[] {
     return this.all('SELECT * FROM messages WHERE lead_id = ? ORDER BY date, id', leadId).map(toMessage);
   }
-  addMessage(m: Omit<ChatMessage, 'id'>): ChatMessage {
+  // kind/mediaPath/durationSec default to a plain text message
+  addMessage(m: Omit<ChatMessage, 'id' | 'kind' | 'mediaPath' | 'durationSec'> & Partial<Pick<ChatMessage, 'kind' | 'mediaPath' | 'durationSec'>>): ChatMessage {
     const res = this.run(
-      `INSERT INTO messages(lead_id, account_id, direction, "where", text, tg_chat_id, tg_message_id, date, auto)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      m.leadId, m.accountId, m.direction, m.where, m.text, m.tgChatId, m.tgMessageId, m.date, Number(m.auto),
+      `INSERT INTO messages(lead_id, account_id, direction, "where", kind, text, media_path, duration_sec, tg_chat_id, tg_message_id, date, auto)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      m.leadId, m.accountId, m.direction, m.where, m.kind ?? 'text', m.text, m.mediaPath ?? null, m.durationSec ?? null,
+      m.tgChatId, m.tgMessageId, m.date, Number(m.auto),
     );
     return toMessage(this.one('SELECT * FROM messages WHERE id = ?', Number(res.lastInsertRowid))!);
   }
@@ -401,5 +439,36 @@ export class Db {
   }
   removeBroadcast(id: number) {
     this.run('DELETE FROM broadcasts WHERE id = ?', id);
+  }
+
+  updateMessageText(id: number, text: string) {
+    this.run('UPDATE messages SET text = ? WHERE id = ?', text, id);
+  }
+
+  // CRM cards: one per lead, created on first access
+  getCard(leadId: number): ClientCard {
+    this.run('INSERT INTO cards(lead_id, updated_at) VALUES(?, ?) ON CONFLICT(lead_id) DO NOTHING', leadId, Date.now());
+    return toCard(this.one('SELECT * FROM cards WHERE lead_id = ?', leadId)!);
+  }
+  updateCard(leadId: number, patch: Partial<Omit<ClientCard, 'leadId' | 'updatedAt'>>): ClientCard {
+    const next = { ...this.getCard(leadId), ...patch };
+    this.run(
+      `UPDATE cards SET stage = ?, summary = ?, anamnesis = ?, brief = ?, notes = ?, completeness = ?, updated_at = ?,
+       brief_updated_at = ? WHERE lead_id = ?`,
+      next.stage, next.summary, json(next.anamnesis), next.brief, next.notes, next.completeness, Date.now(),
+      next.briefUpdatedAt, leadId,
+    );
+    return this.getCard(leadId);
+  }
+  // Leads that have a card or a dialog, newest activity first (pipeline view)
+  listCardLeads(projectId?: number): Lead[] {
+    const where = projectId ? 'AND l.project_id = ?' : '';
+    const args = projectId ? [projectId] : [];
+    return this.all(
+      `SELECT l.* FROM leads l LEFT JOIN cards c ON c.lead_id = l.id
+       WHERE (c.lead_id IS NOT NULL OR l.status IN ('replied', 'dialog')) ${where}
+       ORDER BY COALESCE(c.updated_at, l.created_at) DESC LIMIT 500`,
+      ...args,
+    ).map(toLead);
   }
 }

@@ -11,7 +11,7 @@ const emptySettings = () => ({
   llmModel: '',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '', handoffNotifyTo: '',
+  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
 });
 
 describe('TdlEngine smoke', () => {

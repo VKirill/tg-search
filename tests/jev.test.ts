@@ -11,7 +11,7 @@ const settings = (): Settings => ({
   llmModel: '',
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: 'test-key',
-  jevModel: 'jev-1.14.0', handoffNotifyTo: '',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
 });
 
 const project = (): Project => ({
@@ -43,6 +43,7 @@ function msg(id: number, text: string): TgMessage {
     senderName: 'A',
     senderUsername: 'a',
     senderIsBot: false,
+    voice: null,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,

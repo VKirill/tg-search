@@ -23,6 +23,7 @@ export interface TgMessage {
   senderName: string | null;
   senderUsername: string | null;
   senderIsBot: boolean; // chat moderation bots etc.: never leads
+  voice: { fileId: number; durationSec: number } | null; // voice note (text is the caption, usually empty)
   replyToMessageId: number | null;
   link: string | null; // public t.me link when the chat has a username
   isOutgoing: boolean;
@@ -69,6 +70,9 @@ export interface TelegramEngine {
   replyInChat(accountId: number, chatId: number, replyToMessageId: number, text: string): Promise<TgMessage>;
 
   sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage>; // plain post, e.g. broadcasts
+  // Voice notes: OGG/Opus file; waveform is optional. Download returns a local file path.
+  sendVoice(accountId: number, chatId: number, filePath: string, durationSec: number, replyToMessageId?: number): Promise<TgMessage>;
+  downloadFile(accountId: number, fileId: number): Promise<string>;
 
   // New incoming messages in private chats (lead answers) for all accounts
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;

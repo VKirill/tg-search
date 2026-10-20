@@ -4,6 +4,7 @@ import type {
   AppEvent,
   AutopilotSettings,
   ChatMessage,
+  ClientCard,
   Lead,
   LeadFilter,
   LoginState,
@@ -18,6 +19,18 @@ const leadExtra = { sequenceStep: 0, nextStepAt: null, handoff: false, handoffRe
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function mockCard(leadId: number): ClientCard {
+  return {
+    leadId, stage: 'discovery', summary: 'Клиент запускает студию йоги, нужен сайт с расписанием и онлайн-записью. Сроки — месяц.',
+    anamnesis: {
+      task: 'Сайт студии йоги с расписанием и онлайн-записью', goal: 'Запись клиентов без звонков', audience: 'Жители района, 25–45 лет',
+      features: ['Расписание занятий', 'Онлайн-запись', 'Оплата абонементов'], integrations: ['ЮKassa'], stack: ['Next.js', 'Supabase'],
+      deadline: 'Открытие через месяц', budget: 'Не назван', references: [], contacts: '', openQuestions: ['Бюджет', 'Нужен ли личный кабинет'],
+    },
+    brief: '', notes: '', completeness: 60, updatedAt: Date.now(), briefUpdatedAt: null,
+  };
+}
+
 const now = Date.now();
 const day = new Date().toISOString().slice(0, 10);
 
@@ -29,7 +42,7 @@ let settings: Settings = {
   llmModel: 'anthropic/claude-haiku-5.5',
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: '',
-  jevModel: 'jev-1.14.0', handoffNotifyTo: '',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
 };
 
 const accounts: Account[] = [
@@ -355,6 +368,9 @@ const messages: ChatMessage[] = [
     accountId: null,
     direction: 'in',
     where: 'chat',
+    kind: 'text',
+    mediaPath: null,
+    durationSec: null,
     text: 'Ищу разработчика на MVP мобильного приложения с интеграцией Telegram-бота. Бюджет обсуждаем, сроки 6–8 недель.',
     tgChatId: 101,
     tgMessageId: 8801,
@@ -367,6 +383,9 @@ const messages: ChatMessage[] = [
     accountId: 1,
     direction: 'out',
     where: 'dm',
+    kind: 'text',
+    mediaPath: null,
+    durationSec: null,
     text: 'Алексей, добрый день! Делал похожие MVP на TypeScript — могу коротко созвониться и оценить объём?',
     tgChatId: 5001,
     tgMessageId: 90001,
@@ -379,6 +398,9 @@ const messages: ChatMessage[] = [
     accountId: null,
     direction: 'in',
     where: 'dm',
+    kind: 'text',
+    mediaPath: null,
+    durationSec: null,
     text: 'Да, напишите в личку удобное время сегодня вечером.',
     tgChatId: 5001,
     tgMessageId: 90002,
@@ -654,6 +676,9 @@ export function createMockApi(): Api {
           accountId: acc.id,
           direction: 'out',
           where,
+          kind: 'text',
+          mediaPath: null,
+          durationSec: null,
           text,
           tgChatId: l.tgChatId,
           tgMessageId: nid(),
@@ -690,6 +715,41 @@ export function createMockApi(): Api {
           emit({ type: 'project:update', project: { ...p, autopilot: { ...p.autopilot } } });
         }
         emit({ type: 'job', projectId, stage: 'Готово', done: true });
+      },
+    },
+    crm: {
+      async get(leadId) {
+        return mockCard(leadId);
+      },
+      async update(leadId, patch) {
+        return { ...mockCard(leadId), ...patch };
+      },
+      async refresh(leadId) {
+        await delay(500);
+        return mockCard(leadId);
+      },
+      async generateBrief(leadId) {
+        await delay(800);
+        return mockCard(leadId);
+      },
+      async addNote(leadId, text) {
+        return { id: nid(), leadId, accountId: null, direction: 'out', where: 'dm', kind: 'note', text, mediaPath: null, durationSec: null, tgChatId: 0, tgMessageId: null, date: Date.now(), auto: false };
+      },
+      async board() {
+        return leads.slice(0, 6).map((lead) => ({ lead: { ...lead }, card: mockCard(lead.id) }));
+      },
+    },
+    voice: {
+      async send() {
+        throw new Error('Голосовые в демо-режиме не отправляются');
+      },
+      async preview() {
+        throw new Error('Озвучка в демо-режиме недоступна');
+      },
+    },
+    calls: {
+      async save() {
+        throw new Error('Запись созвонов в демо-режиме недоступна');
       },
     },
     manager: {

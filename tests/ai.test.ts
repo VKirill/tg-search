@@ -13,7 +13,7 @@ const baseSettings = (): Settings => ({
   llmModel: 'anthropic/claude-haiku-5.5',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '', handoffNotifyTo: '',
+  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
 });
 
 function completionBody(content: string) {
@@ -63,6 +63,7 @@ function tgMessage(chatId: number, messageId: number, text: string): TgMessage {
     senderName: 'U',
     senderUsername: null,
     senderIsBot: false,
+    voice: null,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,

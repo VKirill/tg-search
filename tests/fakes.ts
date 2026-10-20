@@ -104,6 +104,7 @@ export class FakeEngine implements TelegramEngine {
       senderName: null,
       senderUsername: null,
       senderIsBot: false,
+      voice: null,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -122,6 +123,7 @@ export class FakeEngine implements TelegramEngine {
       senderName: null,
       senderUsername: null,
       senderIsBot: false,
+      voice: null,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -145,8 +147,24 @@ export class FakeEngine implements TelegramEngine {
     this.posted.push({ accountId, chatId, text });
     return {
       chatId, messageId: Date.now(), date: Date.now(), text, senderUserId: null, senderChatId: null,
-      senderName: null, senderUsername: null, senderIsBot: false, replyToMessageId: null, link: null, isOutgoing: true,
+      senderName: null, senderUsername: null, senderIsBot: false, voice: null, replyToMessageId: null, link: null, isOutgoing: true,
     };
+  }
+
+  voiceSent: { accountId: number; chatId: number; filePath: string; durationSec: number }[] = [];
+  async sendVoice(accountId: number, chatId: number, filePath: string, durationSec: number): Promise<TgMessage> {
+    this.voiceSent.push({ accountId, chatId, filePath, durationSec });
+    return {
+      chatId, messageId: Date.now(), date: Date.now(), text: '', senderUserId: null, senderChatId: null,
+      senderName: null, senderUsername: null, senderIsBot: false, voice: { fileId: 1, durationSec }, replyToMessageId: null,
+      link: null, isOutgoing: true,
+    };
+  }
+  files = new Map<number, string>();
+  async downloadFile(_accountId: number, fileId: number): Promise<string> {
+    const path = this.files.get(fileId);
+    if (!path) throw new Error(`file ${fileId}`);
+    return path;
   }
 
   private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
@@ -211,6 +229,7 @@ export function makeMsg(
     senderUserId: 500 + messageId,
     senderChatId: null,
     senderIsBot: false,
+    voice: null,
     senderName: 'Author',
     senderUsername: 'author',
     replyToMessageId: null,

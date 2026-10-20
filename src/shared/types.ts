@@ -40,6 +40,7 @@ export interface ManagerSettings {
   prompt: string; // persona, goal, offer details, prices, rules, when to hand over
   replyDelaySec: number; // wait before answering: looks human and merges message bursts
   maxReplies: number; // auto replies per lead, then hand over to a human
+  voiceReplies: 'never' | 'mirror'; // mirror: answer with a voice note when the client sent a voice note
 }
 
 export interface ManagerTestResult {
@@ -140,13 +141,18 @@ export interface Lead {
   createdAt: number;
 }
 
+export type MessageKind = 'text' | 'voice' | 'call' | 'note';
+
 export interface ChatMessage {
   id: number;
   leadId: number;
   accountId: number | null;
   direction: 'in' | 'out';
   where: 'dm' | 'chat';
-  text: string;
+  kind: MessageKind; // voice: Telegram voice note; call: recorded call; note: owner's private note (never sent)
+  text: string; // for voice/call: the transcript
+  mediaPath: string | null; // local audio file for voice/call
+  durationSec: number | null;
   tgChatId: number;
   tgMessageId: number | null;
   date: number; // unix ms
@@ -163,6 +169,43 @@ export interface Settings {
   jevApiKey: string; // empty = qualify with the LLM instead of Jev
   jevModel: string; // e.g. jev-1.14.0
   handoffNotifyTo: string; // @username that gets a summary when the AI manager hands a dialog over; empty = app notification only
+  ownerName: string; // whose assistant the AI manager is, e.g. «Кирилл»
+  sttBaseUrl: string; // OpenAI-compatible /audio/transcriptions, e.g. https://api.openai.com/v1
+  sttApiKey: string;
+  sttModel: string; // e.g. gpt-4o-transcribe
+  ttsBaseUrl: string; // OpenAI-compatible /audio/speech
+  ttsApiKey: string;
+  ttsModel: string; // e.g. gpt-4o-mini-tts
+  ttsVoice: string; // e.g. nova
+}
+
+// Mini-CRM card of one client dialog (lead): stage, running summary, anamnesis and the brief (ТЗ) for the owner.
+export type DealStage = 'new' | 'contacted' | 'discovery' | 'brief_ready' | 'handed_over' | 'proposal' | 'won' | 'lost';
+
+export interface Anamnesis {
+  task: string; // what the client wants in their words, condensed
+  goal: string; // business goal / why
+  audience: string;
+  features: string[]; // required functionality
+  integrations: string[]; // CRM, payments, APIs…
+  stack: string[]; // suggested technologies (assistant's guess, owner decides)
+  deadline: string;
+  budget: string;
+  references: string[]; // examples, links, competitors
+  contacts: string; // phone/email/company if the client shared them
+  openQuestions: string[]; // what is still unknown — the assistant asks these next
+}
+
+export interface ClientCard {
+  leadId: number;
+  stage: DealStage;
+  summary: string; // where the conversation stopped, 3–6 lines, refreshed automatically
+  anamnesis: Anamnesis;
+  brief: string; // Markdown technical brief (ТЗ) for the owner to price the work
+  notes: string; // owner's free notes
+  completeness: number; // 0..100: how much of the anamnesis is known
+  updatedAt: number;
+  briefUpdatedAt: number | null;
 }
 
 // Periodic posting of an offer into chosen chats from the user's accounts.
@@ -221,6 +264,7 @@ export type AppEvent =
   | { type: 'source:update'; source: Source }
   | { type: 'project:update'; project: Project }
   | { type: 'broadcast:update'; broadcast: Broadcast }
+  | { type: 'crm:update'; card: ClientCard }
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
@@ -268,6 +312,23 @@ export interface Api {
     set(projectId: number, patch: Partial<AutopilotSettings>): Promise<Project>;
     runNow(projectId: number): Promise<void>;
   };
+  crm: {
+    get(leadId: number): Promise<ClientCard>;
+    update(leadId: number, patch: Partial<Pick<ClientCard, 'stage' | 'summary' | 'anamnesis' | 'brief' | 'notes'>>): Promise<ClientCard>;
+    refresh(leadId: number): Promise<ClientCard>; // re-read the whole dialog (texts, voice and call transcripts) with the LLM
+    generateBrief(leadId: number): Promise<ClientCard>; // write the ТЗ from the anamnesis and the dialog
+    addNote(leadId: number, text: string): Promise<ChatMessage>; // private note in the timeline
+    board(projectId?: number): Promise<{ lead: Lead; card: ClientCard }[]>; // all cards for a pipeline view
+  };
+  voice: {
+    // TTS → Telegram voice note to the lead (dm or chat), through the limiter
+    send(leadId: number, text: string, where: 'dm' | 'chat'): Promise<ChatMessage>;
+    preview(text: string): Promise<string>; // synthesize only, returns a local file path to play
+  };
+  calls: {
+    // Recording is captured in the renderer (mic + system audio); main stores, transcribes and updates the CRM card.
+    save(leadId: number, audio: Uint8Array, mimeType: string, durationSec: number): Promise<ChatMessage>;
+  };
   manager: {
     // Sandbox: one manager turn for a made-up dialog, without Telegram. history excludes the lead's first message.
     test(projectId: number, leadText: string, history: { direction: 'in' | 'out'; text: string }[], settings?: ManagerSettings): Promise<ManagerTestResult>;
@@ -291,10 +352,12 @@ export const DEFAULT_MANAGER: ManagerSettings = {
   apiKey: '',
   model: '',
   prompt:
-    'Ты — менеджер по продажам. Отвечай коротко и по-человечески, на языке собеседника. Цель — понять задачу, сроки и бюджет и договориться о созвоне. ' +
-    'Не выдумывай цены и обещания, которых нет в описании оффера. Если человек просит смету, договор, звонок прямо сейчас, злится или вопрос вне твоей компетенции — передай диалог человеку.',
+    'Ты — помощник {owner}, собираешь заявку клиента. Представляйся как помощник {owner}. Пиши коротко и по-человечески, на языке собеседника, по одному вопросу за раз. ' +
+    'Цель — собрать анамнез: что нужно сделать, зачем, для кого, какой функционал и интеграции, сроки, бюджет, примеры. Цены и сроки не называй — их назовёт {owner} после изучения задачи. ' +
+    'Когда задача понятна или клиент просит цену, договор, созвон или живого человека — скажи, что передаёшь заявку {owner}, и он свяжется лично.',
   replyDelaySec: 60,
-  maxReplies: 8,
+  maxReplies: 12,
+  voiceReplies: 'never',
 };
 
 export const DEFAULT_AUTOPILOT: AutopilotSettings = {
