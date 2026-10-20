@@ -15,6 +15,8 @@ import { discover } from './pipeline/discovery';
 import { scan } from './pipeline/scanner';
 import { draftReply, sendMessage } from './pipeline/outreach';
 import { createAutopilot } from './pipeline/autopilot';
+import { createRealtime } from './pipeline/realtime';
+import { createImporter } from './pipeline/importer';
 
 export interface AppDeps {
   db: Db;
@@ -30,6 +32,8 @@ export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, emit, openExternal } = deps;
   const pipeline = { db, engine, ai, emit };
   const autopilot = createAutopilot(pipeline);
+  const realtime = createRealtime(pipeline);
+  const importer = createImporter({ db, engine, emit });
 
   return {
     async start() {
@@ -55,10 +59,13 @@ export function createApp(deps: AppDeps): AppHandlers {
         emit({ type: 'message:new', message });
         emit({ type: 'lead:update', lead: updated });
       });
+      realtime.start();
       autopilot.start();
     },
 
     async stop() {
+      realtime.stop();
+      importer.stop();
       autopilot.stop();
       await engine.close();
     },
@@ -93,9 +100,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       list: async (projectId) => db.listSources(projectId),
       discover: (projectId) => discover(pipeline, projectId),
       scan: (projectId, sourceIds) => scan(pipeline, projectId, sourceIds),
-      importCsv: async () => {
-        throw new Error('not implemented'); // CSV import worker
-      },
+      importCsv: (projectId, csv) => importer.importCsv(projectId, csv),
       add: async (projectId, linkOrUsername) => {
         const project = db.getProject(projectId);
         const accounts = db.listAccounts().filter(
