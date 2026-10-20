@@ -73,6 +73,8 @@ export interface TelegramEngine {
   // Voice notes: OGG/Opus file; waveform is optional. Download returns a local file path.
   sendVoice(accountId: number, chatId: number, filePath: string, durationSec: number, replyToMessageId?: number): Promise<TgMessage>;
   downloadFile(accountId: number, fileId: number): Promise<string>;
+  // Private chat with a user (created if needed); its id is where DMs to that user go.
+  ensurePrivateChat(accountId: number, userId: number): Promise<number>;
 
   // New incoming messages in private chats (lead answers) for all accounts
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;

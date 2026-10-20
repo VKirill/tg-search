@@ -9,7 +9,7 @@ import { Db } from '../src/main/db';
 import { DEFAULT_MANAGER } from '../src/shared/types';
 import type { Anamnesis, ClientCard, Lead, Project } from '../src/shared/types';
 import type { CrmAi, CrmAnalyzeResult, CrmTimelineLine } from '../src/main/ai/crm';
-import { FakeAi, FakeEngine, FakeManager } from './fakes';
+import { FakeAi, FakeEngine, FakeManager, FakeSpeech } from './fakes';
 
 class FakeCrmAi implements CrmAi {
   analyzeCalls = 0;
@@ -369,6 +369,8 @@ describe('app crm api', () => {
       engine,
       ai: new FakeAi(),
       crmAi,
+      speech: new FakeSpeech(),
+      dataDir: '/tmp/tg-search-crm-test',
       emit: () => {},
       openExternal: async () => {},
     });

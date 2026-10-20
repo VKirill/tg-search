@@ -2,7 +2,7 @@ import type { ChatMessage, ClientCard, Lead, Project } from '../../shared/types'
 import type { ManagerAi } from '../ai/types';
 import type { Db } from '../db';
 import type { TelegramEngine } from '../telegram/types';
-import { sendMessage, type OutreachDeps } from './outreach';
+import { sendMessage, sendVoiceMessage, type OutreachDeps } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
@@ -156,7 +156,14 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
         }
       }
 
-      await sendMessage(deps, leadId, result.reply.trim(), 'dm', true);
+      const lastIn = [...messages].reverse().find((m) => m.direction === 'in');
+      const mirrorVoice =
+        project.manager.voiceReplies === 'mirror' && lastIn?.kind === 'voice' && deps.speech;
+      if (mirrorVoice) {
+        await sendVoiceMessage(deps, leadId, result.reply.trim(), 'dm', true);
+      } else {
+        await sendMessage(deps, leadId, result.reply.trim(), 'dm', true);
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       if (isLimiterError(error)) {

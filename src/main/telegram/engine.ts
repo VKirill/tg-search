@@ -376,8 +376,19 @@ export class TdlEngine implements TelegramEngine {
 
   async sendDirect(accountId: number, userId: number, text: string): Promise<TgMessage> {
     const slot = await this.requireAuthorizedSlot(accountId);
+    const chatId = await this.ensurePrivateChatSlot(slot, userId);
+    return await this.sendText(slot, chatId, text);
+  }
+
+  /** TDLib private chat id for a user (used for voice notes in DM). */
+  async ensurePrivateChat(accountId: number, userId: number): Promise<number> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    return this.ensurePrivateChatSlot(slot, userId);
+  }
+
+  private async ensurePrivateChatSlot(slot: AccountSlot, userId: number): Promise<number> {
     const chat = await this.invoke(slot, { _: 'createPrivateChat', user_id: userId, force: false });
-    return await this.sendText(slot, chat.id, text);
+    return chat.id;
   }
 
   async replyInChat(
