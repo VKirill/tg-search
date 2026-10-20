@@ -57,6 +57,8 @@ interface AccountSlot {
   authStatus: AccountStatus;
   authWaiters: AuthWaiter[];
   pendingSends: Map<number, PendingSend>;
+  // Send results that arrived before waitForSend registered (keyed by temporary message id).
+  earlySends: Map<number, { message?: message; error?: error }>;
 }
 
 function parseFloodWaitSeconds(message: string): number {
@@ -310,6 +312,7 @@ export class TdlEngine implements TelegramEngine {
     await this.ensureChatAccessible(slot, chatId);
 
     const collected: message[] = [];
+    const seenIds = new Set<number>(); // offset 0 returns from_message_id again on the next page
     let fromMessageId = 0;
 
     while (collected.length < limit) {
@@ -323,8 +326,10 @@ export class TdlEngine implements TelegramEngine {
       });
       if (!page.messages.some((m) => m !== null)) break;
 
-      const pageMessages = page.messages.filter((m): m is message => m !== null);
+      const pageMessages = page.messages.filter((m): m is message => m !== null && !seenIds.has(m.id));
+      if (!pageMessages.length) break;
       for (const msg of pageMessages) {
+        seenIds.add(msg.id);
         if (msg.date * 1000 < sinceMs) continue;
         if (afterMessageId !== null && msg.id <= afterMessageId) continue;
         collected.push(msg);
@@ -410,6 +415,7 @@ export class TdlEngine implements TelegramEngine {
       authStatus: 'logged_out',
       authWaiters: [],
       pendingSends: new Map(),
+      earlySends: new Map(),
     };
 
     client.on('error', (err) => console.error(`TDLib account ${accountId}:`, err));
@@ -454,6 +460,8 @@ export class TdlEngine implements TelegramEngine {
         clearTimeout(pending.timer);
         slot.pendingSends.delete(update.old_message_id);
         pending.resolve(update.message);
+      } else {
+        slot.earlySends.set(update.old_message_id, { message: update.message });
       }
       return;
     }
@@ -464,6 +472,8 @@ export class TdlEngine implements TelegramEngine {
         clearTimeout(pending.timer);
         slot.pendingSends.delete(update.old_message_id);
         pending.reject(this.tdErrorToJsError(update.error));
+      } else {
+        slot.earlySends.set(update.old_message_id, { error: update.error });
       }
       return;
     }
@@ -672,6 +682,11 @@ export class TdlEngine implements TelegramEngine {
   }
 
   private waitForSend(slot: AccountSlot, oldMessageId: number): Promise<message> {
+    const early = slot.earlySends.get(oldMessageId);
+    if (early) {
+      slot.earlySends.delete(oldMessageId);
+      return early.message ? Promise.resolve(early.message) : Promise.reject(this.tdErrorToJsError(early.error!));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         slot.pendingSends.delete(oldMessageId);
