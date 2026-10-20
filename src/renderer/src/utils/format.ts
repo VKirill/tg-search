@@ -1,3 +1,5 @@
+import type { DealStage } from '../../../shared/types';
+
 const MONTHS = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
 
 export function formatLeadDate(ms: number): string {
@@ -89,4 +91,43 @@ export function nextRunText(nextRunAt: number | null): string {
   if (!nextRunAt) return '—';
   const d = new Date(nextRunAt);
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+export function dealStageLabel(stage: DealStage): string {
+  const map: Record<DealStage, string> = {
+    new: 'Новый',
+    contacted: 'Связались',
+    discovery: 'Сбор требований',
+    brief_ready: 'ТЗ готово',
+    handed_over: 'Передан Кириллу',
+    proposal: 'КП отправлено',
+    won: 'В работе / Выигран',
+    lost: 'Отказ',
+  };
+  return map[stage] ?? stage;
+}
+
+export const DEAL_STAGES: DealStage[] = [
+  'new',
+  'contacted',
+  'discovery',
+  'brief_ready',
+  'handed_over',
+  'proposal',
+  'won',
+  'lost',
+];
+
+export function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+export function foundByLabel(foundBy: string | null): string {
+  if (!foundBy) return '—';
+  if (foundBy === 'manual') return 'вручную';
+  if (foundBy === 'member') return 'участник';
+  if (foundBy === 'csv') return 'CSV';
+  return 'поиск';
 }
