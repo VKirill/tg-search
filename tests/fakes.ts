@@ -50,7 +50,13 @@ export class FakeEngine implements TelegramEngine {
   async searchMessages(_accountId: number, _query: string, _since: number, _limit: number): Promise<TgMessage[]> {
     return this.searchMsgs;
   }
+  resolveMap = new Map<string, TgChat>();
+  failResolve = new Set<string>();
+
   async resolveChat(_accountId: number, linkOrUsername: string): Promise<TgChat> {
+    if (this.failResolve.has(linkOrUsername)) throw new Error('not found');
+    const mapped = this.resolveMap.get(linkOrUsername);
+    if (mapped) return mapped;
     const chat = this.chats.values().next().value;
     if (!chat) throw new Error('no chat');
     return { ...chat, username: linkOrUsername.replace('@', '') };
@@ -128,8 +134,12 @@ export class FakeEngine implements TelegramEngine {
     this.privateMessageCb?.(accountId, msg);
   }
 
+  mustJoinPost = new Set<number>();
   posted: { accountId: number; chatId: number; text: string }[] = [];
   async sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage> {
+    if (this.mustJoinPost.has(chatId) && !this.joinCalls.includes(chatId)) {
+      throw new Error('USER_NOT_PARTICIPANT: not a member');
+    }
     this.posted.push({ accountId, chatId, text });
     return {
       chatId, messageId: Date.now(), date: Date.now(), text, senderUserId: null, senderChatId: null,

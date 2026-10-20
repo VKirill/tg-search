@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { Db } from './db';
 import { TdlEngine } from './telegram/engine';
 import { OpenAiLeadAi } from './ai/leadAi';
+import { LlmSpinner } from './ai/spinner';
 import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
@@ -46,7 +47,8 @@ app.whenReady().then(async () => {
   const emit = (e: AppEvent) => win?.webContents.send(EVENT_CHANNEL, e);
   const engine = new TdlEngine(join(dataDir, 'tdlib'), () => db.getSettings());
   const ai = new OpenAiLeadAi(() => db.getSettings());
-  const handlers = createApp({ db, engine, ai, emit, openExternal: (url) => shell.openExternal(url) });
+  const spinner = new LlmSpinner(() => db.getSettings());
+  const handlers = createApp({ db, engine, ai, spinner, emit, openExternal: (url) => shell.openExternal(url) });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {
     for (const m of methods as string[]) {
