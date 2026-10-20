@@ -3,6 +3,7 @@ import type { Account, Lead, Project, Source } from '../../shared/types';
 import { AccountsDialog } from './components/AccountsDialog';
 import { BroadcastsView } from './components/BroadcastsView';
 import { ChatPanel } from './components/ChatPanel';
+import { ChatsView } from './components/ChatsView';
 import { CrmPanel } from './components/CrmPanel';
 import { FunnelView } from './components/FunnelView';
 import { LeadsPanel, type LeadFilters } from './components/LeadsPanel';
@@ -269,6 +270,7 @@ function AppInner() {
             <CrmPanel lead={selectedLead} collapsed={crmCollapsed} onToggleCollapse={() => setCrmCollapsed((c) => !c)} />
           </>
         )}
+        {view === 'chats' && <ChatsView accounts={accounts} projects={projects} />}
         {view === 'funnel' && <FunnelView projectId={projectFilterId} onOpenLead={openLeadFromFunnel} />}
         {view === 'projects' && (
           <ProjectsView projectList={projects} accounts={accounts} onRefresh={() => refreshProjects()} />

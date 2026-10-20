@@ -1588,3 +1588,59 @@ button.chip {
 button.chip:hover {
   color: var(--text);
 }
+
+/* «Чаты» — manual Telegram client */
+.chats-list { display: flex; flex-direction: column; min-height: 0; }
+.chats-search {
+  display: flex; align-items: center; gap: 8px; margin: 0 var(--space-4) var(--space-2);
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.2);
+  color: var(--text-secondary);
+}
+.chats-search input { flex: 1; border: none; background: transparent; outline: none; color: var(--text); }
+.chats-search-hint {
+  margin: 0 var(--space-4) var(--space-2); padding: 6px 10px; text-align: left; border: 1px dashed var(--border);
+  border-radius: var(--radius-sm); background: transparent; color: var(--accent); cursor: pointer; font-size: 12px;
+}
+.chats-items { flex: 1; overflow-y: auto; padding: 0 var(--space-2) var(--space-3); }
+.chats-section { padding: 10px 8px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); }
+.chats-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-sm); cursor: pointer; }
+.chats-item:hover { background: rgba(255, 255, 255, 0.04); }
+.chats-item--active { background: rgba(10, 132, 255, 0.18); }
+.chats-item__body { flex: 1; min-width: 0; }
+.chats-item__row { display: flex; align-items: center; gap: 8px; }
+.chats-item__title { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chats-item__time { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.chats-item__sub { flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chats-unread { min-width: 18px; padding: 1px 6px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; text-align: center; }
+.chats-badge { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.chats-empty { padding: var(--space-4); }
+.chats-avatar {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; font-weight: 600; color: #fff;
+}
+.chats-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-top: var(--titlebar); }
+.chats-placeholder { margin: auto; color: var(--text-secondary); }
+.chats-header {
+  display: flex; align-items: center; gap: 12px; padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.chats-header__body { flex: 1; min-width: 0; }
+.chats-header__title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chats-timeline { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: var(--space-4); }
+.chats-older {
+  align-self: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 12px;
+}
+.chats-text { white-space: pre-wrap; word-break: break-word; }
+.chats-quote {
+  margin-bottom: 4px; padding-left: 8px; border-left: 2px solid var(--accent); font-size: 12px; color: var(--text-secondary);
+}
+.chats-meta { display: flex; gap: 10px; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+.chats-reply { border: none; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 11px; }
+.chats-replying { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary); }
+.chats-readonly { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; }
+.chats-side {
+  width: 280px; flex-shrink: 0; padding: calc(var(--titlebar) + var(--space-3)) var(--space-4) var(--space-4);
+  border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px;
+}
+.chats-listen { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }

@@ -160,6 +160,15 @@ export function IconInbox(p: IconProps) {
   );
 }
 
+export function IconChats(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M5 5.5h11a2 2 0 0 1 2 2V13a2 2 0 0 1-2 2H10l-4 3.5V15H5a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2z" />
+      <path d="M18 9h1a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v2.5L15 18" />
+    </StrokeIcon>
+  );
+}
+
 export function IconLeads(p: IconProps) {
   return (
     <StrokeIcon {...p}>

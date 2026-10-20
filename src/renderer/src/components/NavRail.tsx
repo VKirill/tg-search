@@ -1,9 +1,10 @@
 import type React from 'react';
-import { IconAccounts, IconBroadcast, IconFunnel, IconInbox, IconLeads, IconSettings, IconTopics } from './Icons';
+import { IconAccounts, IconBroadcast, IconChats, IconFunnel, IconInbox, IconLeads, IconSettings, IconTopics } from './Icons';
 import type { Account } from '../../../shared/types';
 
 export type NavView =
   | 'inbox'
+  | 'chats'
   | 'leads'
   | 'funnel'
   | 'projects'
@@ -21,6 +22,7 @@ type NavRailProps = {
 
 const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React.ReactElement }[] = [
   { id: 'inbox', label: 'Входящие', Icon: IconInbox },
+  { id: 'chats', label: 'Чаты', Icon: IconChats },
   { id: 'leads', label: 'Лиды', Icon: IconLeads },
   { id: 'funnel', label: 'Воронка', Icon: IconFunnel },
   { id: 'projects', label: 'Тематики', Icon: IconTopics },
