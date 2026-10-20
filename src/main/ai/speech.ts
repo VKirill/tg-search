@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import type { Settings } from '../../shared/types';
 import { ensureMediaDir } from '../media';
+import { recordUsage } from '../usage';
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const RETRY_DELAYS_MS = [500, 2000];
@@ -245,7 +246,8 @@ export class OpenAiSpeech implements SpeechService {
   }
 
   async transcribe(filePath: string): Promise<string> {
-    this.sttSettings();
+    const s = this.sttSettings();
+    recordUsage({ kind: 'stt', model: s.sttModel, units: await probeDurationSec(filePath).catch(() => 0) });
     const st = await stat(filePath);
     if (st.size <= MAX_STT_BYTES) {
       return this.transcribeOne(filePath);
@@ -316,6 +318,7 @@ export class OpenAiSpeech implements SpeechService {
       const oggPath = join(outDir, `tts-${Date.now()}.ogg`);
       await convertToTelegramVoice(rawPath, oggPath);
       const durationSec = await probeDurationSec(oggPath);
+      recordUsage({ kind: 'tts', model: s.ttsModel, units: durationSec });
       return { path: oggPath, durationSec };
     } finally {
       await rm(workDir, { recursive: true, force: true });

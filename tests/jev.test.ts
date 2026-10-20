@@ -11,7 +11,7 @@ const settings = (): Settings => ({
   llmModel: '',
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: 'test-key',
-  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
 });
 
 const project = (): Project => ({

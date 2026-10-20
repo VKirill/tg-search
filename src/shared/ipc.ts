@@ -19,6 +19,8 @@ export const API_METHODS: ApiMap = {
   calls: ['save'],
   manager: ['test'],
   broadcasts: ['list', 'create', 'update', 'remove', 'runNow'],
+  stats: ['report'],
+  categories: ['list', 'create', 'update', 'remove'],
   chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media'],
   shell: ['openExternal'],
 };

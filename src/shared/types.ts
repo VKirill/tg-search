@@ -177,6 +177,57 @@ export interface Settings {
   ttsApiKey: string;
   ttsModel: string; // e.g. gpt-4o-mini-tts
   ttsVoice: string; // e.g. nova
+  jevPricePerMTok: string; // USD per 1M input tokens (OpenLux jev-1.14: ~0.042); output is free
+  sttPricePerMin: string; // USD per audio minute, estimate for statistics
+  ttsPricePerMin: string; // USD per audio minute, estimate for statistics
+  requestThreshold: string; // 0..1: messages below this «is a request» probability skip project qualification
+}
+
+// Demand map: every analyzed message gets one category and a «request vs chatter» probability.
+export interface Category {
+  id: number;
+  name: string;
+  description: string; // what requests belong here; shown to Jev
+  enabled: boolean;
+}
+
+export type UsageKind = 'jev' | 'llm' | 'stt' | 'tts';
+
+export interface StatsDay {
+  day: string; // YYYY-MM-DD, local
+  analyzed: number; // messages classified
+  requests: number; // request probability >= threshold
+  chatter: number;
+  leads: number;
+  sent: number; // outgoing messages (manual, auto, broadcasts excluded)
+  costUsd: number;
+  costByKind: Record<UsageKind, number>;
+}
+
+export interface CategoryStat {
+  categoryId: number | null; // null = no category fits
+  name: string;
+  messages: number;
+  requests: number;
+  examples: { text: string; link: string | null; date: number; prob: number }[]; // top requests by probability
+}
+
+export interface UsageStat {
+  kind: UsageKind;
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  units: number; // messages for jev, seconds for stt/tts
+  costUsd: number;
+}
+
+export interface StatsReport {
+  period: 'day' | 'week' | 'month';
+  days: StatsDay[]; // oldest first, every day of the period
+  totals: Omit<StatsDay, 'day'>;
+  categories: CategoryStat[];
+  usage: UsageStat[];
 }
 
 // Mini-CRM card of one client dialog (lead): stage, running summary, anamnesis and the brief (ТЗ) for the owner.
@@ -367,6 +418,15 @@ export interface Api {
     update(id: number, patch: Partial<BroadcastInput> & { enabled?: boolean }): Promise<Broadcast>;
     remove(id: number): Promise<void>;
     runNow(id: number): Promise<{ posted: number; skipped: number; errors: number }>;
+  };
+  stats: {
+    report(period: 'day' | 'week' | 'month'): Promise<StatsReport>;
+  };
+  categories: {
+    list(): Promise<Category[]>;
+    create(input: Pick<Category, 'name' | 'description'>): Promise<Category>;
+    update(id: number, patch: Partial<Omit<Category, 'id'>>): Promise<Category>;
+    remove(id: number): Promise<void>;
   };
   chats: {
     list(accountId: number): Promise<ChatSummary[]>; // the account's chats, newest activity first

@@ -1,5 +1,5 @@
 import type React from 'react';
-import { IconAccounts, IconBroadcast, IconChats, IconFunnel, IconInbox, IconLeads, IconSettings, IconTopics } from './Icons';
+import { IconAccounts, IconBroadcast, IconChats, IconFunnel, IconInbox, IconLeads, IconSettings, IconStats, IconTopics } from './Icons';
 import type { Account } from '../../../shared/types';
 
 export type NavView =
@@ -9,6 +9,7 @@ export type NavView =
   | 'funnel'
   | 'projects'
   | 'broadcasts'
+  | 'stats'
   | 'accounts'
   | 'settings';
 
@@ -27,6 +28,7 @@ const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React
   { id: 'funnel', label: 'Воронка', Icon: IconFunnel },
   { id: 'projects', label: 'Тематики', Icon: IconTopics },
   { id: 'broadcasts', label: 'Рассылки', Icon: IconBroadcast },
+  { id: 'stats', label: 'Статистика', Icon: IconStats },
   { id: 'accounts', label: 'Аккаунты', Icon: IconAccounts },
   { id: 'settings', label: 'Настройки', Icon: IconSettings },
 ];

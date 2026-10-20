@@ -1,6 +1,7 @@
 // OpenAI-compatible chat completions client (global fetch).
 
 import type { Settings } from '../../shared/types';
+import { recordUsage } from '../usage';
 
 export type LlmMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -80,6 +81,8 @@ async function postChatCompletion(
     temperature: options.temperature ?? 0.2,
   };
   if (options.jsonObject) body.response_format = { type: 'json_object' };
+  // OpenRouter returns the exact cost of the call; other OpenAI-compatible APIs may reject the extra field
+  if (settings.llmBaseUrl.includes('openrouter.ai')) body.usage = { include: true };
 
   const res = await fetch(url, {
     method: 'POST',
@@ -104,7 +107,12 @@ async function postChatCompletion(
 
   const data = (await res.json()) as {
     choices?: { message?: { content?: string | null } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
   };
+  recordUsage({
+    kind: 'llm', model: settings.llmModel, inputTokens: data.usage?.prompt_tokens, outputTokens: data.usage?.completion_tokens,
+    costUsd: data.usage?.cost ?? 0,
+  });
   const content = data.choices?.[0]?.message?.content;
   if (content == null || content === '') {
     throw new Error('Ошибка LLM: пустой ответ');

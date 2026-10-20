@@ -160,6 +160,17 @@ export function IconInbox(p: IconProps) {
   );
 }
 
+export function IconStats(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M4 20h16" />
+      <rect x="5.5" y="11" width="3" height="6" rx="0.8" />
+      <rect x="10.5" y="6" width="3" height="11" rx="0.8" />
+      <rect x="15.5" y="9" width="3" height="8" rx="0.8" />
+    </StrokeIcon>
+  );
+}
+
 export function IconChats(p: IconProps) {
   return (
     <StrokeIcon {...p}>

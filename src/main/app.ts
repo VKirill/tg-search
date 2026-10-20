@@ -2,7 +2,8 @@
 
 import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
-import type { DialogTurn, LeadAi, ManagerAi, TextSpinner } from './ai/types';
+import type { Categorizer, DialogTurn, LeadAi, ManagerAi, TextSpinner } from './ai/types';
+import { buildReport } from './pipeline/stats';
 import { stubManagerAi } from './ai/manager';
 import { stubCrmAi } from './ai/crm';
 import { createCrm } from './pipeline/crm';
@@ -38,6 +39,7 @@ export interface AppDeps {
   manager?: ManagerAi;
   crmAi?: CrmAi;
   spinner?: TextSpinner;
+  categorizer?: Categorizer; // demand map (Jev); absent in tests
   speech: SpeechService;
   dataDir: string;
   emit: (e: AppEvent) => void;
@@ -57,7 +59,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     if (e.type === 'lead:update') crm.onLeadUpdate(e.lead);
   };
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, speech, emit, manager };
+  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer };
   const autopilot = createAutopilot(pipeline);
   const managerAgent = createManagerAgent({ ...pipeline, manager, crm });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
@@ -324,6 +326,15 @@ export function createApp(deps: AppDeps): AppHandlers {
       update: (id, patch) => broadcaster.update(id, patch),
       remove: (id) => broadcaster.remove(id),
       runNow: (id) => broadcaster.runNow(id),
+    },
+    stats: {
+      report: async (period) => buildReport(db, period),
+    },
+    categories: {
+      list: async () => db.listCategories(),
+      create: async ({ name, description }) => db.createCategory(name, description),
+      update: async (id, patch) => db.updateCategory(id, patch),
+      remove: async (id) => db.removeCategory(id),
     },
     chats: {
       list: async (accountId) =>

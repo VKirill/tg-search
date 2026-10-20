@@ -11,7 +11,7 @@ const emptySettings = () => ({
   llmModel: '',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '',
+  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
 });
 
 describe('TdlEngine smoke', () => {

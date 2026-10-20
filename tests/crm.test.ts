@@ -267,7 +267,7 @@ describe('OpenAiManagerAi card context', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
     });
     const ai = new OpenAiManagerAi(settings);
     const project = {
@@ -423,7 +423,7 @@ describe('OpenAiCrmAi parse', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
     });
     const ai = new OpenAiCrmAi(settings);
     const card: ClientCard = {

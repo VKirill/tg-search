@@ -9,6 +9,8 @@ import {
   type ManagerSettings,
   type Anamnesis,
   type Broadcast,
+  type Category,
+  type UsageKind,
   type BroadcastChat,
   type ClientCard,
   type AutopilotSettings,
@@ -85,6 +87,23 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   interval_hours REAL NOT NULL DEFAULT 24, spin INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
+);
+-- Every analyzed message once (globally, not per project): the demand map behind statistics.
+CREATE TABLE IF NOT EXISTS classified (
+  tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER NOT NULL, day TEXT NOT NULL, date INTEGER NOT NULL,
+  category_id INTEGER, category_prob REAL NOT NULL, request_prob REAL NOT NULL, text TEXT NOT NULL, link TEXT,
+  PRIMARY KEY(tg_chat_id, tg_message_id)
+);
+CREATE INDEX IF NOT EXISTS classified_day ON classified(day);
+CREATE TABLE IF NOT EXISTS usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0, units REAL NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS usage_day ON usage(day);
 CREATE TABLE IF NOT EXISTS seen (
   project_id INTEGER NOT NULL, tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER NOT NULL,
   PRIMARY KEY(project_id, tg_chat_id, tg_message_id)
@@ -181,7 +200,20 @@ export const SETTINGS_DEFAULTS: Settings = {
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
   ttsVoice: 'nova',
+  jevPricePerMTok: '0.042',
+  sttPricePerMin: '0.006',
+  ttsPricePerMin: '0.015',
+  requestThreshold: '0.2',
 };
+
+const DEFAULT_CATEGORIES: [string, string][] = [
+  ['IT-разработка', 'Сайты, лендинги, Telegram-боты, приложения, интеграции, автоматизация, доработка и поддержка'],
+  ['Реклама и маркетинг', 'Таргет, контекст, SMM, продвижение, лидогенерация, маркетинговая стратегия'],
+  ['Фото, видео и дизайн', 'Генерация и обработка фото, видеомонтаж, нейрофото, логотипы, дизайн, инфографика'],
+  ['Учёба и домашние задания', 'Помощь с домашним заданием, контрольные, курсовые, решение задач, репетиторство'],
+  ['Карточки маркетплейсов', 'Карточки товаров для Wildberries, Ozon, Яндекс Маркета: тексты, фото, инфографика, SEO'],
+  ['Тексты и копирайтинг', 'Статьи, посты, продающие тексты, переводы, редактура'],
+];
 
 export class Db {
   readonly raw: DatabaseSync;
@@ -190,6 +222,7 @@ export class Db {
     this.raw = new DatabaseSync(path);
     this.raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.raw.exec(SCHEMA);
+    this.seedCategories();
     // Columns added after the first release
     const projectCols = this.all('PRAGMA table_info(projects)').map((c) => c.name);
     if (!projectCols.includes('criteria')) this.raw.exec("ALTER TABLE projects ADD COLUMN criteria TEXT NOT NULL DEFAULT ''");
@@ -208,6 +241,11 @@ export class Db {
         ALTER TABLE leads ADD COLUMN handoff INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE leads ADD COLUMN handoff_reason TEXT;`);
     }
+  }
+
+  private seedCategories() {
+    if (this.one('SELECT 1 FROM categories LIMIT 1')) return;
+    for (const [name, description] of DEFAULT_CATEGORIES) this.run('INSERT INTO categories(name, description) VALUES(?, ?)', name, description);
   }
 
   private one(sql: string, ...args: any[]): Row | undefined {
@@ -470,5 +508,87 @@ export class Db {
        ORDER BY COALESCE(c.updated_at, l.created_at) DESC LIMIT 500`,
       ...args,
     ).map(toLead);
+  }
+
+  // Demand categories
+  listCategories(): Category[] {
+    return this.all('SELECT * FROM categories ORDER BY id').map((r) => ({ id: r.id, name: r.name, description: r.description, enabled: !!r.enabled }));
+  }
+  getCategory(id: number): Category {
+    const c = this.listCategories().find((x) => x.id === id);
+    if (!c) throw new Error(`category ${id} not found`);
+    return c;
+  }
+  createCategory(name: string, description: string): Category {
+    const res = this.run('INSERT INTO categories(name, description) VALUES(?, ?)', name, description);
+    return this.getCategory(Number(res.lastInsertRowid));
+  }
+  updateCategory(id: number, patch: Partial<Omit<Category, 'id'>>): Category {
+    const next = { ...this.getCategory(id), ...patch };
+    this.run('UPDATE categories SET name = ?, description = ?, enabled = ? WHERE id = ?', next.name, next.description, Number(next.enabled), id);
+    return this.getCategory(id);
+  }
+  removeCategory(id: number) {
+    this.run('DELETE FROM categories WHERE id = ?', id);
+    this.run('UPDATE classified SET category_id = NULL WHERE category_id = ?', id);
+  }
+
+  // Classified messages (global, once per message)
+  filterUnclassified<T extends { chatId: number; messageId: number }>(msgs: T[]): T[] {
+    const stmt = this.raw.prepare('SELECT 1 FROM classified WHERE tg_chat_id = ? AND tg_message_id = ?');
+    return msgs.filter((m) => !stmt.get(m.chatId, m.messageId));
+  }
+  // Request probability per message key; messages never classified are absent
+  requestProbs(msgs: { chatId: number; messageId: number }[]): Map<string, number> {
+    const stmt = this.raw.prepare('SELECT request_prob FROM classified WHERE tg_chat_id = ? AND tg_message_id = ?');
+    const out = new Map<string, number>();
+    for (const m of msgs) {
+      const r = stmt.get(m.chatId, m.messageId) as Row | undefined;
+      if (r) out.set(`${m.chatId}:${m.messageId}`, r.request_prob);
+    }
+    return out;
+  }
+  addClassified(c: { chatId: number; messageId: number; day: string; date: number; categoryId: number | null; categoryProb: number; requestProb: number; text: string; link: string | null }) {
+    this.run(
+      `INSERT OR IGNORE INTO classified(tg_chat_id, tg_message_id, day, date, category_id, category_prob, request_prob, text, link)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      c.chatId, c.messageId, c.day, c.date, c.categoryId, c.categoryProb, c.requestProb, c.text.slice(0, 2000), c.link,
+    );
+  }
+
+  // AI usage and spend
+  addUsage(u: { day: string; kind: UsageKind; model: string; inputTokens: number; outputTokens: number; units: number; costUsd: number }) {
+    this.run(
+      'INSERT INTO usage(day, kind, model, input_tokens, output_tokens, units, cost_usd) VALUES(?, ?, ?, ?, ?, ?, ?)',
+      u.day, u.kind, u.model, u.inputTokens, u.outputTokens, u.units, u.costUsd,
+    );
+  }
+
+  // Raw aggregates for the statistics report over [fromDay, toDay] (local YYYY-MM-DD)
+  statsRows(fromDay: string, toDay: string, threshold: number, fromMs: number, toMs: number) {
+    return {
+      analyzed: this.all(
+        `SELECT day, COUNT(*) n, SUM(request_prob >= ?) req FROM classified WHERE day BETWEEN ? AND ? GROUP BY day`,
+        threshold, fromDay, toDay,
+      ),
+      usageByDay: this.all(
+        `SELECT day, kind, SUM(cost_usd) cost FROM usage WHERE day BETWEEN ? AND ? GROUP BY day, kind`, fromDay, toDay,
+      ),
+      usage: this.all(
+        `SELECT kind, model, COUNT(*) calls, SUM(input_tokens) input, SUM(output_tokens) output, SUM(units) units, SUM(cost_usd) cost
+         FROM usage WHERE day BETWEEN ? AND ? GROUP BY kind, model ORDER BY cost DESC`, fromDay, toDay,
+      ),
+      leads: this.all('SELECT created_at ts FROM leads WHERE created_at BETWEEN ? AND ?', fromMs, toMs),
+      sent: this.all("SELECT date ts FROM messages WHERE direction = 'out' AND kind != 'note' AND date BETWEEN ? AND ?", fromMs, toMs),
+      categories: this.all(
+        `SELECT category_id, COUNT(*) n, SUM(request_prob >= ?) req FROM classified WHERE day BETWEEN ? AND ?
+         GROUP BY category_id ORDER BY req DESC, n DESC`, threshold, fromDay, toDay,
+      ),
+      examples: this.all(
+        `SELECT category_id, text, link, date, request_prob FROM classified
+         WHERE day BETWEEN ? AND ? AND request_prob >= ? ORDER BY request_prob DESC, date DESC LIMIT 400`,
+        fromDay, toDay, threshold,
+      ),
+    };
   }
 }

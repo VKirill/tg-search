@@ -28,7 +28,7 @@ const baseSettings = (): Settings => ({
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: 'tts-key',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova',
+  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
 });
 
 describe('OpenAiSpeech HTTP', () => {

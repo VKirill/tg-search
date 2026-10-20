@@ -1,6 +1,7 @@
 import type { AppEvent, Project } from '../../shared/types';
 import type { Db } from '../db';
-import type { LeadAi } from '../ai/types';
+import type { Categorizer, LeadAi } from '../ai/types';
+import { todayLocal } from './limiter';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
 
@@ -9,6 +10,7 @@ export interface ScannerDeps {
   engine: TelegramEngine;
   ai: LeadAi;
   emit: (e: AppEvent) => void;
+  categorizer?: Categorizer;
 }
 
 const MIN_TEXT_LEN = 15;
@@ -24,6 +26,7 @@ export async function qualifyAndAddLeads(
   sourceId: number,
   messages: TgMessage[],
 ): Promise<number> {
+  if (deps.categorizer) messages = await categorizeAndGate(deps, deps.categorizer, messages);
   if (messages.length === 0) return 0;
   const examples = deps.db.feedbackExamples(project.id);
   const quals = await deps.ai.qualify(project, messages, examples);
@@ -53,6 +56,33 @@ export async function qualifyAndAddLeads(
     }
   }
   return added;
+}
+
+// Demand map first: each new message is classified once (globally); only probable requests go on to the
+// project's qualification. Fails open: an unclassified message is qualified as before, so no lead is lost.
+async function categorizeAndGate(deps: ScannerDeps, categorizer: Categorizer, messages: TgMessage[]): Promise<TgMessage[]> {
+  if (messages.length === 0) return messages;
+  const fresh = deps.db.filterUnclassified(messages);
+  if (fresh.length) {
+    try {
+      const results = new Map((await categorizer.classify(deps.db.listCategories(), fresh)).map((r) => [r.key, r]));
+      const day = todayLocal(Date.now());
+      for (const m of fresh) {
+        const r = results.get(`${m.chatId}:${m.messageId}`);
+        if (!r) continue;
+        deps.db.addClassified({
+          chatId: m.chatId, messageId: m.messageId, day, date: m.date, categoryId: r.categoryId,
+          categoryProb: r.categoryProb, requestProb: r.requestProb, text: m.text, link: m.link,
+        });
+      }
+    } catch (err) {
+      console.error('categorize', err);
+      return messages;
+    }
+  }
+  const probs = deps.db.requestProbs(messages);
+  const threshold = Number(deps.db.getSettings().requestThreshold || 0);
+  return messages.filter((m) => (probs.get(`${m.chatId}:${m.messageId}`) ?? 1) >= threshold);
 }
 
 async function fetchHistory(

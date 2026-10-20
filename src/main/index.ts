@@ -14,6 +14,8 @@ import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
 import { startControlServer, pushControlEvent } from './control';
 import { OpenAiSpeech } from './ai/speech';
+import { JevCategorizer } from './ai/categorizer';
+import { setUsageSink } from './usage';
 import { registerMediaProtocol, registerMediaSchemes } from './media';
 
 registerMediaSchemes();
@@ -78,6 +80,7 @@ app.whenReady().then(async () => {
   const managerAi = new OpenAiManagerAi(getSettings);
   const crmAi = new OpenAiCrmAi(getSettings);
   const speech = new OpenAiSpeech(getSettings, dataDir);
+  setUsageSink((u) => db.addUsage(u), getSettings);
   const handlers = createApp({
     db,
     engine,
@@ -86,6 +89,7 @@ app.whenReady().then(async () => {
     crmAi,
     spinner,
     speech,
+    categorizer: new JevCategorizer(getSettings),
     dataDir,
     emit,
     openExternal: (url) => shell.openExternal(url),

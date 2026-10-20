@@ -161,7 +161,7 @@ describe('OpenAiManagerAi', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
     });
     const ai = new OpenAiManagerAi(settings);
     const project = {

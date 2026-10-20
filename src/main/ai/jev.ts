@@ -3,6 +3,7 @@
 import type { LeadLabel, Project, Settings } from '../../shared/types';
 import type { TgMessage } from '../telegram/types';
 import type { FeedbackExample, Qualification, Qualifier } from './types';
+import { recordUsage } from '../usage';
 
 const CHUNK_SIZE = 10;
 const MAX_PARALLEL = 4;
@@ -24,6 +25,7 @@ type NoulAnswer = {
 
 type SystemOneResponse = {
   answers?: Record<string, ScoreAnswer | NoulAnswer>;
+  usage?: { input_tokens?: number; output_tokens?: number };
 };
 
 function messageKey(m: TgMessage): string {
@@ -140,7 +142,7 @@ function mapOne(key: string, fit: ScoreAnswer | undefined, seller: NoulAnswer | 
   return { key, score, label, reason };
 }
 
-async function postSystemOne(getSettings: () => Settings, body: object): Promise<SystemOneResponse> {
+export async function postSystemOne(getSettings: () => Settings, body: object): Promise<SystemOneResponse> {
   const settings = getSettings();
   const url = `${settings.jevBaseUrl.replace(/\/$/, '')}/systemone`;
   const payload = JSON.stringify({
@@ -169,7 +171,12 @@ async function postSystemOne(getSettings: () => Settings, body: object): Promise
         err.retryAfterMs = retryAfterMs(res);
         throw err;
       }
-      return (await res.json()) as SystemOneResponse;
+      const data = (await res.json()) as SystemOneResponse;
+      recordUsage({
+        kind: 'jev', model: settings.jevModel || 'jev-1.14.0', inputTokens: data.usage?.input_tokens,
+        outputTokens: data.usage?.output_tokens, units: Object.keys((body as { questions?: object }).questions ?? {}).length,
+      });
+      return data;
     } catch (e) {
       lastErr = e;
       const status = (e as { status?: number }).status;
@@ -202,7 +209,7 @@ async function qualifyChunk(
   });
 }
 
-async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+export async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   async function worker() {

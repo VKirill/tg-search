@@ -1,6 +1,6 @@
 // Contract of the AI layer. Implemented in ./leadAi.ts over an OpenAI-compatible chat API.
 
-import type { ClientCard, Lead, LeadLabel, ManagerSettings, ManagerTestResult, Project, ProjectInput } from '../../shared/types';
+import type { Category, ClientCard, Lead, LeadLabel, ManagerSettings, ManagerTestResult, Project, ProjectInput } from '../../shared/types';
 import type { TgChat, TgMessage } from '../telegram/types';
 
 export type ProjectBrief = Pick<ProjectInput, 'task' | 'target' | 'offer' | 'geo' | 'languages' | 'materials'>;
@@ -50,4 +50,16 @@ export interface ManagerAi {
   // Next manager message for the dialog, or a handoff decision. settings override project.manager (sandbox).
   // card: current CRM card — the manager asks the open questions of the anamnesis one by one.
   reply(project: Project, lead: Lead, history: DialogTurn[], settings?: ManagerSettings, card?: ClientCard): Promise<ManagerTestResult>;
+}
+
+export interface Classification {
+  key: string; // `${chatId}:${messageId}`
+  categoryId: number | null; // null = no category fits
+  categoryProb: number; // 0..1
+  requestProb: number; // 0..1: the author asks for / orders a service or help (not chatter, not self-promotion)
+}
+
+// Demand map (Jev): one category per message plus the request probability.
+export interface Categorizer {
+  classify(categories: Category[], messages: TgMessage[]): Promise<Classification[]>;
 }

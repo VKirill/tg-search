@@ -4,6 +4,7 @@ import { AccountsDialog } from './components/AccountsDialog';
 import { BroadcastsView } from './components/BroadcastsView';
 import { ChatPanel } from './components/ChatPanel';
 import { ChatsView } from './components/ChatsView';
+import { StatsView } from './components/StatsView';
 import { CrmPanel } from './components/CrmPanel';
 import { FunnelView } from './components/FunnelView';
 import { LeadsPanel, type LeadFilters } from './components/LeadsPanel';
@@ -275,6 +276,7 @@ function AppInner() {
         {view === 'projects' && (
           <ProjectsView projectList={projects} accounts={accounts} onRefresh={() => refreshProjects()} />
         )}
+        {view === 'stats' && <StatsView />}
         {view === 'broadcasts' && <BroadcastsView accounts={accounts} />}
         {view === 'settings' && <SettingsView />}
       </div>

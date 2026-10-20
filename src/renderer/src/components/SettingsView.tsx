@@ -66,6 +66,8 @@ export function SettingsView() {
           <div className="field"><label>Base URL</label><input value={s.jevBaseUrl} onChange={(e) => setS({ ...s, jevBaseUrl: e.target.value })} /></div>
           <div className="field"><label>API key</label><input type="password" value={s.jevApiKey} onChange={(e) => setS({ ...s, jevApiKey: e.target.value })} /></div>
           <div className="field"><label>Модель</label><input value={s.jevModel} onChange={(e) => setS({ ...s, jevModel: e.target.value })} /></div>
+          <div className="field"><label>Цена, $ за 1 млн входных токенов (для статистики)</label><input value={s.jevPricePerMTok} onChange={(e) => setS({ ...s, jevPricePerMTok: e.target.value })} /></div>
+          <div className="field"><label>Порог «это запрос» (0–1): ниже — болтовня, тематики её не проверяют</label><input value={s.requestThreshold} onChange={(e) => setS({ ...s, requestThreshold: e.target.value })} /></div>
         </section>
         <section>
           <h2 className="section-title">LLM</h2>

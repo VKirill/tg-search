@@ -5,6 +5,7 @@ import type {
   AppEvent,
   AutopilotSettings,
   Broadcast,
+  Category,
   ChatInfo,
   ChatItem,
   ChatMessage,
@@ -16,6 +17,7 @@ import type {
   Project,
   ProjectInput,
   Settings,
+  StatsReport,
   Source,
 } from '../../shared/types';
 import { DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../../shared/types';
@@ -44,7 +46,7 @@ let settings: Settings = {
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova',
+  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
 };
 
 const accounts: Account[] = [
@@ -449,6 +451,62 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockCategories: Category[] = [
+  { id: 1, name: 'IT-разработка', description: 'Сайты, боты, приложения, интеграции, автоматизация', enabled: true },
+  { id: 2, name: 'Реклама и маркетинг', description: 'Таргет, контекст, SMM, продвижение', enabled: true },
+  { id: 3, name: 'Фото, видео и дизайн', description: 'Нейрофото, монтаж, логотипы, инфографика', enabled: true },
+  { id: 4, name: 'Учёба и домашние задания', description: 'Домашние задания, контрольные, решение задач', enabled: true },
+  { id: 5, name: 'Карточки маркетплейсов', description: 'Карточки для Wildberries, Ozon: тексты, фото, инфографика', enabled: true },
+  { id: 6, name: 'Тексты и копирайтинг', description: 'Статьи, посты, продающие тексты', enabled: true },
+];
+
+function mockStats(period: StatsReport['period']): StatsReport {
+  const n = period === 'day' ? 1 : period === 'week' ? 7 : 30;
+  const days = Array.from({ length: n }, (_, i) => {
+    const d = new Date(now - (n - 1 - i) * 86_400_000);
+    const analyzed = 2400 + Math.round(900 * Math.sin(i * 1.3) + (i % 3) * 300);
+    const requests = Math.round(analyzed * (0.06 + (i % 4) * 0.01));
+    const jev = analyzed * 0.000021;
+    const llm = 0.04 + (i % 5) * 0.03;
+    return {
+      day: d.toISOString().slice(0, 10), analyzed, requests, chatter: analyzed - requests, leads: Math.round(requests * 0.18),
+      sent: 3 + (i % 4), costUsd: jev + llm + 0.02, costByKind: { jev, llm, stt: 0.012, tts: 0.008 },
+    };
+  });
+  const totals = days.reduce(
+    (t, d) => ({
+      analyzed: t.analyzed + d.analyzed, requests: t.requests + d.requests, chatter: t.chatter + d.chatter,
+      leads: t.leads + d.leads, sent: t.sent + d.sent, costUsd: t.costUsd + d.costUsd,
+      costByKind: { jev: t.costByKind.jev + d.costByKind.jev, llm: t.costByKind.llm + d.costByKind.llm, stt: t.costByKind.stt + d.costByKind.stt, tts: t.costByKind.tts + d.costByKind.tts },
+    }),
+    { analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0 } },
+  );
+  const share = [0.34, 0.22, 0.14, 0.12, 0.1, 0.08];
+  const examples: Record<number, string[]> = {
+    1: ['Нужен Telegram-бот для записи клиентов в салон, бюджет до 50к', 'Ищу разработчика: доработать сайт на Tilda и подключить оплату'],
+    2: ['Кто настроит таргет ВК для доставки еды? Бюджет на рекламу 100к в месяц', 'Ищу маркетолога на запуск онлайн-курса'],
+    3: ['Нужны нейрофото для каталога одежды, 20 образов', 'Смонтировать рилс из моих видео, 10 штук в месяц'],
+    4: ['Помогите решить задачи по физике, 9 класс, фото прикрепила', 'Кто сделает контрольную по высшей математике до пятницы?'],
+    5: ['Нужна карточка товара для Ozon: инфографика и описание, 5 SKU', 'Ищу дизайнера карточек для WB, обувь'],
+    6: ['Нужен копирайтер на тексты для лендинга стоматологии', 'Перевести презентацию на английский, 30 слайдов'],
+  };
+  const categories = mockCategories.map((c, i) => ({
+    categoryId: c.id, name: c.name,
+    messages: Math.round(totals.analyzed * share[i] * 0.4), requests: Math.round(totals.requests * share[i]),
+    examples: (examples[c.id] ?? []).map((text, k) => ({ text, link: null, date: now - k * 3600_000, prob: 0.95 - k * 0.07 })),
+  }));
+  categories.push({ categoryId: null, name: 'Без категории', messages: Math.round(totals.analyzed * 0.6), requests: 0, examples: [] } as never);
+  return {
+    period, days, totals, categories,
+    usage: [
+      { kind: 'jev', model: 'jev-1.14.0', calls: Math.round(totals.analyzed / 10), inputTokens: totals.analyzed * 450, outputTokens: totals.analyzed * 8, units: totals.analyzed * 2, costUsd: totals.costByKind.jev },
+      { kind: 'llm', model: 'anthropic/claude-haiku-5.5', calls: 140 * n, inputTokens: 9_000 * n, outputTokens: 2_000 * n, units: 0, costUsd: totals.costByKind.llm },
+      { kind: 'stt', model: 'gpt-4o-transcribe', calls: 6 * n, inputTokens: 0, outputTokens: 0, units: 120 * n, costUsd: totals.costByKind.stt },
+      { kind: 'tts', model: 'gpt-4o-mini-tts', calls: 3 * n, inputTokens: 0, outputTokens: 0, units: 32 * n, costUsd: totals.costByKind.tts },
+    ],
+  };
+}
 
 const mockChats: ChatSummary[] = [
   { chatId: -1001, title: 'Фриланс · заказы на разработку', username: 'freelance_dev_orders', kind: 'supergroup', memberCount: 18420, isMember: true, unreadCount: 12, lastText: 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', lastDate: now - 4 * 60_000 },
@@ -965,6 +1023,31 @@ export function createMockApi(): Api {
         await delay(1500);
         emit({ type: 'job', projectId: 0, stage: 'Готово', done: true });
         return { posted: 2, skipped: 1, errors: 0 };
+      },
+    },
+    stats: {
+      async report(period) {
+        await delay(150);
+        return mockStats(period);
+      },
+    },
+    categories: {
+      async list() {
+        return mockCategories.map((c) => ({ ...c }));
+      },
+      async create(input) {
+        const c = { id: nid(), enabled: true, ...input };
+        mockCategories.push(c);
+        return { ...c };
+      },
+      async update(id, patch) {
+        const c = mockCategories.find((x) => x.id === id)!;
+        Object.assign(c, patch);
+        return { ...c };
+      },
+      async remove(id) {
+        const i = mockCategories.findIndex((x) => x.id === id);
+        if (i >= 0) mockCategories.splice(i, 1);
       },
     },
     chats: {
