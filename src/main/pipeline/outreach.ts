@@ -1,6 +1,7 @@
 import type { AppEvent, Lead } from '../../shared/types';
 import type { Db } from '../db';
 import type { LeadAi } from '../ai/types';
+import type { SpeechService } from '../ai/speech';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
 import { afterSend, canSend, limiterErrorMessage } from './limiter';
@@ -10,8 +11,13 @@ export interface OutreachDeps {
   db: Db;
   engine: TelegramEngine;
   ai: LeadAi;
+  speech?: SpeechService;
   emit: (e: AppEvent) => void;
 }
+
+type EngineWithPrivateChat = TelegramEngine & {
+  ensurePrivateChat?(accountId: number, userId: number): Promise<number>;
+};
 
 function pickSendingAccount(
   db: Db,
@@ -32,6 +38,47 @@ function pickSendingAccount(
     lastFail = r;
   }
   throw new Error(limiterErrorMessage(lastFail));
+}
+
+async function dmChatId(deps: OutreachDeps, accountId: number, lead: Lead): Promise<number> {
+  if (lead.authorUserId == null) throw new Error('Контакт не определён — ответьте в чате');
+  const dm = deps.db.listMessages(lead.id).find((m) => m.where === 'dm');
+  if (dm) return dm.tgChatId;
+  const eng = deps.engine as EngineWithPrivateChat;
+  if (eng.ensurePrivateChat) return eng.ensurePrivateChat(accountId, lead.authorUserId);
+  if (lead.authorUsername) {
+    const chat = await deps.engine.resolveChat(accountId, `@${lead.authorUsername}`);
+    return chat.chatId;
+  }
+  throw new Error('Контакт не определён — ответьте в чате');
+}
+
+async function sendVoiceViaEngine(
+  deps: OutreachDeps,
+  accountId: number,
+  lead: Lead,
+  where: 'dm' | 'chat',
+  filePath: string,
+  durationSec: number,
+  joinIfNeeded: boolean,
+): Promise<TgMessage> {
+  if (where === 'dm') {
+    const chatId = await dmChatId(deps, accountId, lead);
+    return deps.engine.sendVoice(accountId, chatId, filePath, durationSec);
+  }
+  try {
+    return await deps.engine.sendVoice(
+      accountId,
+      lead.tgChatId,
+      filePath,
+      durationSec,
+      lead.tgMessageId,
+    );
+  } catch (err) {
+    if (!joinIfNeeded) throw err;
+    await deps.engine.joinChat(accountId, lead.tgChatId);
+    return deps.engine.sendVoice(accountId, lead.tgChatId, filePath, durationSec, lead.tgMessageId);
+  }
 }
 
 async function sendViaEngine(
@@ -83,6 +130,56 @@ export async function sendMessage(
     direction: 'out',
     where,
     text,
+    tgChatId: tgMsg.chatId,
+    tgMessageId: tgMsg.messageId,
+    date: tgMsg.date,
+    auto,
+  });
+
+  const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
+  if (lead.sequenceStep === 0) maybeStartChainAfterFirstSend(deps.db, leadId, now);
+  const account = deps.db.getAccount(accountId);
+  const patched = deps.db.updateAccount(accountId, afterSend(account, now));
+
+  deps.emit({ type: 'message:new', message });
+  deps.emit({ type: 'lead:update', lead: updatedLead });
+  deps.emit({ type: 'account:update', account: patched });
+  return message;
+}
+
+export async function sendVoiceMessage(
+  deps: OutreachDeps,
+  leadId: number,
+  text: string,
+  where: 'dm' | 'chat',
+  auto = false,
+): Promise<import('../../shared/types').ChatMessage> {
+  if (!deps.speech) throw new Error('Голосовые сообщения не настроены');
+  const lead = deps.db.getLead(leadId);
+  const project = deps.db.getProject(lead.projectId);
+  const now = Date.now();
+  const { accountId } = pickSendingAccount(deps.db, project.accountIds, lead, now);
+
+  const { path: filePath, durationSec } = await deps.speech.synthesize(text);
+  const tgMsg = await sendVoiceViaEngine(
+    deps,
+    accountId,
+    lead,
+    where,
+    filePath,
+    durationSec,
+    project.autopilot.joinIfNeeded,
+  );
+
+  const message = deps.db.addMessage({
+    leadId,
+    accountId,
+    direction: 'out',
+    where,
+    kind: 'voice',
+    text,
+    mediaPath: filePath,
+    durationSec,
     tgChatId: tgMsg.chatId,
     tgMessageId: tgMsg.messageId,
     date: tgMsg.date,

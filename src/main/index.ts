@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from 'electron';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { Db } from './db';
@@ -12,6 +12,10 @@ import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
 import { startControlServer, pushControlEvent } from './control';
+import { OpenAiSpeech } from './ai/speech';
+import { registerMediaProtocol, registerMediaSchemes } from './media';
+
+registerMediaSchemes();
 
 let win: BrowserWindow | null = null;
 let control: { stop(): void } | null = null;
@@ -38,16 +42,27 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  registerMediaProtocol();
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then((sources) => callback({ video: sources[0], audio: 'loopback' }))
+      .catch(() => callback({}));
+  });
+
   const dataDir = app.getPath('userData');
   mkdirSync(dataDir, { recursive: true });
   const db = new Db(join(dataDir, 'tg-search.db'));
   // Development defaults from the environment; values saved in Settings take priority.
   const s = db.getSettings();
+  const openAiKey = process.env.OPENAI_API_KEY || '';
   db.setSettings({
     tgApiId: s.tgApiId || process.env.TG_API_ID || '',
     tgApiHash: s.tgApiHash || process.env.TG_API_HASH || '',
     llmApiKey: s.llmApiKey || process.env.OPENROUTER_API_KEY || '',
     jevApiKey: s.jevApiKey || process.env.OPENLUX_API_KEY || '',
+    sttApiKey: s.sttApiKey || openAiKey,
+    ttsApiKey: s.ttsApiKey || openAiKey,
   });
 
   const emit = (e: AppEvent) => {
@@ -60,12 +75,15 @@ app.whenReady().then(async () => {
   const ai = createLeadAi(getSettings, llm, new JevQualifier(getSettings));
   const spinner = new LlmSpinner(getSettings);
   const managerAi = new OpenAiManagerAi(getSettings);
+  const speech = new OpenAiSpeech(getSettings, dataDir);
   const handlers = createApp({
     db,
     engine,
     ai,
     manager: managerAi,
     spinner,
+    speech,
+    dataDir,
     emit,
     openExternal: (url) => shell.openExternal(url),
   });

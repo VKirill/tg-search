@@ -1,17 +1,26 @@
 import type { Source } from '../../shared/types';
+import type { SpeechService } from '../ai/speech';
 import type { TgMessage } from '../telegram/types';
+import { transcribeIncomingVoice } from '../voice/incoming';
 import {
   filterIncomingMessages,
   qualifyAndAddLeads,
   type ScannerDeps,
 } from './scanner';
 
+export interface RealtimeDeps extends ScannerDeps {
+  speech?: SpeechService;
+  dataDir?: string;
+}
+
 const FLUSH_MS = 3000;
 const FLUSH_MAX = 20;
 
 type Buffered = { msg: TgMessage; sourceId: number };
 
-export function createRealtime(deps: ScannerDeps) {
+const MAX_VOICE_SEC = 90;
+
+export function createRealtime(deps: RealtimeDeps) {
   const buffers = new Map<number, Map<string, Buffered>>();
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -90,9 +99,7 @@ export function createRealtime(deps: ScannerDeps) {
     return pending;
   }
 
-  async function onChatMessage(accountId: number, msg: TgMessage) {
-    if (msg.isOutgoing) return;
-    if (msg.text.trim().length < 15) return;
+  async function bufferMessage(accountId: number, msg: TgMessage) {
     const projects = deps.db
       .listProjects()
       .filter((p) => p.accountIds.length === 0 || p.accountIds.includes(accountId));
@@ -112,9 +119,39 @@ export function createRealtime(deps: ScannerDeps) {
     }
   }
 
+  async function onVoiceMessage(accountId: number, msg: TgMessage) {
+    if (!deps.speech || !deps.dataDir || !msg.voice || msg.voice.durationSec > MAX_VOICE_SEC) return;
+    const projects = deps.db
+      .listProjects()
+      .filter((p) => p.accountIds.length === 0 || p.accountIds.includes(accountId));
+    const projectId = projects[0]?.id ?? null;
+    const { text } = await transcribeIncomingVoice({
+      dataDir: deps.dataDir,
+      engine: deps.engine,
+      speech: deps.speech,
+      accountId,
+      msg,
+      emit: projectId != null ? deps.emit : undefined,
+      projectId: projectId ?? undefined,
+    });
+    await bufferMessage(accountId, { ...msg, text });
+  }
+
+  async function onChatMessage(accountId: number, msg: TgMessage) {
+    if (msg.isOutgoing) return;
+    if (msg.senderIsBot) return;
+    if (msg.voice) return;
+    if (msg.text.trim().length < 15) return;
+    await bufferMessage(accountId, msg);
+  }
+
   return {
     start() {
       deps.engine.onChatMessage((accountId, msg) => {
+        if (msg.voice && !msg.isOutgoing) {
+          onVoiceMessage(accountId, msg).catch((err) => console.error('realtime voice', msg.chatId, err));
+          return;
+        }
         onChatMessage(accountId, msg).catch((err) => console.error('realtime message', msg.chatId, err));
       });
     },

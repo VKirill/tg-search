@@ -16,7 +16,10 @@ import {
 } from './pipeline/accounts';
 import { discover } from './pipeline/discovery';
 import { scan } from './pipeline/scanner';
-import { draftReply, sendMessage } from './pipeline/outreach';
+import type { SpeechService } from './ai/speech';
+import { writeCallRecording } from './media';
+import { draftReply, sendMessage, sendVoiceMessage } from './pipeline/outreach';
+import { transcribeIncomingVoice } from './voice/incoming';
 import { createAutopilot } from './pipeline/autopilot';
 import { createRealtime } from './pipeline/realtime';
 import { createImporter } from './pipeline/importer';
@@ -30,6 +33,8 @@ export interface AppDeps {
   ai: LeadAi;
   manager?: ManagerAi;
   spinner?: TextSpinner;
+  speech: SpeechService;
+  dataDir: string;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
 }
@@ -37,14 +42,14 @@ export interface AppDeps {
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
 
 export function createApp(deps: AppDeps): AppHandlers {
-  const { db, engine, ai, emit, openExternal } = deps;
+  const { db, engine, ai, emit, openExternal, speech, dataDir } = deps;
   const manager = deps.manager ?? stubManagerAi();
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, emit, manager };
+  const pipeline = { db, engine, ai, speech, emit, manager };
   const autopilot = createAutopilot(pipeline);
   const managerAgent = createManagerAgent({ ...pipeline, manager });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
-  const realtime = createRealtime(pipeline);
+  const realtime = createRealtime({ ...pipeline, dataDir });
   const importer = createImporter({ db, engine, emit });
 
   return {
@@ -52,26 +57,51 @@ export function createApp(deps: AppDeps): AppHandlers {
       const ids = db.listAccounts().filter((a) => a.status === 'authorized').map((a) => a.id);
       await engine.init(ids);
       engine.onPrivateMessage((accountId, msg) => {
-        if (msg.senderUserId == null) return;
-        const leads = db.findLeadsByAuthor(msg.senderUserId);
-        if (leads.length === 0) return;
-        const lead = leads[0];
-        const message = db.addMessage({
-          leadId: lead.id,
-          accountId,
-          direction: 'in',
-          where: 'dm',
-          text: msg.text,
-          tgChatId: msg.chatId,
-          tgMessageId: msg.messageId,
-          date: msg.date,
-          auto: false,
-        });
-        stopChainOnIncoming(db, lead.id);
-        const updated = db.updateLead(lead.id, { status: 'dialog' });
-        emit({ type: 'message:new', message });
-        emit({ type: 'lead:update', lead: updated });
-        managerAgent.onIncoming(lead.id);
+        void (async () => {
+          if (msg.senderUserId == null) return;
+          const leads = db.findLeadsByAuthor(msg.senderUserId);
+          if (leads.length === 0) return;
+          const lead = leads[0];
+          const project = db.getProject(lead.projectId);
+          let text = msg.text;
+          let kind: import('../shared/types').MessageKind = 'text';
+          let mediaPath: string | null = null;
+          let durationSec: number | null = null;
+          if (msg.voice) {
+            const ingested = await transcribeIncomingVoice({
+              dataDir,
+              engine,
+              speech,
+              accountId,
+              msg,
+              emit,
+              projectId: project.id,
+            });
+            text = ingested.text;
+            mediaPath = ingested.mediaPath;
+            durationSec = ingested.durationSec;
+            kind = 'voice';
+          }
+          const message = db.addMessage({
+            leadId: lead.id,
+            accountId,
+            direction: 'in',
+            where: 'dm',
+            kind,
+            text,
+            mediaPath,
+            durationSec,
+            tgChatId: msg.chatId,
+            tgMessageId: msg.messageId,
+            date: msg.date,
+            auto: false,
+          });
+          stopChainOnIncoming(db, lead.id);
+          const updated = db.updateLead(lead.id, { status: 'dialog' });
+          emit({ type: 'message:new', message });
+          emit({ type: 'lead:update', lead: updated });
+          managerAgent.onIncoming(lead.id);
+        })().catch((err) => console.error('private message', err));
       });
       realtime.start();
       autopilot.start();
@@ -203,16 +233,49 @@ export function createApp(deps: AppDeps): AppHandlers {
       board: async (projectId) => db.listCardLeads(projectId).map((lead) => ({ lead, card: db.getCard(lead.id) })),
     },
     voice: {
-      send: async () => {
-        throw new Error('not implemented'); // voice worker
-      },
-      preview: async () => {
-        throw new Error('not implemented'); // voice worker
+      send: (leadId, text, where) => sendVoiceMessage(pipeline, leadId, text, where, false),
+      preview: async (text) => {
+        const { path } = await speech.synthesize(text);
+        return path;
       },
     },
     calls: {
-      save: async () => {
-        throw new Error('not implemented'); // voice worker
+      save: async (leadId, audio, mimeType, durationSec) => {
+        const lead = db.getLead(leadId);
+        const mediaPath = writeCallRecording(dataDir, leadId, audio, mimeType);
+        let transcript = '';
+        const prep = await speech.prepareForStt(mediaPath);
+        try {
+          transcript = await speech.transcribe(prep.path);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          transcript = '[созвон, не удалось расшифровать]';
+          emit({
+            type: 'job',
+            projectId: lead.projectId,
+            stage: 'Расшифровка созвона',
+            done: true,
+            error,
+          });
+        } finally {
+          await prep.cleanup();
+        }
+        const message = db.addMessage({
+          leadId,
+          accountId: lead.accountId,
+          direction: 'out',
+          where: 'dm',
+          kind: 'call',
+          text: transcript,
+          mediaPath,
+          durationSec,
+          tgChatId: lead.tgChatId,
+          tgMessageId: null,
+          date: Date.now(),
+          auto: false,
+        });
+        emit({ type: 'message:new', message });
+        return message;
       },
     },
     manager: {
