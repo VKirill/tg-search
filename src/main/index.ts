@@ -5,6 +5,8 @@ import { Db } from './db';
 import { TdlEngine } from './telegram/engine';
 import { OpenAiLeadAi } from './ai/leadAi';
 import { LlmSpinner } from './ai/spinner';
+import { JevQualifier } from './ai/jev';
+import { createLeadAi } from './ai/hybrid';
 import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
@@ -42,12 +44,15 @@ app.whenReady().then(async () => {
     tgApiId: s.tgApiId || process.env.TG_API_ID || '',
     tgApiHash: s.tgApiHash || process.env.TG_API_HASH || '',
     llmApiKey: s.llmApiKey || process.env.OPENROUTER_API_KEY || '',
+    jevApiKey: s.jevApiKey || process.env.OPENLUX_API_KEY || '',
   });
 
   const emit = (e: AppEvent) => win?.webContents.send(EVENT_CHANNEL, e);
   const engine = new TdlEngine(join(dataDir, 'tdlib'), () => db.getSettings());
-  const ai = new OpenAiLeadAi(() => db.getSettings());
-  const spinner = new LlmSpinner(() => db.getSettings());
+  const getSettings = () => db.getSettings();
+  const llm = new OpenAiLeadAi(getSettings);
+  const ai = createLeadAi(getSettings, llm, new JevQualifier(getSettings));
+  const spinner = new LlmSpinner(getSettings);
   const handlers = createApp({ db, engine, ai, spinner, emit, openExternal: (url) => shell.openExternal(url) });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {
