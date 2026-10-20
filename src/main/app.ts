@@ -2,7 +2,9 @@
 
 import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
-import type { LeadAi } from './ai/types';
+import type { LeadAi, TextSpinner } from './ai/types';
+import { passthroughSpinner } from './ai/spinner';
+import { createBroadcaster } from './pipeline/broadcaster';
 import type { Api, AppEvent, AutopilotSettings, ProjectInput } from '../shared/types';
 import {
   removeAccount,
@@ -20,6 +22,7 @@ export interface AppDeps {
   db: Db;
   engine: TelegramEngine;
   ai: LeadAi;
+  spinner?: TextSpinner;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
 }
@@ -28,8 +31,10 @@ export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(
 
 export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, emit, openExternal } = deps;
+  const spinner = deps.spinner ?? passthroughSpinner;
   const pipeline = { db, engine, ai, emit };
   const autopilot = createAutopilot(pipeline);
+  const broadcaster = createBroadcaster({ db, engine, spinner, emit });
 
   return {
     async start() {
@@ -56,9 +61,11 @@ export function createApp(deps: AppDeps): AppHandlers {
         emit({ type: 'lead:update', lead: updated });
       });
       autopilot.start();
+      broadcaster.start();
     },
 
     async stop() {
+      broadcaster.stop();
       autopilot.stop();
       await engine.close();
     },
@@ -153,16 +160,10 @@ export function createApp(deps: AppDeps): AppHandlers {
 
     broadcasts: {
       list: async () => db.listBroadcasts(),
-      create: async () => {
-        throw new Error('not implemented'); // broadcast worker
-      },
-      update: async () => {
-        throw new Error('not implemented'); // broadcast worker
-      },
-      remove: async (id) => db.removeBroadcast(id),
-      runNow: async () => {
-        throw new Error('not implemented'); // broadcast worker
-      },
+      create: (input) => broadcaster.create(input),
+      update: (id, patch) => broadcaster.update(id, patch),
+      remove: (id) => broadcaster.remove(id),
+      runNow: (id) => broadcaster.runNow(id),
     },
     shell: { openExternal: (url) => openExternal(url) },
   };

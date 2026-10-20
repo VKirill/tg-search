@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiLeadAi } from '../src/main/ai/leadAi';
 import { chatCompletion, parseJsonFromLlm } from '../src/main/ai/llm';
+import { LlmSpinner } from '../src/main/ai/spinner';
 import { DEFAULT_AUTOPILOT, type Lead, type Project, type Settings } from '../src/shared/types';
 import type { TgMessage } from '../src/main/telegram/types';
 
@@ -263,5 +264,23 @@ describe('OpenAiLeadAi', () => {
     });
     expect(n).toBe(2);
     expect(words).toEqual(['ищу сайт', 'нужен бот']);
+  });
+});
+
+describe('LlmSpinner', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns spun text from JSON response', async () => {
+    vi.stubGlobal('fetch', mockFetchJson(completionBody('{"text":"Вариант текста"}')));
+    const spinner = new LlmSpinner(baseSettings);
+    await expect(spinner.spin('Исходный текст @shop 100₽')).resolves.toBe('Вариант текста');
+  });
+
+  it('throws on invalid JSON shape', async () => {
+    vi.stubGlobal('fetch', mockFetchJson(completionBody('{"oops":1}')));
+    const spinner = new LlmSpinner(baseSettings);
+    await expect(spinner.spin('x')).rejects.toThrow('неверный формат text');
   });
 });
