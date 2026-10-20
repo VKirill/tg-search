@@ -1,0 +1,41 @@
+{
+  "name": "tg-search",
+  "productName": "TG Search",
+  "version": "0.1.0",
+  "private": true,
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dist": "electron-vite build && electron-builder --mac dmg"
+  },
+  "dependencies": {
+    "prebuilt-tdlib": "^0.1008067.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tdl": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.9.2",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  },
+  "allowScripts": {
+    "bufferutil": false,
+    "electron-winstaller": false,
+    "es5-ext": false,
+    "utf-8-validate": false,
+    "fsevents@2.3.3": true,
+    "tdl@8.1.0": true
+  }
+}
