@@ -4,6 +4,7 @@ import type { LeadAi } from '../ai/types';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
 import { afterSend, canSend, limiterErrorMessage } from './limiter';
+import { maybeStartChainAfterFirstSend } from './sequence';
 
 export interface OutreachDeps {
   db: Db;
@@ -89,6 +90,7 @@ export async function sendMessage(
   });
 
   const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
+  if (lead.sequenceStep === 0) maybeStartChainAfterFirstSend(deps.db, leadId, now);
   const account = deps.db.getAccount(accountId);
   const patched = deps.db.updateAccount(accountId, afterSend(account, now));
 
