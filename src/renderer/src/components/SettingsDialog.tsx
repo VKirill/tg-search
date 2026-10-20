@@ -63,7 +63,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       </div>
       <div className="field">
         <label>api_hash</label>
-        <input value={s.tgApiHash} onChange={(e) => setS({ ...s, tgApiHash: e.target.value })} />
+        <input type="password" autoComplete="off" value={s.tgApiHash} onChange={(e) => setS({ ...s, tgApiHash: e.target.value })} />
       </div>
       <div className="field">
         <label>LLM base URL</label>

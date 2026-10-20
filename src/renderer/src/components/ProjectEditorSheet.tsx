@@ -194,7 +194,7 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
                   {sandboxOut && <div className="sandbox__last">{sandboxOut}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input style={{ flex: 1 }} value={sandboxIn} onChange={(e) => setSandboxIn(e.target.value)} placeholder="Сообщение клиента…" onKeyDown={(e) => e.key === 'Enter' && managerTest()} />
+                  <input className="text-input" style={{ flex: 1 }} value={sandboxIn} onChange={(e) => setSandboxIn(e.target.value)} placeholder="Сообщение клиента…" onKeyDown={(e) => e.key === 'Enter' && managerTest()} />
                   <button type="button" className="btn btn--sm" onClick={managerTest}>Отправить</button>
                 </div>
               </div>
@@ -279,7 +279,7 @@ function ChainEditor({ sequence, onChange }: { sequence: SequenceStep[]; onChang
               <option value="ai">ИИ-инструкция</option>
             </select>
           </div>
-          <textarea value={step.text} onChange={(e) => update(i, { ...step, text: e.target.value })} rows={3} />
+          <textarea className="text-input" value={step.text} onChange={(e) => update(i, { ...step, text: e.target.value })} rows={3} />
           <div className="chip-row">
             {['{name}', '{request}'].map((c) => (
               <button key={c} type="button" className="chip" onClick={() => update(i, { ...step, text: step.text + c })}>{c}</button>

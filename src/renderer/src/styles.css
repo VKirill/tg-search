@@ -738,6 +738,7 @@ select {
   margin-bottom: 6px;
 }
 
+.text-input,
 .field input,
 .field textarea,
 .field select {
@@ -1574,4 +1575,16 @@ select {
   max-height: 200px;
   overflow-y: auto;
   margin-bottom: var(--space-2);
+}
+
+/* Variable chips under chain step texts are buttons: reset native button look */
+button.chip {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+button.chip:hover {
+  color: var(--text);
 }

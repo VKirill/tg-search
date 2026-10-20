@@ -17,6 +17,18 @@ Projects ─▶ Leads (AI score, 👍/👎) ─▶ Dialog (DM or reply in chat)
    Your 👍/👎 become examples for later qualification.
 4. **Reply**: AI draft or full autopilot to DM or the chat, with a daily limit and pauses per account.
 
+## Screens
+
+| Dialog with voice and CRM card | Handoff with a recorded call |
+|---|---|
+| ![](docs/screens/dialog-voice.png) | ![](docs/screens/handoff-call.png) |
+| **Pipeline** | **Topic: outreach chain** |
+| ![](docs/screens/funnel.png) | ![](docs/screens/topic-chain.png) |
+| **Topic: AI manager + sandbox** | **Broadcasts** |
+| ![](docs/screens/topic-manager.png) | ![](docs/screens/broadcasts.png) |
+
+Screens show the demo data (`npx vite src/renderer --port 5180` runs the UI with a mock API).
+
 ## Run
 
 ```sh

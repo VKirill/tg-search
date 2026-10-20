@@ -54,7 +54,7 @@ export function SettingsView() {
         <section>
           <h2 className="section-title">Telegram</h2>
           <div className="field"><label>api_id</label><input value={s.tgApiId} onChange={(e) => setS({ ...s, tgApiId: e.target.value })} /></div>
-          <div className="field"><label>api_hash</label><input value={s.tgApiHash} onChange={(e) => setS({ ...s, tgApiHash: e.target.value })} /></div>
+          <div className="field"><label>api_hash</label><input type="password" autoComplete="off" value={s.tgApiHash} onChange={(e) => setS({ ...s, tgApiHash: e.target.value })} /></div>
         </section>
         <section>
           <h2 className="section-title">Владелец</h2>
