@@ -9,6 +9,24 @@ export type ChatCompletionOptions = {
   jsonObject?: boolean;
 };
 
+/** Per-call LLM endpoint; empty fields fall back to global Settings. */
+export type LlmOverride = {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+};
+
+function settingsWithOverride(getSettings: () => Settings, override?: LlmOverride): Settings {
+  if (!override) return getSettings();
+  const s = getSettings();
+  return {
+    ...s,
+    llmBaseUrl: override.baseUrl?.trim() || s.llmBaseUrl,
+    llmApiKey: override.apiKey?.trim() || s.llmApiKey,
+    llmModel: override.model?.trim() || s.llmModel,
+  };
+}
+
 const REQUEST_TIMEOUT_MS = 60_000;
 const RETRY_DELAYS_MS = [500, 2000];
 const ATTRIBUTION = {
@@ -98,8 +116,9 @@ export async function chatCompletion(
   getSettings: () => Settings,
   messages: LlmMessage[],
   options: ChatCompletionOptions = {},
+  override?: LlmOverride,
 ): Promise<string> {
-  const settings = getSettings();
+  const settings = settingsWithOverride(getSettings, override);
   requireApiKey(settings);
 
   let lastErr: unknown;
@@ -126,14 +145,15 @@ export async function chatJsonCompletion(
   getSettings: () => Settings,
   messages: LlmMessage[],
   options: ChatCompletionOptions = {},
+  override?: LlmOverride,
 ): Promise<unknown> {
   const opts = { ...options, jsonObject: true };
-  const text = await chatCompletion(getSettings, messages, opts);
+  const text = await chatCompletion(getSettings, messages, opts, override);
   try {
     return parseJsonFromLlm(text);
   } catch (e) {
     if (!(e instanceof SyntaxError)) throw e;
-    const retryText = await chatCompletion(getSettings, messages, opts);
+    const retryText = await chatCompletion(getSettings, messages, opts, override);
     return parseJsonFromLlm(retryText);
   }
 }
