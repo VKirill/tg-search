@@ -7,25 +7,17 @@ import {
   leadLabelTag,
   leadStatusTag,
 } from '../utils/format';
-import {
-  IconFilterHidden,
-  IconFilterLiked,
-  IconFilterReplied,
-  IconSearch,
-  IconSort,
-  IconThumbDown,
-  IconThumbUp,
-} from './Icons';
+import { IconSearch, IconSort, IconThumbDown, IconThumbUp } from './Icons';
 
 export type LeadSort = 'newest' | 'score';
+export type LeadFilterChip = 'new' | 'handoff' | 'dialog' | 'replied' | 'hidden' | null;
 export type LeadFilters = {
-  likedOnly: boolean;
-  repliedOnly: boolean;
-  showHidden: boolean;
+  chip: LeadFilterChip;
   sort: LeadSort;
 };
 
 type LeadsPanelProps = {
+  title?: string;
   leads: Lead[];
   sources: Source[];
   selectedLeadId: number | null;
@@ -41,6 +33,7 @@ type LeadsPanelProps = {
 };
 
 export function LeadsPanel({
+  title = 'Лиды',
   leads,
   sources,
   selectedLeadId,
@@ -54,12 +47,7 @@ export function LeadsPanel({
   onSelect,
   onFeedback,
 }: LeadsPanelProps) {
-  let list = [...leads];
-  if (filters.likedOnly) list = list.filter((l) => l.feedback === 'up');
-  if (filters.repliedOnly) list = list.filter((l) => l.status === 'replied' || l.status === 'dialog');
-  if (!filters.showHidden) list = list.filter((l) => l.status !== 'hidden');
-  if (filters.sort === 'score') list.sort((a, b) => b.score - a.score);
-  else list.sort((a, b) => b.date - a.date);
+  const list = [...leads];
 
   const sourceTitle = (sourceId: number | null) => {
     if (!sourceId) return '—';
@@ -72,7 +60,7 @@ export function LeadsPanel({
 
   return (
     <section className="panel panel--leads">
-      <div className="panel-header">Лиды</div>
+      <div className="panel-header">{title}</div>
       <div className="search-row">
         <div className="search-field">
           <IconSearch size={14} />
@@ -85,34 +73,23 @@ export function LeadsPanel({
         </div>
       </div>
       <div className="leads-toolbar no-drag">
-        <div className="filter-group">
-          <button
-            type="button"
-            className={`icon-btn${filters.likedOnly ? ' icon-btn--active' : ''}`}
-            onClick={() => onFilters({ ...filters, likedOnly: !filters.likedOnly })}
-            title="Только с оценкой «нравится»"
-            aria-label="Только понравившиеся"
-          >
-            <IconFilterLiked active={filters.likedOnly} />
-          </button>
-          <button
-            type="button"
-            className={`icon-btn${filters.repliedOnly ? ' icon-btn--active' : ''}`}
-            onClick={() => onFilters({ ...filters, repliedOnly: !filters.repliedOnly })}
-            title="С ответом"
-            aria-label="С ответом"
-          >
-            <IconFilterReplied active={filters.repliedOnly} />
-          </button>
-          <button
-            type="button"
-            className={`icon-btn${filters.showHidden ? ' icon-btn--active' : ''}`}
-            onClick={() => onFilters({ ...filters, showHidden: !filters.showHidden })}
-            title="Показать скрытые"
-            aria-label="Скрытые"
-          >
-            <IconFilterHidden active={filters.showHidden} />
-          </button>
+        <div className="filter-chips">
+          {([
+            ['new', 'Новые'],
+            ['handoff', 'Нужен человек'],
+            ['dialog', 'Диалог'],
+            ['replied', 'Отвечено'],
+            ['hidden', 'Скрытые'],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip${filters.chip === id ? ' filter-chip--active' : ''}`}
+              onClick={() => onFilters({ ...filters, chip: filters.chip === id ? null : id })}
+            >
+              {label}
+            </button>
+          ))}
           <button type="button" className="icon-btn" onClick={toggleSort} title="Сортировка" aria-label="Сортировка">
             <IconSort />
           </button>
@@ -149,6 +126,10 @@ export function LeadsPanel({
                 <span className="score-badge">{lead.score}%</span>
               </div>
               <p className="lead-card__text">{lead.text}</p>
+              <div className="lead-card__badges">
+                {lead.handoff && <span className="tag tag--warn">передача</span>}
+                {lead.sequenceStep > 0 && lead.nextStepAt && <span className="tag">цепочка {lead.sequenceStep}</span>}
+              </div>
               <div className="lead-card__row">
                 <div className="tags">
                   <span className="tag">{leadLabelTag(lead.label)}</span>
