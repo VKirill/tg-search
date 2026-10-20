@@ -6,7 +6,18 @@ import { createAutopilot } from '../src/main/pipeline/autopilot';
 import { discover } from '../src/main/pipeline/discovery';
 import { scan } from '../src/main/pipeline/scanner';
 import { sendMessage } from '../src/main/pipeline/outreach';
-import { FakeAi, FakeEngine, makeChat, makeMsg } from './fakes';
+import { FakeAi, FakeEngine, FakeSpeech, makeChat, makeMsg } from './fakes';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+function testAppDeps(extra: Record<string, unknown> = {}) {
+  return {
+    speech: new FakeSpeech(),
+    dataDir: mkdtempSync(join(tmpdir(), 'tg-test-')),
+    ...extra,
+  };
+}
 import type { AppEvent } from '../src/shared/types';
 
 function setupPipeline() {
@@ -277,7 +288,14 @@ describe('autopilot', () => {
 describe('incoming private messages', () => {
   it('attaches to the newest lead by author', async () => {
     const { db, engine, emit, acc, project } = setupPipeline();
-    const app = createApp({ db, engine, ai: new FakeAi(), emit, openExternal: async () => {} });
+    const app = createApp({
+      db,
+      engine,
+      ai: new FakeAi(),
+      emit,
+      openExternal: async () => {},
+      ...testAppDeps(),
+    });
     await app.start();
 
     const older = db.addLead({

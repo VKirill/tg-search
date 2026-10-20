@@ -106,7 +106,7 @@ describe('createRealtime', () => {
     for (let i = 1; i <= 20; i++) {
       engine.emitChat(1, makeMsg(chatId, i, `сообщение ${i} с достаточной длиной`));
     }
-    await Promise.resolve();
+    await vi.waitFor(() => ai.qualifyCalls === 1);
     expect(ai.qualifyCalls).toBe(1);
     rt.stop();
   });

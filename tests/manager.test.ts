@@ -4,7 +4,14 @@ import { createApp } from '../src/main/app';
 import { createManagerAgent } from '../src/main/pipeline/managerAgent';
 import { Db } from '../src/main/db';
 import { DEFAULT_MANAGER } from '../src/shared/types';
-import { FakeAi, FakeEngine, FakeManager, makeMsg } from './fakes';
+import { FakeAi, FakeEngine, FakeManager, FakeSpeech, makeMsg } from './fakes';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+function testAppDeps() {
+  return { speech: new FakeSpeech(), dataDir: mkdtempSync(join(tmpdir(), 'tg-test-')) };
+}
 
 function setupManager() {
   const db = new Db(':memory:');
@@ -213,7 +220,15 @@ describe('OpenAiManagerAi', () => {
 describe('manager.test API', () => {
   it('returns parsed manager reply', async () => {
     const { db, engine, manager } = setupManager();
-    const app = createApp({ db, engine, ai: new FakeAi(), manager, emit: () => {}, openExternal: async () => {} });
+    const app = createApp({
+      db,
+      engine,
+      ai: new FakeAi(),
+      manager,
+      emit: () => {},
+      openExternal: async () => {},
+      ...testAppDeps(),
+    });
     manager.replyResult = { reply: 'Тест', handoff: false, reason: '' };
     const project = db.listProjects()[0];
     const result = await app.manager.test(project.id, 'Запрос', [{ direction: 'out', text: 'Мы пишем' }]);
@@ -235,6 +250,7 @@ describe('app private message', () => {
       manager,
       emit: (e) => events.push(e),
       openExternal: async () => {},
+      ...testAppDeps(),
     });
     await app.start();
     engine.emitPrivate(acc.id, makeMsg(500, 10, 'Ответ лида', { senderUserId: lead.authorUserId! }));

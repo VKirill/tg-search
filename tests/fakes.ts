@@ -1,6 +1,7 @@
 import type { AccountStatus, Lead, Project } from '../src/shared/types';
 import type { DialogTurn, LeadAi, ManagerAi, Qualification } from '../src/main/ai/types';
 import type { ManagerTestResult } from '../src/shared/types';
+import type { SpeechService } from '../src/main/ai/speech';
 import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from '../src/main/telegram/types';
 
 export class FakeEngine implements TelegramEngine {
@@ -90,6 +91,10 @@ export class FakeEngine implements TelegramEngine {
   async joinChat(_accountId: number, chatId: number): Promise<void> {
     this.joinCalls.push(chatId);
     this.mustJoin.delete(chatId);
+  }
+
+  async ensurePrivateChat(_accountId: number, userId: number): Promise<number> {
+    return userId;
   }
 
   async sendDirect(accountId: number, userId: number, text: string): Promise<TgMessage> {
@@ -228,6 +233,25 @@ export class FakeManager implements ManagerAi {
   async reply(_project: Project, _lead: Lead, _history: DialogTurn[]): Promise<ManagerTestResult> {
     this.replyCalls++;
     return this.replyResult;
+  }
+}
+
+export class FakeSpeech implements SpeechService {
+  transcribeResult = 'тестовая расшифровка';
+  synthesizeResult = { path: '/tmp/fake-voice.ogg', durationSec: 3 };
+  transcribeCalls: string[] = [];
+  synthesizeCalls: string[] = [];
+
+  async transcribe(filePath: string): Promise<string> {
+    this.transcribeCalls.push(filePath);
+    return this.transcribeResult;
+  }
+  async synthesize(text: string): Promise<{ path: string; durationSec: number }> {
+    this.synthesizeCalls.push(text);
+    return this.synthesizeResult;
+  }
+  async prepareForStt(inputPath: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
+    return { path: inputPath, cleanup: async () => {} };
   }
 }
 
