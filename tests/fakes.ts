@@ -7,7 +7,7 @@ import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from '../
 export class FakeEngine implements TelegramEngine {
   chats = new Map<number, TgChat>();
   history = new Map<string, TgMessage[]>();
-  searchChats: TgChat[] = [];
+  publicChats: TgChat[] = []; // results of searchPublicChats
   searchPosts: TgMessage[] = [];
   searchMsgs: TgMessage[] = [];
   me: TgMe = {
@@ -43,7 +43,7 @@ export class FakeEngine implements TelegramEngine {
   }
 
   async searchPublicChats(_accountId: number, _query: string): Promise<TgChat[]> {
-    return this.searchChats;
+    return this.publicChats;
   }
   async searchPublicPosts(_accountId: number, _query: string, _limit: number): Promise<TgMessage[]> {
     return this.searchPosts;
@@ -170,6 +170,20 @@ export class FakeEngine implements TelegramEngine {
     const path = this.files.get(fileId);
     if (!path) throw new Error(`file ${fileId}`);
     return path;
+  }
+
+  async listChats(_accountId: number, _limit: number) {
+    return [...this.chats.values()].map((chat) => ({ chat, unreadCount: 0, last: null }));
+  }
+  async getMessagesBefore(_accountId: number, chatId: number, _before: number | null, limit: number): Promise<TgMessage[]> {
+    return (this.history.get(String(chatId)) ?? []).slice(-limit);
+  }
+  async searchChats(_accountId: number, query: string): Promise<TgChat[]> {
+    return [...this.chats.values()].filter((c) => c.title.toLowerCase().includes(query.toLowerCase()));
+  }
+  leftChats: number[] = [];
+  async leaveChat(_accountId: number, chatId: number): Promise<void> {
+    this.leftChats.push(chatId);
   }
 
   private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;

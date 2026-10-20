@@ -20,7 +20,8 @@ import {
 import { discover } from './pipeline/discovery';
 import { scan } from './pipeline/scanner';
 import type { SpeechService } from './ai/speech';
-import { writeCallRecording } from './media';
+import { mediaUrlFromPath, storeMediaCopy, writeCallRecording } from './media';
+import type { TgChat, TgMessage } from './telegram/types';
 import { draftReply, sendMessage, sendVoiceMessage } from './pipeline/outreach';
 import { transcribeIncomingVoice } from './voice/incoming';
 import { createAutopilot } from './pipeline/autopilot';
@@ -324,6 +325,37 @@ export function createApp(deps: AppDeps): AppHandlers {
       remove: (id) => broadcaster.remove(id),
       runNow: (id) => broadcaster.runNow(id),
     },
+    chats: {
+      list: async (accountId) =>
+        (await engine.listChats(accountId, 300)).map(({ chat, unreadCount, last }) => ({
+          ...chatInfo(chat), unreadCount, lastText: last?.text ?? null, lastDate: last?.date ?? null,
+        })),
+      history: async (accountId, chatId, before) =>
+        (await engine.getMessagesBefore(accountId, chatId, before ?? null, 50)).map(chatItem),
+      // Manual messages from the «Чаты» section are the owner typing, not outreach: no limiter (docs/decisions.md)
+      send: async (accountId, chatId, text, replyTo) =>
+        chatItem(replyTo ? await engine.replyInChat(accountId, chatId, replyTo, text) : await engine.sendToChat(accountId, chatId, text)),
+      search: async (accountId, query) => (await engine.searchChats(accountId, query)).map(chatInfo),
+      join: async (accountId, target) => {
+        const chat = typeof target === 'number' ? await engine.getChat(accountId, target) : await engine.resolveChat(accountId, target);
+        if (!chat.isMember) await engine.joinChat(accountId, chat.chatId);
+        return chatInfo(await engine.getChat(accountId, chat.chatId));
+      },
+      leave: (accountId, chatId) => engine.leaveChat(accountId, chatId),
+      media: async (accountId, fileId) =>
+        mediaUrlFromPath(storeMediaCopy(dataDir, await engine.downloadFile(accountId, fileId), `chat-${fileId}`)),
+    },
     shell: { openExternal: (url) => openExternal(url) },
+  };
+}
+
+function chatInfo(c: TgChat) {
+  return { chatId: c.chatId, title: c.title, username: c.username, kind: c.kind, memberCount: c.memberCount, isMember: c.isMember };
+}
+
+function chatItem(m: TgMessage) {
+  return {
+    messageId: m.messageId, date: m.date, text: m.text, senderName: m.senderName, senderUsername: m.senderUsername,
+    isOutgoing: m.isOutgoing, voice: m.voice, replyToMessageId: m.replyToMessageId, link: m.link,
   };
 }

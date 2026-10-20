@@ -5,7 +5,7 @@
 
 import { protocol } from 'electron';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, resolve, sep } from 'node:path';
 
 const SCHEME = 'tgmedia';
 
@@ -62,14 +62,20 @@ export function registerMediaSchemes(): void {
   ]);
 }
 
-export function registerMediaProtocol(): void {
+// Only files under allowedRoot (the app's userData) are served: the renderer must not read arbitrary files.
+export function registerMediaProtocol(allowedRoot: string): void {
+  const root = resolve(allowedRoot) + sep;
   protocol.registerFileProtocol(SCHEME, (request, callback) => {
     const prefix = `${SCHEME}://local/`;
     if (!request.url.startsWith(prefix)) {
       callback({ error: -2 });
       return;
     }
-    const filePath = decodeURIComponent(request.url.slice(prefix.length));
+    const filePath = resolve(decodeURIComponent(request.url.slice(prefix.length)));
+    if (!filePath.startsWith(root)) {
+      callback({ error: -10 }); // ACCESS_DENIED
+      return;
+    }
     callback({ path: filePath });
   });
 }

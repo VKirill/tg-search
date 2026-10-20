@@ -5,7 +5,10 @@ import type {
   AppEvent,
   AutopilotSettings,
   Broadcast,
+  ChatInfo,
+  ChatItem,
   ChatMessage,
+  ChatSummary,
   ClientCard,
   Lead,
   LeadFilter,
@@ -446,6 +449,33 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockChats: ChatSummary[] = [
+  { chatId: -1001, title: 'Фриланс · заказы на разработку', username: 'freelance_dev_orders', kind: 'supergroup', memberCount: 18420, isMember: true, unreadCount: 12, lastText: 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', lastDate: now - 4 * 60_000 },
+  { chatId: -1002, title: 'Предприниматели · нетворкинг', username: 'biz_networking', kind: 'supergroup', memberCount: 25539, isMember: true, unreadCount: 3, lastText: 'Кто делал интеграцию amoCRM с сайтом? Поделитесь контактом', lastDate: now - 35 * 60_000 },
+  { chatId: -1003, title: 'WordPress for developers', username: 'wp4dev', kind: 'supergroup', memberCount: 4210, isMember: true, unreadCount: 0, lastText: 'Обновил плагин, всё взлетело', lastDate: now - 3 * 3600_000 },
+  { chatId: 501, title: 'Мария Воронцова', username: 'maria_vorontsova', kind: 'private', memberCount: null, isMember: true, unreadCount: 1, lastText: 'Спасибо! Тогда жду ТЗ завтра', lastDate: now - 6 * 3600_000 },
+  { chatId: -1004, title: 'AI и автоматизация бизнеса', username: 'ai_automation_news', kind: 'channel', memberCount: 8857, isMember: true, unreadCount: 7, lastText: 'Разбор: как мы сократили обработку заявок в 3 раза', lastDate: now - 26 * 3600_000 },
+];
+
+const mockPublicChats: ChatInfo[] = [
+  { chatId: -2001, title: 'Ищу разработчика · биржа заказов', username: 'find_developer_chat', kind: 'supergroup', memberCount: 9312, isMember: false },
+  { chatId: -2002, title: 'Telegram-боты: заказы и вакансии', username: 'tg_bots_orders', kind: 'supergroup', memberCount: 5120, isMember: false },
+];
+
+function mockChatItems(chatId: number): ChatItem[] {
+  const base = now - 3 * 3600_000;
+  const lines: [string, string, boolean][] = [
+    ['Олег', 'Всем привет! Кто может сделать лендинг под запуск курса за неделю?', false],
+    ['Анна', 'Посмотрите портфолио у @studio_landing, делали похожее', false],
+    ['Кирилл', 'Олег, могу взяться — напишите в личку детали', true],
+    ['Игорь', 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', false],
+  ];
+  return lines.map(([name, text, out], i) => ({
+    messageId: Math.abs(chatId) * 100 + i + 1, date: base + i * 40 * 60_000, text, senderName: name, senderUsername: null,
+    isOutgoing: out, voice: i === 1 ? { fileId: 9, durationSec: 7 } : null, replyToMessageId: null, link: null,
+  }));
+}
 
 function emptyAnamnesis(): Anamnesis {
   return { task: '', goal: '', audience: '', features: [], integrations: [], stack: [], deadline: '', budget: '', references: [], contacts: '', openQuestions: [] };
@@ -935,6 +965,47 @@ export function createMockApi(): Api {
         await delay(1500);
         emit({ type: 'job', projectId: 0, stage: 'Готово', done: true });
         return { posted: 2, skipped: 1, errors: 0 };
+      },
+    },
+    chats: {
+      async list() {
+        await delay(120);
+        return mockChats.map((c) => ({ ...c }));
+      },
+      async history(_accountId, chatId, before) {
+        await delay(150);
+        const all = mockChatItems(chatId);
+        return before ? all.filter((m) => m.messageId < before) : all;
+      },
+      async send(_accountId, chatId, text, replyTo) {
+        await delay(200);
+        const item: ChatItem = {
+          messageId: Date.now(), date: Date.now(), text, senderName: 'Кирилл', senderUsername: 'kirill_vech', isOutgoing: true,
+          voice: null, replyToMessageId: replyTo ?? null, link: null,
+        };
+        const c = mockChats.find((x) => x.chatId === chatId);
+        if (c) Object.assign(c, { lastText: text, lastDate: item.date });
+        return item;
+      },
+      async search(_accountId, query) {
+        await delay(300);
+        const q = query.toLowerCase();
+        return [...mockChats, ...mockPublicChats].filter((c) => c.title.toLowerCase().includes(q) || (c.username ?? '').includes(q));
+      },
+      async join(_accountId, target) {
+        await delay(400);
+        const c = mockPublicChats.find((x) => x.chatId === target || `@${x.username}` === target) ?? mockPublicChats[0];
+        const joined = { ...c, isMember: true };
+        mockChats.unshift({ ...joined, unreadCount: 0, lastText: null, lastDate: null });
+        return joined;
+      },
+      async leave(_accountId, chatId) {
+        await delay(200);
+        const i = mockChats.findIndex((c) => c.chatId === chatId);
+        if (i >= 0) mockChats.splice(i, 1);
+      },
+      async media() {
+        return mockWavDataUrl();
       },
     },
     shell: {

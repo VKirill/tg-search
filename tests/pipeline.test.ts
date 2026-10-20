@@ -53,7 +53,7 @@ describe('discovery', () => {
     db.updateProject(project.id, { autopilot: { workingListSize: 1 } });
     const c1 = makeChat(101, 'Alpha');
     const c2 = makeChat(102, 'Beta');
-    engine.searchChats = [c1, c2];
+    engine.publicChats = [c1, c2];
     engine.chats.set(101, c1);
     engine.chats.set(102, c2);
     engine.setHistory(101, []);

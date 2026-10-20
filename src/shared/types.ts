@@ -268,6 +268,34 @@ export type AppEvent =
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
+// «Чаты»: manual Telegram client over the work accounts — chat list, history, search, join/leave.
+export interface ChatInfo {
+  chatId: number;
+  title: string;
+  username: string | null;
+  kind: ChatKind;
+  memberCount: number | null;
+  isMember: boolean;
+}
+
+export interface ChatSummary extends ChatInfo {
+  unreadCount: number;
+  lastText: string | null;
+  lastDate: number | null; // unix ms
+}
+
+export interface ChatItem {
+  messageId: number;
+  date: number; // unix ms
+  text: string;
+  senderName: string | null;
+  senderUsername: string | null;
+  isOutgoing: boolean;
+  voice: { fileId: number; durationSec: number } | null;
+  replyToMessageId: number | null;
+  link: string | null;
+}
+
 export interface Api {
   settings: {
     get(): Promise<Settings>;
@@ -339,6 +367,17 @@ export interface Api {
     update(id: number, patch: Partial<BroadcastInput> & { enabled?: boolean }): Promise<Broadcast>;
     remove(id: number): Promise<void>;
     runNow(id: number): Promise<{ posted: number; skipped: number; errors: number }>;
+  };
+  chats: {
+    list(accountId: number): Promise<ChatSummary[]>; // the account's chats, newest activity first
+    // 50 messages older than beforeMessageId (null = newest), oldest first; opens public chats the account is not in
+    history(accountId: number, chatId: number, beforeMessageId?: number | null): Promise<ChatItem[]>;
+    // Manual message as the account; not counted by the outreach limiter
+    send(accountId: number, chatId: number, text: string, replyToMessageId?: number | null): Promise<ChatItem>;
+    search(accountId: number, query: string): Promise<ChatInfo[]>; // the account's chats + public chats/channels
+    join(accountId: number, chatIdOrLink: number | string): Promise<ChatInfo>; // id, @username, t.me link or invite link
+    leave(accountId: number, chatId: number): Promise<void>;
+    media(accountId: number, fileId: number): Promise<string>; // download a voice note; returns a tgmedia:// URL
   };
   shell: {
     openExternal(url: string): Promise<void>;

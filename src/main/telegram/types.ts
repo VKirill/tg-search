@@ -76,6 +76,13 @@ export interface TelegramEngine {
   // Private chat with a user (created if needed); its id is where DMs to that user go.
   ensurePrivateChat(accountId: number, userId: number): Promise<number>;
 
+  // Manual client («Чаты»)
+  listChats(accountId: number, limit: number): Promise<{ chat: TgChat; unreadCount: number; last: TgMessage | null }[]>;
+  // Messages older than beforeMessageId (null = newest), oldest first
+  getMessagesBefore(accountId: number, chatId: number, beforeMessageId: number | null, limit: number): Promise<TgMessage[]>;
+  searchChats(accountId: number, query: string): Promise<TgChat[]>; // own chats + public chats/channels
+  leaveChat(accountId: number, chatId: number): Promise<void>;
+
   // New incoming messages in private chats (lead answers) for all accounts
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;
   // New messages in groups, supergroups and channels the accounts are members of (real-time monitoring).

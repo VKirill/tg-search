@@ -43,7 +43,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  registerMediaProtocol();
+  registerMediaProtocol(app.getPath('userData'));
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     desktopCapturer
       .getSources({ types: ['screen'] })

@@ -369,6 +369,83 @@ export class TdlEngine implements TelegramEngine {
     return await this.mapMessages(slot, collected);
   }
 
+  async listChats(
+    accountId: number,
+    limit: number,
+  ): Promise<{ chat: TgChat; unreadCount: number; last: TgMessage | null }[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    try {
+      await this.invoke(slot, { _: 'loadChats', chat_list: { _: 'chatListMain' }, limit });
+    } catch {
+      // 404 means every chat of the list is already loaded
+    }
+    const { chat_ids } = await this.invoke(slot, { _: 'getChats', chat_list: { _: 'chatListMain' }, limit });
+    const out: { chat: TgChat; unreadCount: number; last: TgMessage | null }[] = [];
+    for (const id of chat_ids) {
+      const td = await this.invoke(slot, { _: 'getChat', chat_id: id });
+      const chat = await this.lightChat(slot, td);
+      const last = td.last_message ? mapMessage(td.last_message, { chatUsername: chat.username }) : null;
+      out.push({ chat, unreadCount: td.unread_count, last });
+    }
+    return out;
+  }
+
+  async getMessagesBefore(
+    accountId: number,
+    chatId: number,
+    beforeMessageId: number | null,
+    limit: number,
+  ): Promise<TgMessage[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.ensureChatAccessible(slot, chatId);
+    const collected: message[] = [];
+    const seenIds = new Set<number>(beforeMessageId ? [beforeMessageId] : []);
+    let fromMessageId = beforeMessageId ?? 0;
+    let emptyPages = 0;
+    while (collected.length < limit) {
+      const page = await this.invoke(slot, {
+        _: 'getChatHistory',
+        chat_id: chatId,
+        from_message_id: fromMessageId,
+        offset: 0,
+        limit: Math.min(100, limit - collected.length + 1),
+        only_local: false,
+      });
+      const fresh = page.messages.filter((m): m is message => m !== null && !seenIds.has(m.id));
+      // TDLib loads history lazily; the start of the chat also ends here after a few empty pages
+      if (!fresh.length) {
+        if (++emptyPages > 3) break;
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
+      emptyPages = 0;
+      for (const m of fresh) {
+        seenIds.add(m.id);
+        collected.push(m);
+      }
+      fromMessageId = fresh[fresh.length - 1].id;
+    }
+    collected.sort((a, b) => a.id - b.id);
+    return await this.mapMessages(slot, collected.slice(-limit));
+  }
+
+  async searchChats(accountId: number, query: string): Promise<TgChat[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const ids = async (q: Promise<{ chat_ids: number[] }>) => (await q.catch(() => ({ chat_ids: [] }))).chat_ids;
+    const own = await ids(this.invoke(slot, { _: 'searchChats', query, limit: 20 }));
+    const pub = await ids(this.invoke(slot, { _: 'searchPublicChats', query }));
+    const out: TgChat[] = [];
+    for (const id of [...new Set([...own, ...pub])].slice(0, 40)) {
+      out.push(await this.lightChat(slot, await this.invoke(slot, { _: 'getChat', chat_id: id })));
+    }
+    return out;
+  }
+
+  async leaveChat(accountId: number, chatId: number): Promise<void> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, { _: 'leaveChat', chat_id: chatId });
+  }
+
   async joinChat(accountId: number, chatId: number): Promise<void> {
     const slot = await this.requireAuthorizedSlot(accountId);
     await this.invoke(slot, { _: 'joinChat', chat_id: chatId });
@@ -668,6 +745,22 @@ export class TdlEngine implements TelegramEngine {
     }
     this.chatUsernameCache.set(tdChat.id, username);
     return username;
+  }
+
+  // Chat without full info requests: enough for lists (no description).
+  private async lightChat(slot: AccountSlot, tdChat: chat): Promise<TgChat> {
+    if (tdChat.type._ === 'chatTypePrivate') {
+      const u = await this.getUserCached(slot, tdChat.type.user_id);
+      return mapChat(tdChat, { username: activeUsername(u.usernames) });
+    }
+    if (tdChat.type._ === 'chatTypeBasicGroup') {
+      const bg = await this.invoke(slot, { _: 'getBasicGroup', basic_group_id: tdChat.type.basic_group_id });
+      return mapChat(tdChat, { basicGroup: bg });
+    }
+    if (tdChat.type._ === 'chatTypeSupergroup') {
+      return mapChat(tdChat, { supergroup: await this.getSupergroupCached(slot, tdChat.type.supergroup_id) });
+    }
+    return mapChat(tdChat);
   }
 
   private async loadTgChat(slot: AccountSlot, chatId: number): Promise<TgChat | null> {
