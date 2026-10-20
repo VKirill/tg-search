@@ -1,4 +1,4 @@
-import type { Lead, ManagerSettings, ManagerTestResult, Project, Settings } from '../../shared/types';
+import type { ClientCard, Lead, ManagerSettings, ManagerTestResult, Project, Settings } from '../../shared/types';
 import { chatCompletion, chatJsonCompletion, type LlmOverride } from './llm';
 import type { DialogTurn, ManagerAi } from './types';
 
@@ -9,7 +9,7 @@ const MANAGER_RULES =
   'и не говори «я не бот». ' +
   'Ответ строго JSON: {"reply": "...", "handoff": true|false, "reason": "короткая причина на русском"}. ' +
   'handoff=true, если цель из промпта достигнута (собраны требования, готов к заказу/оплате, договорились о созвоне), ' +
-  'человек просит человека/договор/смету вне промпта, злится или тема вне компетенции. При handoff=true reply — короткий мост ' +
+  'полнота анамнеза в карточке ≥ 80%, человек просит человека/договор/смету/цену, злится или тема вне компетенции. При handoff=true reply — короткий мост ' +
   '(например «Передаю коллеге, он свяжется в ближайшее время») или пустая строка.';
 
 function materialsText(project: Project): string {
@@ -42,6 +42,33 @@ function llmFromManager(settings: ManagerSettings): LlmOverride {
 
 function effectiveManager(project: Project, override?: ManagerSettings): ManagerSettings {
   return override ? { ...project.manager, ...override } : project.manager;
+}
+
+function cardContext(card?: ClientCard): string {
+  if (!card) return '';
+  const a = card.anamnesis;
+  const known = [
+    a.task.trim() && `Задача: ${a.task.trim()}`,
+    a.goal.trim() && `Цель: ${a.goal.trim()}`,
+    a.audience.trim() && `Аудитория: ${a.audience.trim()}`,
+    a.features.length && `Функционал: ${a.features.join(', ')}`,
+    a.integrations.length && `Интеграции: ${a.integrations.join(', ')}`,
+    a.deadline.trim() && `Срок: ${a.deadline.trim()}`,
+    a.budget.trim() && `Бюджет: ${a.budget.trim()}`,
+    a.contacts.trim() && `Контакты: ${a.contacts.trim()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const questions =
+    a.openQuestions.length > 0
+      ? `Открытые вопросы (спроси по одному, начиная с самого важного):\n${a.openQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+      : 'Открытых вопросов в карточке нет — уточняй задачу, срок и бюджет по ситуации.';
+  return `
+
+Карточка клиента (анамнез):
+${known || 'Пока мало данных.'}
+Полнота анамнеза: ${card.completeness}%
+${questions}`;
 }
 
 function toChatMessages(history: DialogTurn[]): { role: 'user' | 'assistant'; content: string }[] {
@@ -92,9 +119,10 @@ ${hist ? `Уже отправлено:\n${hist}` : ''}`;
     lead: Lead,
     history: DialogTurn[],
     settings?: ManagerSettings,
+    card?: ClientCard,
   ): Promise<ManagerTestResult> {
     const mgr = effectiveManager(project, settings);
-    const system = managerContext(project, mgr, this.getSettings().ownerName);
+    const system = managerContext(project, mgr, this.getSettings().ownerName) + cardContext(card);
     const messages = [
       { role: 'system' as const, content: system },
       ...toChatMessages(history).map((m) => ({ role: m.role, content: m.content })),

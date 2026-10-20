@@ -4,6 +4,9 @@ import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
 import type { DialogTurn, LeadAi, ManagerAi, TextSpinner } from './ai/types';
 import { stubManagerAi } from './ai/manager';
+import { stubCrmAi } from './ai/crm';
+import { createCrm } from './pipeline/crm';
+import type { CrmAi } from './ai/crm';
 import { passthroughSpinner } from './ai/spinner';
 import { createBroadcaster } from './pipeline/broadcaster';
 import type { Api, AppEvent, AutopilotSettings, ProjectInput } from '../shared/types';
@@ -29,6 +32,7 @@ export interface AppDeps {
   engine: TelegramEngine;
   ai: LeadAi;
   manager?: ManagerAi;
+  crmAi?: CrmAi;
   spinner?: TextSpinner;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
@@ -37,12 +41,19 @@ export interface AppDeps {
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
 
 export function createApp(deps: AppDeps): AppHandlers {
-  const { db, engine, ai, emit, openExternal } = deps;
+  const { db, engine, ai, openExternal } = deps;
   const manager = deps.manager ?? stubManagerAi();
+  const crmAi = deps.crmAi ?? stubCrmAi();
+  const crm = createCrm({ db, crmAi, emit: deps.emit });
+  const emit = (e: AppEvent) => {
+    deps.emit(e);
+    if (e.type === 'message:new') crm.onMessage(e.message);
+    if (e.type === 'lead:update') crm.onLeadUpdate(e.lead);
+  };
   const spinner = deps.spinner ?? passthroughSpinner;
   const pipeline = { db, engine, ai, emit, manager };
   const autopilot = createAutopilot(pipeline);
-  const managerAgent = createManagerAgent({ ...pipeline, manager });
+  const managerAgent = createManagerAgent({ ...pipeline, manager, crm });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
   const realtime = createRealtime(pipeline);
   const importer = createImporter({ db, engine, emit });
@@ -84,6 +95,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       importer.stop();
       managerAgent.stop();
       autopilot.stop();
+      crm.stop();
       await engine.close();
     },
 
@@ -185,12 +197,8 @@ export function createApp(deps: AppDeps): AppHandlers {
         emit({ type: 'crm:update', card });
         return card;
       },
-      refresh: async () => {
-        throw new Error('not implemented'); // CRM worker
-      },
-      generateBrief: async () => {
-        throw new Error('not implemented'); // CRM worker
-      },
+      refresh: (leadId) => crm.refresh(leadId),
+      generateBrief: (leadId) => crm.generateBrief(leadId),
       addNote: async (leadId, text) => {
         const lead = db.getLead(leadId);
         const message = db.addMessage({

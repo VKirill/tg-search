@@ -1,4 +1,4 @@
-import type { AccountStatus, Lead, Project } from '../src/shared/types';
+import type { AccountStatus, ClientCard, Lead, Project } from '../src/shared/types';
 import type { DialogTurn, LeadAi, ManagerAi, Qualification } from '../src/main/ai/types';
 import type { ManagerTestResult } from '../src/shared/types';
 import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from '../src/main/telegram/types';
@@ -225,8 +225,17 @@ export class FakeManager implements ManagerAi {
     this.writeStepCalls++;
     return this.writeStepText;
   }
-  async reply(_project: Project, _lead: Lead, _history: DialogTurn[]): Promise<ManagerTestResult> {
+  lastCard: ClientCard | undefined;
+
+  async reply(
+    _project: Project,
+    _lead: Lead,
+    _history: DialogTurn[],
+    _settings?: import('../src/shared/types').ManagerSettings,
+    card?: ClientCard,
+  ): Promise<ManagerTestResult> {
     this.replyCalls++;
+    this.lastCard = card;
     return this.replyResult;
   }
 }
