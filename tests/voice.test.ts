@@ -1,3 +1,4 @@
+import { todayLocal } from '../src/main/pipeline/limiter';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -135,7 +136,7 @@ describe('incoming voice in DM', () => {
 describe('sendVoiceMessage', () => {
   it('uses limiter and stores kind voice', async () => {
     const { db, engine, speech, pipeline, lead, acc } = setupVoice();
-    db.updateAccount(acc.id, { sentToday: 10, sentDay: new Date().toISOString().slice(0, 10) });
+    db.updateAccount(acc.id, { sentToday: 10, sentDay: todayLocal(Date.now()) });
     await expect(sendVoiceMessage(pipeline, lead.id, 'Привет', 'dm')).rejects.toThrow('Дневной лимит');
 
     db.updateAccount(acc.id, { sentToday: 0, sentDay: null });

@@ -1,3 +1,4 @@
+import { todayLocal } from '../src/main/pipeline/limiter';
 import { DEFAULT_MANAGER } from '../src/shared/types';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
@@ -117,7 +118,7 @@ describe('outreach', () => {
       label: 'demand',
       reason: 'x',
     })!;
-    db.updateAccount(acc.id, { sentToday: 10, sentDay: new Date().toISOString().slice(0, 10) });
+    db.updateAccount(acc.id, { sentToday: 10, sentDay: todayLocal(Date.now()) });
     await expect(sendMessage(pipeline, lead.id, 'hi', 'dm')).rejects.toThrow('Дневной лимит');
 
     db.updateAccount(acc.id, { sentToday: 0, sentDay: null });
