@@ -9,6 +9,9 @@ const emptySettings = () => ({
   llmBaseUrl: '',
   llmApiKey: '',
   llmModel: '',
+  jevBaseUrl: '',
+  jevApiKey: '',
+  jevModel: '',
 });
 
 describe('TdlEngine smoke', () => {

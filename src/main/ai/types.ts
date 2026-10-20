@@ -32,3 +32,13 @@ export interface LeadAi {
   // Reply for the lead in its language, short and human; history is the dialog so far.
   draftReply(project: Project, lead: Lead, where: 'dm' | 'chat', history: DialogTurn[]): Promise<string>;
 }
+
+// Fast qualification only (Jev via TypeSafe System One). Same contract as LeadAi.qualify.
+export interface Qualifier {
+  qualify(project: Project, messages: TgMessage[], examples: FeedbackExample[]): Promise<Qualification[]>;
+}
+
+// Spins a broadcast text so every post differs slightly while keeping the meaning.
+export interface TextSpinner {
+  spin(text: string): Promise<string>;
+}

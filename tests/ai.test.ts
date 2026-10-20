@@ -10,6 +10,9 @@ const baseSettings = (): Settings => ({
   llmBaseUrl: 'https://openrouter.ai/api/v1',
   llmApiKey: 'sk-test',
   llmModel: 'anthropic/claude-haiku-5.5',
+  jevBaseUrl: '',
+  jevApiKey: '',
+  jevModel: '',
 });
 
 function completionBody(content: string) {
@@ -36,6 +39,7 @@ const sampleProject = (): Project => ({
   task: 'clients',
   target: 'стартапы',
   offer: 'разработка на TypeScript',
+  criteria: '',
   geo: ['Россия'],
   languages: ['русский'],
   accountIds: [1],

@@ -22,6 +22,7 @@ function setupPipeline() {
     task: 'clients',
     target: 'buyers',
     offer: 'dev',
+    criteria: '',
     geo: [],
     languages: ['ru'],
     accountIds: [acc.id],

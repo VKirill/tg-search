@@ -107,6 +107,7 @@ export class TdlEngine implements TelegramEngine {
   private readonly userCache = new Map<number, user>();
   private readonly chatUsernameCache = new Map<number, string | null>();
   private privateMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
+  private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
 
   constructor(readonly dataDir: string, readonly settings: () => Settings) {}
 
@@ -133,6 +134,10 @@ export class TdlEngine implements TelegramEngine {
 
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void {
     this.privateMessageCb = cb;
+  }
+
+  onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void {
+    this.chatMessageCb = cb;
   }
 
   async startLogin(accountId: number, phone: string): Promise<TgLoginResult> {
@@ -371,6 +376,11 @@ export class TdlEngine implements TelegramEngine {
     return await this.sendText(slot, chatId, text, replyToMessageId);
   }
 
+  async sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    return await this.sendText(slot, chatId, text);
+  }
+
   // ——— internals ———
 
   private requireApiCredentials(): void {
@@ -478,16 +488,17 @@ export class TdlEngine implements TelegramEngine {
       return;
     }
 
-    if (update._ === 'updateNewMessage' && this.privateMessageCb) {
+    if (update._ === 'updateNewMessage' && (this.privateMessageCb || this.chatMessageCb)) {
       const msg = update.message;
       if (msg.is_outgoing) return;
       try {
         const tdChat = await this.invoke(slot, { _: 'getChat', chat_id: msg.chat_id });
-        if (tdChat.type._ !== 'chatTypePrivate') return;
+        const cb = tdChat.type._ === 'chatTypePrivate' ? this.privateMessageCb : this.chatMessageCb;
+        if (!cb) return;
         const mapped = await this.mapOneMessage(slot, msg, tdChat);
-        this.privateMessageCb(slot.accountId, mapped);
+        cb(slot.accountId, mapped);
       } catch (err) {
-        console.error('onPrivateMessage handler failed:', err);
+        console.error('new message handler failed:', err);
       }
     }
   }

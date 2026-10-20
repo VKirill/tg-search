@@ -30,6 +30,7 @@ export interface Project {
   task: ProjectTask;
   target: string; // who or what to find
   offer: string; // what matters: your experience, offer, conditions
+  criteria: string; // project prompt: what kind of message fits and may get an automatic offer (used by Jev)
   geo: string[];
   languages: string[];
   accountIds: number[];
@@ -41,7 +42,7 @@ export interface Project {
 
 export type ProjectInput = Pick<
   Project,
-  'name' | 'task' | 'target' | 'offer' | 'geo' | 'languages' | 'accountIds' | 'materials' | 'keywords'
+  'name' | 'task' | 'target' | 'offer' | 'criteria' | 'geo' | 'languages' | 'accountIds' | 'materials' | 'keywords'
 >;
 
 export type AccountStatus = 'authorized' | 'wait_code' | 'wait_password' | 'logged_out' | 'error';
@@ -128,6 +129,45 @@ export interface Settings {
   llmBaseUrl: string; // OpenAI-compatible endpoint, e.g. https://openrouter.ai/api/v1
   llmApiKey: string;
   llmModel: string;
+  jevBaseUrl: string; // TypeSafe System One endpoint base, e.g. https://api.openlux.ai/v1
+  jevApiKey: string; // empty = qualify with the LLM instead of Jev
+  jevModel: string; // e.g. jev-1.14.0
+}
+
+// Periodic posting of an offer into chosen chats from the user's accounts.
+export interface BroadcastChat {
+  tgChatId: number;
+  title: string;
+  username: string | null;
+  lastPostedAt: number | null; // unix ms
+  lastError: string | null;
+}
+
+export interface Broadcast {
+  id: number;
+  name: string;
+  text: string;
+  accountIds: number[]; // accounts that post, in rotation
+  chats: BroadcastChat[];
+  intervalHours: number; // at most one post per chat per interval
+  spin: boolean; // let the LLM vary the wording of every post (identical texts look like spam)
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface BroadcastInput {
+  name: string;
+  text: string;
+  accountIds: number[];
+  chatLinks: string[]; // @username or t.me links, resolved on save
+  intervalHours: number;
+  spin: boolean;
+}
+
+export interface ImportResult {
+  added: number;
+  skipped: number; // already in the project
+  failed: { value: string; error: string }[];
 }
 
 export interface LeadFilter {
@@ -149,6 +189,7 @@ export type AppEvent =
   | { type: 'account:update'; account: Account }
   | { type: 'source:update'; source: Source }
   | { type: 'project:update'; project: Project }
+  | { type: 'broadcast:update'; broadcast: Broadcast }
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
@@ -177,6 +218,8 @@ export interface Api {
     discover(projectId: number): Promise<Source[]>; // search Telegram by project keywords
     scan(projectId: number, sourceIds?: number[]): Promise<{ checked: number; newLeads: number }>;
     add(projectId: number, linkOrUsername: string): Promise<Source>;
+    // CSV with a chat link/username in the first column (header optional); joins chats in the background.
+    importCsv(projectId: number, csv: string): Promise<ImportResult>;
     setStatus(sourceId: number, status: SourceStatus): Promise<Source>;
   };
   leads: {
@@ -192,6 +235,13 @@ export interface Api {
   autopilot: {
     set(projectId: number, patch: Partial<AutopilotSettings>): Promise<Project>;
     runNow(projectId: number): Promise<void>;
+  };
+  broadcasts: {
+    list(): Promise<Broadcast[]>;
+    create(input: BroadcastInput): Promise<Broadcast>;
+    update(id: number, patch: Partial<BroadcastInput> & { enabled?: boolean }): Promise<Broadcast>;
+    remove(id: number): Promise<void>;
+    runNow(id: number): Promise<{ posted: number; skipped: number; errors: number }>;
   };
   shell: {
     openExternal(url: string): Promise<void>;

@@ -127,6 +127,23 @@ export class FakeEngine implements TelegramEngine {
   emitPrivate(accountId: number, msg: TgMessage) {
     this.privateMessageCb?.(accountId, msg);
   }
+
+  posted: { accountId: number; chatId: number; text: string }[] = [];
+  async sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage> {
+    this.posted.push({ accountId, chatId, text });
+    return {
+      chatId, messageId: Date.now(), date: Date.now(), text, senderUserId: null, senderChatId: null,
+      senderName: null, senderUsername: null, replyToMessageId: null, link: null, isOutgoing: true,
+    };
+  }
+
+  private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
+  onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void {
+    this.chatMessageCb = cb;
+  }
+  emitChat(accountId: number, msg: TgMessage) {
+    this.chatMessageCb?.(accountId, msg);
+  }
 }
 
 export class FakeAi implements LeadAi {

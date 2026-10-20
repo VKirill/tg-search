@@ -67,6 +67,11 @@ export interface TelegramEngine {
   sendDirect(accountId: number, userId: number, text: string): Promise<TgMessage>;
   replyInChat(accountId: number, chatId: number, replyToMessageId: number, text: string): Promise<TgMessage>;
 
+  sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage>; // plain post, e.g. broadcasts
+
   // New incoming messages in private chats (lead answers) for all accounts
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;
+  // New messages in groups, supergroups and channels the accounts are members of (real-time monitoring).
+  // The same message may arrive from several accounts; consumers dedupe by chatId:messageId.
+  onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void;
 }

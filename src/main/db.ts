@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   DEFAULT_AUTOPILOT,
   type Account,
+  type Broadcast,
+  type BroadcastChat,
   type AutopilotSettings,
   type ChatMessage,
   type Lead,
@@ -67,6 +69,12 @@ CREATE TABLE IF NOT EXISTS messages (
   tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER, date INTEGER NOT NULL, auto INTEGER NOT NULL DEFAULT 0
 );
 -- Every message already evaluated per project, so rescans never pay the LLM twice.
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL, text TEXT NOT NULL, account_ids TEXT NOT NULL DEFAULT '[]', chats TEXT NOT NULL DEFAULT '[]',
+  interval_hours REAL NOT NULL DEFAULT 24, spin INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS seen (
   project_id INTEGER NOT NULL, tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER NOT NULL,
   PRIMARY KEY(project_id, tg_chat_id, tg_message_id)
@@ -89,11 +97,18 @@ function toAccount(r: Row): Account {
 
 function toProject(r: Row): Project {
   return {
-    id: r.id, name: r.name, task: r.task, target: r.target, offer: r.offer,
+    id: r.id, name: r.name, task: r.task, target: r.target, offer: r.offer, criteria: r.criteria,
     geo: parse(r.geo, []), languages: parse(r.languages, []), accountIds: parse(r.account_ids, []),
     materials: parse(r.materials, []), keywords: parse(r.keywords, []),
     autopilot: { ...DEFAULT_AUTOPILOT, ...parse<Partial<AutopilotSettings>>(r.autopilot, {}) },
     createdAt: r.created_at,
+  };
+}
+
+function toBroadcast(r: Row): Broadcast {
+  return {
+    id: r.id, name: r.name, text: r.text, accountIds: parse(r.account_ids, []), chats: parse(r.chats, []),
+    intervalHours: r.interval_hours, spin: !!r.spin, enabled: !!r.enabled, createdAt: r.created_at,
   };
 }
 
@@ -128,6 +143,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   llmBaseUrl: 'https://openrouter.ai/api/v1',
   llmApiKey: '',
   llmModel: 'anthropic/claude-haiku-5.5',
+  jevBaseUrl: 'https://api.openlux.ai/v1',
+  jevApiKey: '',
+  jevModel: 'jev-1.14.0',
 };
 
 export class Db {
@@ -137,6 +155,9 @@ export class Db {
     this.raw = new DatabaseSync(path);
     this.raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.raw.exec(SCHEMA);
+    // Columns added after the first release
+    const projectCols = this.all('PRAGMA table_info(projects)').map((c) => c.name);
+    if (!projectCols.includes('criteria')) this.raw.exec("ALTER TABLE projects ADD COLUMN criteria TEXT NOT NULL DEFAULT ''");
   }
 
   private one(sql: string, ...args: any[]): Row | undefined {
@@ -203,9 +224,9 @@ export class Db {
   }
   createProject(p: ProjectInput): Project {
     const res = this.run(
-      `INSERT INTO projects(name, task, target, offer, geo, languages, account_ids, materials, keywords, autopilot, created_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      p.name, p.task, p.target, p.offer, json(p.geo), json(p.languages), json(p.accountIds), json(p.materials),
+      `INSERT INTO projects(name, task, target, offer, criteria, geo, languages, account_ids, materials, keywords, autopilot, created_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      p.name, p.task, p.target, p.offer, p.criteria ?? '', json(p.geo), json(p.languages), json(p.accountIds), json(p.materials),
       json(p.keywords), json(DEFAULT_AUTOPILOT), Date.now(),
     );
     return this.getProject(Number(res.lastInsertRowid));
@@ -214,9 +235,9 @@ export class Db {
     const cur = this.getProject(id);
     const next = { ...cur, ...patch, autopilot: { ...cur.autopilot, ...patch.autopilot } };
     this.run(
-      `UPDATE projects SET name = ?, task = ?, target = ?, offer = ?, geo = ?, languages = ?, account_ids = ?,
+      `UPDATE projects SET name = ?, task = ?, target = ?, offer = ?, criteria = ?, geo = ?, languages = ?, account_ids = ?,
        materials = ?, keywords = ?, autopilot = ? WHERE id = ?`,
-      next.name, next.task, next.target, next.offer, json(next.geo), json(next.languages), json(next.accountIds),
+      next.name, next.task, next.target, next.offer, next.criteria, json(next.geo), json(next.languages), json(next.accountIds),
       json(next.materials), json(next.keywords), json(next.autopilot), id,
     );
     return this.getProject(id);
@@ -328,5 +349,42 @@ export class Db {
       m.leadId, m.accountId, m.direction, m.where, m.text, m.tgChatId, m.tgMessageId, m.date, Number(m.auto),
     );
     return toMessage(this.one('SELECT * FROM messages WHERE id = ?', Number(res.lastInsertRowid))!);
+  }
+
+  // Active sources of all projects that watch this chat (real-time monitoring)
+  findActiveSourcesByChat(tgChatId: number): Source[] {
+    return this.all("SELECT * FROM sources WHERE tg_chat_id = ? AND status = 'active'", tgChatId).map(toSource);
+  }
+
+  // Broadcasts
+  listBroadcasts(): Broadcast[] {
+    return this.all('SELECT * FROM broadcasts ORDER BY id').map(toBroadcast);
+  }
+  getBroadcast(id: number): Broadcast {
+    const r = this.one('SELECT * FROM broadcasts WHERE id = ?', id);
+    if (!r) throw new Error(`broadcast ${id} not found`);
+    return toBroadcast(r);
+  }
+  createBroadcast(b: Pick<Broadcast, 'name' | 'text' | 'accountIds' | 'chats' | 'intervalHours' | 'spin'>): Broadcast {
+    const res = this.run(
+      `INSERT INTO broadcasts(name, text, account_ids, chats, interval_hours, spin, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      b.name, b.text, json(b.accountIds), json(b.chats), b.intervalHours, Number(b.spin), Date.now(),
+    );
+    return this.getBroadcast(Number(res.lastInsertRowid));
+  }
+  updateBroadcast(id: number, patch: Partial<Omit<Broadcast, 'id' | 'createdAt'>>): Broadcast {
+    const next = { ...this.getBroadcast(id), ...patch };
+    this.run(
+      `UPDATE broadcasts SET name = ?, text = ?, account_ids = ?, chats = ?, interval_hours = ?, spin = ?, enabled = ? WHERE id = ?`,
+      next.name, next.text, json(next.accountIds), json(next.chats), next.intervalHours, Number(next.spin), Number(next.enabled), id,
+    );
+    return this.getBroadcast(id);
+  }
+  updateBroadcastChat(id: number, tgChatId: number, patch: Partial<BroadcastChat>): Broadcast {
+    const b = this.getBroadcast(id);
+    return this.updateBroadcast(id, { chats: b.chats.map((c) => (c.tgChatId === tgChatId ? { ...c, ...patch } : c)) });
+  }
+  removeBroadcast(id: number) {
+    this.run('DELETE FROM broadcasts WHERE id = ?', id);
   }
 }

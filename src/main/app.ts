@@ -93,6 +93,9 @@ export function createApp(deps: AppDeps): AppHandlers {
       list: async (projectId) => db.listSources(projectId),
       discover: (projectId) => discover(pipeline, projectId),
       scan: (projectId, sourceIds) => scan(pipeline, projectId, sourceIds),
+      importCsv: async () => {
+        throw new Error('not implemented'); // CSV import worker
+      },
       add: async (projectId, linkOrUsername) => {
         const project = db.getProject(projectId);
         const accounts = db.listAccounts().filter(
@@ -148,6 +151,19 @@ export function createApp(deps: AppDeps): AppHandlers {
       runNow: (projectId) => autopilot.runNow(projectId),
     },
 
+    broadcasts: {
+      list: async () => db.listBroadcasts(),
+      create: async () => {
+        throw new Error('not implemented'); // broadcast worker
+      },
+      update: async () => {
+        throw new Error('not implemented'); // broadcast worker
+      },
+      remove: async (id) => db.removeBroadcast(id),
+      runNow: async () => {
+        throw new Error('not implemented'); // broadcast worker
+      },
+    },
     shell: { openExternal: (url) => openExternal(url) },
   };
 }

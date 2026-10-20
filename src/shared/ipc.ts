@@ -10,10 +10,11 @@ export const API_METHODS: ApiMap = {
   settings: ['get', 'set'],
   accounts: ['list', 'startLogin', 'submitCode', 'submitPassword', 'update', 'remove'],
   projects: ['list', 'create', 'update', 'remove', 'suggestKeywords'],
-  sources: ['list', 'discover', 'scan', 'add', 'setStatus'],
+  sources: ['list', 'discover', 'scan', 'add', 'importCsv', 'setStatus'],
   leads: ['list', 'feedback', 'setStatus'],
   messages: ['list', 'draft', 'send'],
   autopilot: ['set', 'runNow'],
+  broadcasts: ['list', 'create', 'update', 'remove', 'runNow'],
   shell: ['openExternal'],
 };
 
