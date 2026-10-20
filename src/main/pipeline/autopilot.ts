@@ -6,6 +6,7 @@ import { discover, type DiscoveryDeps } from './discovery';
 import { scan, type ScannerDeps } from './scanner';
 import { draftReply, sendMessage, type OutreachDeps } from './outreach';
 import { canSend } from './limiter';
+import { listAuthorizedProjectAccounts } from './accounts';
 
 export interface AutopilotDeps extends DiscoveryDeps, ScannerDeps, OutreachDeps {}
 
@@ -22,6 +23,7 @@ export interface AutopilotScheduler {
 export function createAutopilot(deps: AutopilotDeps): AutopilotScheduler {
   const running = new Set<number>();
   const queue: QueueItem[] = [];
+  const failed = new Set<number>(); // leads whose auto-reply failed; never retried automatically
   let timer: ReturnType<typeof setInterval> | null = null;
 
   function retireWeakSources(project: Project) {
@@ -53,44 +55,41 @@ export function createAutopilot(deps: AutopilotDeps): AutopilotScheduler {
     for (const lead of deps.db.listLeads(project.id, { status: 'new' })) {
       const where = shouldQueueLead(project, lead);
       if (!where) continue;
-      if (queue.some((q) => q.leadId === lead.id)) continue;
+      if (failed.has(lead.id) || queue.some((q) => q.leadId === lead.id)) continue;
       queue.push({ leadId: lead.id, where });
     }
   }
 
   async function processQueue(now: number) {
-    const usedAccounts = new Set<number>();
     const remaining: QueueItem[] = [];
 
     for (const item of queue) {
-      const lead = deps.db.getLead(item.leadId);
-      const project = deps.db.getProject(lead.projectId);
-      const accounts = project.accountIds.length
-        ? deps.db.listAccounts().filter((a) => project.accountIds.includes(a.id) && a.status === 'authorized')
-        : deps.db.listAccounts().filter((a) => a.status === 'authorized');
-
-      const ordered = [...accounts].sort((a, b) => {
-        if (a.id === lead.accountId) return -1;
-        if (b.id === lead.accountId) return 1;
-        return 0;
-      });
-
-      let sent = false;
-      for (const acc of ordered) {
-        if (usedAccounts.has(acc.id)) continue;
-        const r = canSend(acc, now);
-        if (!r.ok) continue;
-        try {
-          const text = await draftReply(deps, item.leadId);
-          await sendMessage(deps, item.leadId, text, item.where, true);
-          usedAccounts.add(acc.id);
-          sent = true;
-          break;
-        } catch {
-          // keep in queue on limiter or send failure
-        }
+      let lead: Lead;
+      let project: Project;
+      try {
+        lead = deps.db.getLead(item.leadId);
+        project = deps.db.getProject(lead.projectId);
+      } catch {
+        continue; // lead or project was deleted
       }
-      if (!sent) remaining.push(item);
+      // Re-check at send time: the user may have answered, hidden the lead or turned replies off since it was queued.
+      if (!project.autopilot.aiReply || lead.status !== 'new') continue;
+      if (deps.db.listMessages(lead.id).some((m) => m.direction === 'out')) continue;
+
+      const free = listAuthorizedProjectAccounts(deps.db, project.accountIds).some((a) => canSend(a, now).ok);
+      if (!free) {
+        remaining.push(item);
+        continue;
+      }
+      try {
+        const text = await draftReply(deps, item.leadId, item.where);
+        await sendMessage(deps, item.leadId, text, item.where, true);
+      } catch (err) {
+        // Not retried: a send that failed (closed DMs, no rights in the chat) would fail again on every tick.
+        failed.add(item.leadId);
+        const error = err instanceof Error ? err.message : String(err);
+        deps.emit({ type: 'job', projectId: project.id, stage: 'Автоответ не отправлен', done: true, error });
+      }
     }
 
     queue.length = 0;

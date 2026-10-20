@@ -208,6 +208,41 @@ describe('autopilot', () => {
     expect(engine.sent).toHaveLength(1);
   });
 
+  it('does not auto-reply to a queued lead the user already answered', async () => {
+    const { db, engine, pipeline, project } = setupPipeline();
+    db.updateProject(project.id, { autopilot: { enabled: true, aiReply: true, minScore: 50, replyTarget: 'dm' } });
+    const lead = db.addLead({
+      projectId: project.id, sourceId: null, tgChatId: 1, tgMessageId: 30, authorUserId: 200, authorName: 'M',
+      authorUsername: null, text: 'need a bot', date: Date.now(), link: null, score: 90, label: 'demand', reason: '',
+    })!;
+    const ap = createAutopilot(pipeline);
+    await ap.run(project.id); // queued
+    await sendMessage(pipeline, lead.id, 'manual reply', 'dm');
+    await ap.tick();
+    expect(engine.sent.map((m) => m.text)).toEqual(['manual reply']);
+  });
+
+  it('does not retry a failed auto-reply', async () => {
+    const { db, engine, pipeline, project, events } = setupPipeline();
+    db.updateProject(project.id, { autopilot: { enabled: true, aiReply: true, minScore: 50, replyTarget: 'dm' } });
+    db.addLead({
+      projectId: project.id, sourceId: null, tgChatId: 1, tgMessageId: 31, authorUserId: 201, authorName: 'N',
+      authorUsername: null, text: 'need a site', date: Date.now(), link: null, score: 90, label: 'demand', reason: '',
+    });
+    let attempts = 0;
+    engine.sendDirect = async () => {
+      attempts++;
+      throw new Error('USER_PRIVACY_RESTRICTED');
+    };
+    const ap = createAutopilot(pipeline);
+    await ap.run(project.id);
+    await ap.tick();
+    await ap.run(project.id);
+    await ap.tick();
+    expect(attempts).toBe(1);
+    expect(events.some((e) => e.type === 'job' && e.error === 'USER_PRIVACY_RESTRICTED')).toBe(true);
+  });
+
   it('retires weak sources on refresh', async () => {
     const { db, pipeline, project } = setupPipeline();
     const weak = db.addSource({

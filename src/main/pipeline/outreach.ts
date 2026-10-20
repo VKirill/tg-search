@@ -47,17 +47,17 @@ async function sendViaEngine(
   }
   try {
     return await deps.engine.replyInChat(accountId, lead.tgChatId, lead.tgMessageId, text);
-  } catch {
-    if (!joinIfNeeded) throw new Error('replyInChat failed');
+  } catch (err) {
+    if (!joinIfNeeded) throw err;
     await deps.engine.joinChat(accountId, lead.tgChatId);
     return deps.engine.replyInChat(accountId, lead.tgChatId, lead.tgMessageId, text);
   }
 }
 
-export async function draftReply(deps: OutreachDeps, leadId: number): Promise<string> {
+export async function draftReply(deps: OutreachDeps, leadId: number, where?: 'dm' | 'chat'): Promise<string> {
   const lead = deps.db.getLead(leadId);
   const project = deps.db.getProject(lead.projectId);
-  const where = project.autopilot.replyTarget;
+  where ??= project.autopilot.replyTarget;
   const history = deps.db.listMessages(leadId).map((m) => ({ direction: m.direction, text: m.text }));
   return deps.ai.draftReply(project, lead, where, history);
 }
