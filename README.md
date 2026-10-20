@@ -32,6 +32,21 @@ endpoint (OpenRouter by default, model `anthropic/claude-haiku-5.5`). Then add a
 
 Data (SQLite database, TDLib sessions) lives in `~/Library/Application Support/TG Search/`.
 
+## Управление из Claude
+
+Локальный HTTP API на `127.0.0.1` (токен в `control.json` при запущенном приложении). CLI и skill для Claude Code:
+
+```sh
+./scripts/install-skill.sh   # ~/.claude/skills/tg-search + ~/.local/bin/tgs
+tgs status --pretty
+tgs projects --pretty
+tgs leads 1 --min 70 --status new --pretty
+tgs call projects.create '{"name":"...", ...}'
+tgs events --seconds 60
+```
+
+Переменная `TG_SEARCH_DATA` переопределяет каталог данных (для тестов).
+
 ## Stack
 
 Electron 44 · electron-vite 6 · React 19 · TypeScript 7 · TDLib 1.8.67 via `tdl` + `prebuilt-tdlib` · `node:sqlite` · Vitest 5.
