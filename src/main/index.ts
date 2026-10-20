@@ -7,6 +7,7 @@ import { OpenAiLeadAi } from './ai/leadAi';
 import { LlmSpinner } from './ai/spinner';
 import { JevQualifier } from './ai/jev';
 import { createLeadAi } from './ai/hybrid';
+import { OpenAiManagerAi } from './ai/manager';
 import { createApp } from './app';
 import { API_METHODS, EVENT_CHANNEL } from '../shared/ipc';
 import type { AppEvent } from '../shared/types';
@@ -58,7 +59,16 @@ app.whenReady().then(async () => {
   const llm = new OpenAiLeadAi(getSettings);
   const ai = createLeadAi(getSettings, llm, new JevQualifier(getSettings));
   const spinner = new LlmSpinner(getSettings);
-  const handlers = createApp({ db, engine, ai, spinner, emit, openExternal: (url) => shell.openExternal(url) });
+  const managerAi = new OpenAiManagerAi(getSettings);
+  const handlers = createApp({
+    db,
+    engine,
+    ai,
+    manager: managerAi,
+    spinner,
+    emit,
+    openExternal: (url) => shell.openExternal(url),
+  });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {
     for (const m of methods as string[]) {

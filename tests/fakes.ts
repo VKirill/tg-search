@@ -1,6 +1,6 @@
-import type { AccountStatus } from '../src/shared/types';
-import type { Project } from '../src/shared/types';
-import type { LeadAi, Qualification } from '../src/main/ai/types';
+import type { AccountStatus, Lead, Project } from '../src/shared/types';
+import type { DialogTurn, LeadAi, ManagerAi, Qualification } from '../src/main/ai/types';
+import type { ManagerTestResult } from '../src/shared/types';
 import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from '../src/main/telegram/types';
 
 export class FakeEngine implements TelegramEngine {
@@ -213,6 +213,22 @@ export function makeChat(id: number, title = `Chat ${id}`): TgChat {
     description: 'desc',
     isMember: true,
   };
+}
+
+export class FakeManager implements ManagerAi {
+  writeStepText = 'Шаг ИИ';
+  replyResult: ManagerTestResult = { reply: 'Ответ менеджера', handoff: false, reason: '' };
+  writeStepCalls = 0;
+  replyCalls = 0;
+
+  async writeStep(): Promise<string> {
+    this.writeStepCalls++;
+    return this.writeStepText;
+  }
+  async reply(_project: Project, _lead: Lead, _history: DialogTurn[]): Promise<ManagerTestResult> {
+    this.replyCalls++;
+    return this.replyResult;
+  }
 }
 
 export function makeMsg(

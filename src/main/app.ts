@@ -2,7 +2,8 @@
 
 import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
-import type { LeadAi, TextSpinner } from './ai/types';
+import type { DialogTurn, LeadAi, ManagerAi, TextSpinner } from './ai/types';
+import { stubManagerAi } from './ai/manager';
 import { passthroughSpinner } from './ai/spinner';
 import { createBroadcaster } from './pipeline/broadcaster';
 import type { Api, AppEvent, AutopilotSettings, ProjectInput } from '../shared/types';
@@ -19,11 +20,15 @@ import { draftReply, sendMessage } from './pipeline/outreach';
 import { createAutopilot } from './pipeline/autopilot';
 import { createRealtime } from './pipeline/realtime';
 import { createImporter } from './pipeline/importer';
+import { createManagerAgent } from './pipeline/managerAgent';
+import { stopChainOnIncoming } from './pipeline/sequence';
+import type { Lead } from '../shared/types';
 
 export interface AppDeps {
   db: Db;
   engine: TelegramEngine;
   ai: LeadAi;
+  manager?: ManagerAi;
   spinner?: TextSpinner;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
@@ -33,9 +38,11 @@ export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(
 
 export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, emit, openExternal } = deps;
+  const manager = deps.manager ?? stubManagerAi();
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, emit };
+  const pipeline = { db, engine, ai, emit, manager };
   const autopilot = createAutopilot(pipeline);
+  const managerAgent = createManagerAgent({ ...pipeline, manager });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
   const realtime = createRealtime(pipeline);
   const importer = createImporter({ db, engine, emit });
@@ -60,9 +67,11 @@ export function createApp(deps: AppDeps): AppHandlers {
           date: msg.date,
           auto: false,
         });
+        stopChainOnIncoming(db, lead.id);
         const updated = db.updateLead(lead.id, { status: 'dialog' });
         emit({ type: 'message:new', message });
         emit({ type: 'lead:update', lead: updated });
+        managerAgent.onIncoming(lead.id);
       });
       realtime.start();
       autopilot.start();
@@ -73,6 +82,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       broadcaster.stop();
       realtime.stop();
       importer.stop();
+      managerAgent.stop();
       autopilot.stop();
       await engine.close();
     },
@@ -206,8 +216,34 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
     },
     manager: {
-      test: async () => {
-        throw new Error('not implemented'); // manager worker
+      test: async (projectId, leadText, history, settings?) => {
+        const project = db.getProject(projectId);
+        const lead: Lead = {
+          id: 0,
+          projectId,
+          sourceId: null,
+          tgChatId: 0,
+          tgMessageId: 0,
+          authorUserId: 1,
+          authorName: 'Тест',
+          authorUsername: 'test',
+          text: leadText,
+          date: Date.now(),
+          link: null,
+          score: 80,
+          label: 'demand',
+          reason: '',
+          feedback: null,
+          status: 'dialog',
+          accountId: null,
+          sequenceStep: 0,
+          nextStepAt: null,
+          handoff: false,
+          handoffReason: null,
+          createdAt: Date.now(),
+        };
+        const dialog: DialogTurn[] = [{ direction: 'in', text: leadText }, ...history];
+        return manager.reply(project, lead, dialog, settings);
       },
     },
     broadcasts: {

@@ -1,14 +1,17 @@
 import type { AppEvent, Lead, Project } from '../../shared/types';
 import type { Db } from '../db';
-import type { LeadAi } from '../ai/types';
+import type { LeadAi, ManagerAi } from '../ai/types';
 import type { TelegramEngine } from '../telegram/types';
 import { discover, type DiscoveryDeps } from './discovery';
 import { scan, type ScannerDeps } from './scanner';
-import { draftReply, sendMessage, type OutreachDeps } from './outreach';
+import { sendMessage, type OutreachDeps } from './outreach';
+import { firstOutreachText, processDueSteps } from './sequence';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 
-export interface AutopilotDeps extends DiscoveryDeps, ScannerDeps, OutreachDeps {}
+export interface AutopilotDeps extends DiscoveryDeps, ScannerDeps, OutreachDeps {
+  manager?: ManagerAi;
+}
 
 type QueueItem = { leadId: number; where: 'dm' | 'chat' };
 
@@ -83,7 +86,7 @@ export function createAutopilot(deps: AutopilotDeps): AutopilotScheduler {
         continue;
       }
       try {
-        const text = await draftReply(deps, item.leadId, item.where);
+        const text = await firstOutreachText(deps, item.leadId, item.where);
         await sendMessage(deps, item.leadId, text, item.where, true);
       } catch (err) {
         // Not retried: a send that failed (closed DMs, no rights in the chat) would fail again on every tick.
@@ -126,6 +129,7 @@ export function createAutopilot(deps: AutopilotDeps): AutopilotScheduler {
   }
 
   async function tick(now = Date.now()): Promise<void> {
+    await processDueSteps(deps, now);
     await processQueue(now);
     for (const project of deps.db.listProjects()) {
       const ap = project.autopilot;
