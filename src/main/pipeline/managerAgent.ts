@@ -1,4 +1,4 @@
-import type { ChatMessage, Lead, Project } from '../../shared/types';
+import type { ChatMessage, ClientCard, Lead, Project } from '../../shared/types';
 import type { ManagerAi } from '../ai/types';
 import type { Db } from '../db';
 import type { TelegramEngine } from '../telegram/types';
@@ -6,10 +6,13 @@ import { sendMessage, type OutreachDeps } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
-import { OpenAiManagerAi } from '../ai/manager';
-
 export interface ManagerAgentDeps extends OutreachDeps {
   manager: ManagerAi;
+  crm?: {
+    refresh(leadId: number): Promise<ClientCard>;
+    generateBrief(leadId: number): Promise<ClientCard>;
+    runHandoffPipeline(leadId: number): Promise<void>;
+  };
 }
 
 function buildDialogHistory(lead: Lead, messages: ChatMessage[]): DialogTurn[] {
@@ -32,6 +35,19 @@ function leadLine(lead: Lead): string {
 
 function isLimiterError(message: string): boolean {
   return message.includes('Дневной лимит') || message.includes('Пауза между отправками');
+}
+
+function handoffBodyFromCard(card: ClientCard, briefReady: boolean): string {
+  const lines: string[] = [];
+  if (card.summary.trim()) lines.push(card.summary.trim());
+  const a = card.anamnesis;
+  if (a.task.trim()) lines.push(`Задача: ${a.task.trim()}`);
+  if (a.goal.trim()) lines.push(`Цель: ${a.goal.trim()}`);
+  if (a.budget.trim()) lines.push(`Бюджет: ${a.budget.trim()}`);
+  if (a.deadline.trim()) lines.push(`Срок: ${a.deadline.trim()}`);
+  if (a.features.length) lines.push(`Функционал: ${a.features.join(', ')}`);
+  if (briefReady) lines.push('ТЗ готово в карточке клиента');
+  return lines.join('\n');
 }
 
 export function createManagerAgent(deps: ManagerAgentDeps) {
@@ -81,13 +97,19 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     const accountId = updated.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
     if (accountId == null) return;
 
-    let summary: string;
-    if (deps.manager instanceof OpenAiManagerAi) {
-      summary = await deps.manager.handoffSummary(project, lead, history, reason);
-    } else {
-      summary = history.slice(-3).map((t) => `${t.direction === 'in' ? 'Лид' : 'Мы'}: ${t.text}`).join('\n');
+    let briefReady = false;
+    if (deps.crm) {
+      await deps.crm.runHandoffPipeline(lead.id);
+      const after = deps.db.getCard(lead.id);
+      briefReady = Boolean(after.brief.trim() && after.briefUpdatedAt);
     }
-    await notifyOwner(project, lead, accountId, summary, reason);
+
+    const card = deps.db.getCard(lead.id);
+    const summary =
+      card.summary.trim() || card.anamnesis.task.trim()
+        ? handoffBodyFromCard(card, briefReady)
+        : history.slice(-3).map((t) => `${t.direction === 'in' ? 'Лид' : 'Мы'}: ${t.text}`).join('\n');
+    await notifyOwner(project, updated, accountId, summary, reason);
   }
 
   async function runReply(leadId: number) {
@@ -111,7 +133,8 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     }
 
     try {
-      const result = await deps.manager.reply(project, lead, history);
+      const card = deps.db.getCard(leadId);
+      const result = await deps.manager.reply(project, lead, history, undefined, card);
       if (result.handoff) {
         await doHandoff(project, lead, result.reason || 'Передача менеджеру', result.reply, history);
         return;
