@@ -1,3 +1,5 @@
+import type React from 'react';
+import { IconAccounts, IconBroadcast, IconFunnel, IconInbox, IconLeads, IconSettings, IconTopics } from './Icons';
 import type { Account } from '../../../shared/types';
 
 export type NavView =
@@ -17,14 +19,14 @@ type NavRailProps = {
   onToggleCollapse: () => void;
 };
 
-const items: { id: NavView; label: string; icon: string }[] = [
-  { id: 'inbox', label: 'Входящие', icon: '◉' },
-  { id: 'leads', label: 'Лиды', icon: '◎' },
-  { id: 'funnel', label: 'Воронка', icon: '▦' },
-  { id: 'projects', label: 'Тематики', icon: '◇' },
-  { id: 'broadcasts', label: 'Рассылки', icon: '↗' },
-  { id: 'accounts', label: 'Аккаунты', icon: '◈' },
-  { id: 'settings', label: 'Настройки', icon: '⚙' },
+const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React.ReactElement }[] = [
+  { id: 'inbox', label: 'Входящие', Icon: IconInbox },
+  { id: 'leads', label: 'Лиды', Icon: IconLeads },
+  { id: 'funnel', label: 'Воронка', Icon: IconFunnel },
+  { id: 'projects', label: 'Тематики', Icon: IconTopics },
+  { id: 'broadcasts', label: 'Рассылки', Icon: IconBroadcast },
+  { id: 'accounts', label: 'Аккаунты', Icon: IconAccounts },
+  { id: 'settings', label: 'Настройки', Icon: IconSettings },
 ];
 
 export function NavRail({ view, collapsed, accounts, onView, onToggleCollapse }: NavRailProps) {
@@ -43,7 +45,7 @@ export function NavRail({ view, collapsed, accounts, onView, onToggleCollapse }:
               onClick={() => onView(item.id)}
               title={item.label}
             >
-              <span className="nav-rail__icon" aria-hidden>{item.icon}</span>
+              <span className="nav-rail__icon" aria-hidden><item.Icon size={17} /></span>
               {!collapsed && <span className="nav-rail__label">{item.label}</span>}
             </button>
           </li>

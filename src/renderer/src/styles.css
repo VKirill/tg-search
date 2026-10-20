@@ -18,7 +18,7 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
-  --titlebar: 78px;
+  --titlebar: 40px; /* hiddenInset traffic lights fit in the nav rail's top strip */
   --col-projects: 260px;
   --col-leads: 340px;
   --danger: #ff6b6b;
@@ -639,6 +639,7 @@ select {
 
 .segmented {
   display: inline-flex;
+  flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -646,6 +647,7 @@ select {
 
 .segmented button {
   padding: 4px 12px;
+  white-space: nowrap;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -653,7 +655,7 @@ select {
   color: var(--text-secondary);
 }
 
-.segmented button--active {
+.segmented .button--active {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text);
 }

@@ -1,3 +1,4 @@
+import type React from 'react';
 type IconProps = { size?: number; className?: string };
 
 const stroke = 1.5;
@@ -138,5 +139,72 @@ export function IconExternal({ size = 14, className }: IconProps) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
       <path d="M14 4h6v6M10 14L20 4M18 10v8a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h8" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" />
     </svg>
+  );
+}
+
+function StrokeIcon({ size = 16, className, children }: IconProps & { children: React.ReactNode }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden
+      stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+
+export function IconInbox(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M4 13l2.5-7h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5z" />
+      <path d="M4 13h4.5l1 2h5l1-2H20" />
+    </StrokeIcon>
+  );
+}
+
+export function IconLeads(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
+      <path d="M16 6.2a3 3 0 0 1 0 5.6M17.5 14.8c1.6.6 2.6 2 3 4.2" />
+    </StrokeIcon>
+  );
+}
+
+export function IconFunnel(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <rect x="4" y="5" width="4" height="14" rx="1" />
+      <rect x="10" y="5" width="4" height="10" rx="1" />
+      <rect x="16" y="5" width="4" height="6" rx="1" />
+    </StrokeIcon>
+  );
+}
+
+export function IconTopics(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="12" cy="12" r="1" />
+    </StrokeIcon>
+  );
+}
+
+export function IconBroadcast(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M4 10v4h3l6 4V6L7 10H4z" />
+      <path d="M16.5 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11" />
+    </StrokeIcon>
+  );
+}
+
+export function IconAccounts(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="10" r="3" />
+      <path d="M6.5 18.2c1.2-2 3.1-3 5.5-3s4.3 1 5.5 3" />
+    </StrokeIcon>
   );
 }
