@@ -147,6 +147,14 @@ describe('OpenAiManagerAi', () => {
       jevApiKey: '',
       jevModel: '',
       handoffNotifyTo: '',
+      ownerName: 'Кирилл',
+      sttBaseUrl: '',
+      sttApiKey: '',
+      sttModel: '',
+      ttsBaseUrl: '',
+      ttsApiKey: '',
+      ttsModel: '',
+      ttsVoice: '',
     });
     const ai = new OpenAiManagerAi(settings);
     const project = {

@@ -4,7 +4,8 @@ import type { DialogTurn, ManagerAi } from './types';
 
 const MANAGER_RULES =
   'Правила: пиши как живой человек на языке собеседника; 1–4 коротких предложения; один вопрос за раз; ' +
-  'не выдумывай цены и условия, которых нет в оффере и промпте; не упоминай, что ты ИИ, если прямо не спросили. ' +
+  'не выдумывай цены и условия, которых нет в оффере и промпте; ты — помощник {owner}: сам не говори, что ты ИИ, ' +
+  'но если собеседник прямо и всерьёз спрашивает, бот ли ты, не отрицай — скажи, что ты цифровой помощник {owner} и {owner} подключится лично. ' +
   'Ответ строго JSON: {"reply": "...", "handoff": true|false, "reason": "короткая причина на русском"}. ' +
   'handoff=true, если цель из промпта достигнута (собраны требования, готов к заказу/оплате, договорились о созвоне), ' +
   'человек просит человека/договор/смету вне промпта, злится или тема вне компетенции. При handoff=true reply — короткий мост ' +
@@ -15,7 +16,8 @@ function materialsText(project: Project): string {
   return parts.length ? parts.join('\n\n') : '—';
 }
 
-function managerContext(project: Project, mgr: ManagerSettings): string {
+// {owner} in the prompt and rules becomes Settings.ownerName («Кирилл» by default).
+function managerContext(project: Project, mgr: ManagerSettings, owner: string): string {
   return `${mgr.prompt}
 
 Контекст проекта «${project.name}»:
@@ -26,7 +28,7 @@ function managerContext(project: Project, mgr: ManagerSettings): string {
 Материалы:
 ${materialsText(project)}
 
-${MANAGER_RULES}`;
+${MANAGER_RULES}`.replaceAll('{owner}', owner || 'владельца');
 }
 
 function llmFromManager(settings: ManagerSettings): LlmOverride {
@@ -91,7 +93,7 @@ ${hist ? `Уже отправлено:\n${hist}` : ''}`;
     settings?: ManagerSettings,
   ): Promise<ManagerTestResult> {
     const mgr = effectiveManager(project, settings);
-    const system = managerContext(project, mgr);
+    const system = managerContext(project, mgr, this.getSettings().ownerName);
     const messages = [
       { role: 'system' as const, content: system },
       ...toChatMessages(history).map((m) => ({ role: m.role, content: m.content })),
