@@ -1,6 +1,6 @@
 // Contract of the AI layer. Implemented in ./leadAi.ts over an OpenAI-compatible chat API.
 
-import type { Lead, LeadLabel, ManagerSettings, ManagerTestResult, Project, ProjectInput } from '../../shared/types';
+import type { ClientCard, Lead, LeadLabel, ManagerSettings, ManagerTestResult, Project, ProjectInput } from '../../shared/types';
 import type { TgChat, TgMessage } from '../telegram/types';
 
 export type ProjectBrief = Pick<ProjectInput, 'task' | 'target' | 'offer' | 'geo' | 'languages' | 'materials'>;
@@ -48,5 +48,6 @@ export interface ManagerAi {
   // Chain step in 'ai' mode: instruction is the step text; history is what was sent so far.
   writeStep(project: Project, lead: Lead, instruction: string, history: DialogTurn[]): Promise<string>;
   // Next manager message for the dialog, or a handoff decision. settings override project.manager (sandbox).
-  reply(project: Project, lead: Lead, history: DialogTurn[], settings?: ManagerSettings): Promise<ManagerTestResult>;
+  // card: current CRM card — the manager asks the open questions of the anamnesis one by one.
+  reply(project: Project, lead: Lead, history: DialogTurn[], settings?: ManagerSettings, card?: ClientCard): Promise<ManagerTestResult>;
 }
