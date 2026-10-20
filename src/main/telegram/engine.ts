@@ -244,7 +244,8 @@ export class TdlEngine implements TelegramEngine {
     const slot = await this.requireAuthorizedSlot(accountId);
     try {
       const limits = await this.invoke(slot, { _: 'getPublicPostSearchLimits', query });
-      if (!limits.is_current_query_free) return [];
+      // is_current_query_free means "already paid for"; free daily queries come from remaining_free_query_count.
+      if (!limits.is_current_query_free && limits.remaining_free_query_count <= 0) return [];
       const found = await this.invoke(slot, {
         _: 'searchPublicPosts',
         query,
@@ -319,6 +320,7 @@ export class TdlEngine implements TelegramEngine {
     const collected: message[] = [];
     const seenIds = new Set<number>(); // offset 0 returns from_message_id again on the next page
     let fromMessageId = 0;
+    let emptyPages = 0;
 
     while (collected.length < limit) {
       const page = await this.invoke(slot, {
@@ -329,10 +331,14 @@ export class TdlEngine implements TelegramEngine {
         limit: Math.min(100, limit - collected.length),
         only_local: false,
       });
-      if (!page.messages.some((m) => m !== null)) break;
-
       const pageMessages = page.messages.filter((m): m is message => m !== null && !seenIds.has(m.id));
-      if (!pageMessages.length) break;
+      // TDLib loads history from the server lazily: the first calls often return 0–1 messages.
+      if (!pageMessages.length) {
+        if (++emptyPages > 3) break;
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
+      emptyPages = 0;
       for (const msg of pageMessages) {
         seenIds.add(msg.id);
         if (msg.date * 1000 < sinceMs) continue;

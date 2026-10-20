@@ -257,11 +257,17 @@ describe('autopilot', () => {
       accountId: null,
       status: 'active',
     });
-    db.bumpSourceStats(weak.id, 20, 1);
+    const good = db.addSource({
+      projectId: project.id, tgChatId: 302, title: 'Busy', username: null, kind: 'supergroup', memberCount: 5000,
+      foundBy: 'x', accountId: null, status: 'active',
+    });
+    db.bumpSourceStats(weak.id, 200, 1); // 0.5% leads
+    db.bumpSourceStats(good.id, 200, 3); // 1.5% leads: a good busy chat
     db.updateProject(project.id, { autopilot: { refreshSources: true, workingListSize: 10 } });
     const ap = createAutopilot(pipeline);
     await ap.run(project.id);
     expect(db.getSource(weak.id).status).toBe('rejected');
+    expect(db.getSource(good.id).status).toBe('active');
   });
 });
 

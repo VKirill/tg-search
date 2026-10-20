@@ -24,8 +24,9 @@ function countActive(sources: Source[]): number {
 }
 
 function sourceStatusForScore(score: number, activeCount: number, workingListSize: number): Source['status'] {
-  if (score < 30) return 'rejected';
-  if (score >= 60 && activeCount < workingListSize) return 'active';
+  // Low bar on purpose: every message is qualified anyway, and weak sources are retired by their real lead yield.
+  if (score < 15) return 'rejected';
+  if (score >= 35 && activeCount < workingListSize) return 'active';
   return 'candidate';
 }
 

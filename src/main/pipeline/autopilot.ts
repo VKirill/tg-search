@@ -29,8 +29,9 @@ export function createAutopilot(deps: AutopilotDeps): AutopilotScheduler {
   function retireWeakSources(project: Project) {
     for (const s of deps.db.listSources(project.id)) {
       if (s.status !== 'active') continue;
-      if (s.checkedLeads < 10) continue;
-      if (s.matchedLeads / s.checkedLeads >= 0.1) continue;
+      // checkedLeads counts every qualified message; in a busy chat 1% leads is already a good source.
+      if (s.checkedLeads < 100) continue;
+      if (s.matchedLeads / s.checkedLeads >= 0.01) continue;
       const updated = deps.db.updateSource(s.id, { status: 'rejected' });
       deps.emit({ type: 'source:update', source: updated });
     }
