@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Db } from '../src/main/db';
 import { createRealtime } from '../src/main/pipeline/realtime';
-import { DEFAULT_AUTOPILOT } from '../src/shared/types';
+import { DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../src/shared/types';
 import { FakeAi, FakeEngine, makeChat, makeMsg } from './fakes';
 describe('createRealtime', () => {
   let db: Db;
@@ -30,6 +30,8 @@ describe('createRealtime', () => {
       target: 't',
       offer: 'o',
       criteria: '',
+      sequence: [],
+      manager: DEFAULT_MANAGER,
       geo: [],
       languages: [],
       accountIds: [acc.id],

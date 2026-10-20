@@ -1,3 +1,4 @@
+import { DEFAULT_MANAGER } from '../src/shared/types';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
 import { createApp } from '../src/main/app';
@@ -23,6 +24,8 @@ function setupPipeline() {
     target: 'buyers',
     offer: 'dev',
     criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     geo: [],
     languages: ['ru'],
     accountIds: [acc.id],

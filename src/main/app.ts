@@ -141,6 +141,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       list: async (projectId, filter) => db.listLeads(projectId, filter),
       feedback: async (leadId, value) => db.updateLead(leadId, { feedback: value }),
       setStatus: async (leadId, status) => db.setLeadStatus(leadId, status),
+      setHandoff: async (leadId, handoff) => {
+        const lead = db.updateLead(leadId, { handoff, handoffReason: handoff ? 'Взято вручную' : null });
+        emit({ type: 'lead:update', lead });
+        return lead;
+      },
     },
 
     messages: {
@@ -163,6 +168,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       runNow: (projectId) => autopilot.runNow(projectId),
     },
 
+    manager: {
+      test: async () => {
+        throw new Error('not implemented'); // manager worker
+      },
+    },
     broadcasts: {
       list: async () => db.listBroadcasts(),
       create: (input) => broadcaster.create(input),

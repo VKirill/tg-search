@@ -4,7 +4,9 @@
 import { DatabaseSync } from 'node:sqlite';
 import {
   DEFAULT_AUTOPILOT,
+  DEFAULT_MANAGER,
   type Account,
+  type ManagerSettings,
   type Broadcast,
   type BroadcastChat,
   type AutopilotSettings,
@@ -99,7 +101,8 @@ function toProject(r: Row): Project {
   return {
     id: r.id, name: r.name, task: r.task, target: r.target, offer: r.offer, criteria: r.criteria,
     geo: parse(r.geo, []), languages: parse(r.languages, []), accountIds: parse(r.account_ids, []),
-    materials: parse(r.materials, []), keywords: parse(r.keywords, []),
+    materials: parse(r.materials, []), keywords: parse(r.keywords, []), sequence: parse(r.sequence, []),
+    manager: { ...DEFAULT_MANAGER, ...parse<Partial<ManagerSettings>>(r.manager, {}) },
     autopilot: { ...DEFAULT_AUTOPILOT, ...parse<Partial<AutopilotSettings>>(r.autopilot, {}) },
     createdAt: r.created_at,
   };
@@ -126,7 +129,8 @@ function toLead(r: Row): Lead {
     id: r.id, projectId: r.project_id, sourceId: r.source_id, tgChatId: r.tg_chat_id, tgMessageId: r.tg_message_id,
     authorUserId: r.author_user_id, authorName: r.author_name, authorUsername: r.author_username, text: r.text,
     date: r.date, link: r.link, score: r.score, label: r.label, reason: r.reason, feedback: r.feedback,
-    status: r.status, accountId: r.account_id, createdAt: r.created_at,
+    status: r.status, accountId: r.account_id, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
+    handoff: !!r.handoff, handoffReason: r.handoff_reason, createdAt: r.created_at,
   };
 }
 
@@ -146,6 +150,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: '',
   jevModel: 'jev-1.14.0',
+  handoffNotifyTo: '',
 };
 
 export class Db {
@@ -158,6 +163,15 @@ export class Db {
     // Columns added after the first release
     const projectCols = this.all('PRAGMA table_info(projects)').map((c) => c.name);
     if (!projectCols.includes('criteria')) this.raw.exec("ALTER TABLE projects ADD COLUMN criteria TEXT NOT NULL DEFAULT ''");
+    if (!projectCols.includes('sequence')) this.raw.exec("ALTER TABLE projects ADD COLUMN sequence TEXT NOT NULL DEFAULT '[]'");
+    if (!projectCols.includes('manager')) this.raw.exec("ALTER TABLE projects ADD COLUMN manager TEXT NOT NULL DEFAULT '{}'");
+    const leadCols = this.all('PRAGMA table_info(leads)').map((c) => c.name);
+    if (!leadCols.includes('sequence_step')) {
+      this.raw.exec(`ALTER TABLE leads ADD COLUMN sequence_step INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN next_step_at INTEGER;
+        ALTER TABLE leads ADD COLUMN handoff INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN handoff_reason TEXT;`);
+    }
   }
 
   private one(sql: string, ...args: any[]): Row | undefined {
@@ -224,10 +238,10 @@ export class Db {
   }
   createProject(p: ProjectInput): Project {
     const res = this.run(
-      `INSERT INTO projects(name, task, target, offer, criteria, geo, languages, account_ids, materials, keywords, autopilot, created_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects(name, task, target, offer, criteria, geo, languages, account_ids, materials, keywords, sequence, manager, autopilot, created_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.name, p.task, p.target, p.offer, p.criteria ?? '', json(p.geo), json(p.languages), json(p.accountIds), json(p.materials),
-      json(p.keywords), json(DEFAULT_AUTOPILOT), Date.now(),
+      json(p.keywords), json(p.sequence ?? []), json({ ...DEFAULT_MANAGER, ...p.manager }), json(DEFAULT_AUTOPILOT), Date.now(),
     );
     return this.getProject(Number(res.lastInsertRowid));
   }
@@ -236,9 +250,9 @@ export class Db {
     const next = { ...cur, ...patch, autopilot: { ...cur.autopilot, ...patch.autopilot } };
     this.run(
       `UPDATE projects SET name = ?, task = ?, target = ?, offer = ?, criteria = ?, geo = ?, languages = ?, account_ids = ?,
-       materials = ?, keywords = ?, autopilot = ? WHERE id = ?`,
+       materials = ?, keywords = ?, sequence = ?, manager = ?, autopilot = ? WHERE id = ?`,
       next.name, next.task, next.target, next.offer, next.criteria, json(next.geo), json(next.languages), json(next.accountIds),
-      json(next.materials), json(next.keywords), json(next.autopilot), id,
+      json(next.materials), json(next.keywords), json(next.sequence), json(next.manager), json(next.autopilot), id,
     );
     return this.getProject(id);
   }
@@ -307,7 +321,7 @@ export class Db {
     return toLead(r);
   }
   // Returns the new lead, or undefined when this message is already a lead of the project.
-  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId'>): Lead | undefined {
+  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
     const res = this.run(
       `INSERT INTO leads(project_id, source_id, tg_chat_id, tg_message_id, author_user_id, author_name, author_username,
        text, date, link, score, label, reason, created_at)
@@ -317,10 +331,16 @@ export class Db {
     );
     return res.changes ? this.getLead(Number(res.lastInsertRowid)) : undefined;
   }
-  updateLead(id: number, patch: Partial<Pick<Lead, 'feedback' | 'status' | 'accountId'>>): Lead {
-    const cols: Record<string, string> = { feedback: 'feedback', status: 'status', accountId: 'account_id' };
+  updateLead(
+    id: number,
+    patch: Partial<Pick<Lead, 'feedback' | 'status' | 'accountId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>>,
+  ): Lead {
+    const cols: Record<string, string> = {
+      feedback: 'feedback', status: 'status', accountId: 'account_id', sequenceStep: 'sequence_step',
+      nextStepAt: 'next_step_at', handoff: 'handoff', handoffReason: 'handoff_reason',
+    };
     for (const [k, v] of Object.entries(patch)) {
-      if (cols[k] && v !== undefined) this.run(`UPDATE leads SET ${cols[k]} = ? WHERE id = ?`, v, id);
+      if (cols[k] && v !== undefined) this.run(`UPDATE leads SET ${cols[k]} = ? WHERE id = ?`, typeof v === 'boolean' ? Number(v) : v, id);
     }
     return this.getLead(id);
   }

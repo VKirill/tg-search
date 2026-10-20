@@ -31,7 +31,7 @@ vi.mock('tdl', () => ({
               ? { _: 'chat', id: 7, title: 'User', type: { _: 'chatTypePrivate', user_id: 7 } }
               : { _: 'chat', id: -100, title: 'Group', type: { _: 'chatTypeBasicGroup', basic_group_id: 1 } };
           case 'getUser':
-            return { _: 'user', id: 7, first_name: 'Ann', last_name: '', usernames: null };
+            return { _: 'user', id: 7, first_name: 'Ann', last_name: '', usernames: null, type: { _: 'userTypeRegular' } };
           case 'createPrivateChat':
             return { _: 'chat', id: 7, title: 'User', type: { _: 'chatTypePrivate', user_id: 7 } };
           case 'sendMessage': {
@@ -56,7 +56,7 @@ vi.mock('tdl', () => ({
 
 const { TdlEngine } = await import('../src/main/telegram/engine');
 
-const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '' });
+const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '', handoffNotifyTo: '' });
 const dataDir = join(import.meta.dirname, '../tmp/tdlib-fake');
 mkdirSync(dataDir, { recursive: true });
 

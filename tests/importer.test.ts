@@ -1,3 +1,4 @@
+import { DEFAULT_MANAGER } from '../src/shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Db } from '../src/main/db';
 import { createImporter, parseCsvLinks } from '../src/main/pipeline/importer';
@@ -37,6 +38,8 @@ describe('createImporter', () => {
       target: 't',
       offer: 'o',
       criteria: '',
+      sequence: [],
+      manager: DEFAULT_MANAGER,
       geo: [],
       languages: [],
       accountIds: [acc.id],

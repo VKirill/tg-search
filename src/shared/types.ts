@@ -24,6 +24,30 @@ export interface AutopilotSettings {
   nextRunAt: number | null; // unix ms
 }
 
+// One step of the outreach chain. Step 0 is the first message; later steps go out only while the lead stays silent.
+export interface SequenceStep {
+  delayHours: number; // after the previous step (ignored for step 0)
+  mode: 'template' | 'ai'; // template: send text as is; ai: text is an instruction for the AI writer
+  text: string; // template supports {name} and {request}
+}
+
+// AI manager that talks to a lead after they answer, like a sales manager, until it hands the dialog to a human.
+export interface ManagerSettings {
+  enabled: boolean;
+  baseUrl: string; // any OpenAI-compatible endpoint; empty = global LLM settings
+  apiKey: string; // empty = global LLM key
+  model: string; // empty = global LLM model
+  prompt: string; // persona, goal, offer details, prices, rules, when to hand over
+  replyDelaySec: number; // wait before answering: looks human and merges message bursts
+  maxReplies: number; // auto replies per lead, then hand over to a human
+}
+
+export interface ManagerTestResult {
+  reply: string;
+  handoff: boolean; // the manager wants a human to take over
+  reason: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -36,13 +60,15 @@ export interface Project {
   accountIds: number[];
   materials: Material[];
   keywords: string[];
+  sequence: SequenceStep[];
+  manager: ManagerSettings;
   autopilot: AutopilotSettings;
   createdAt: number;
 }
 
 export type ProjectInput = Pick<
   Project,
-  'name' | 'task' | 'target' | 'offer' | 'criteria' | 'geo' | 'languages' | 'accountIds' | 'materials' | 'keywords'
+  'name' | 'task' | 'target' | 'offer' | 'criteria' | 'geo' | 'languages' | 'accountIds' | 'materials' | 'keywords' | 'sequence' | 'manager'
 >;
 
 export type AccountStatus = 'authorized' | 'wait_code' | 'wait_password' | 'logged_out' | 'error';
@@ -107,6 +133,10 @@ export interface Lead {
   feedback: 'up' | 'down' | null;
   status: LeadStatus;
   accountId: number | null; // account that talks to this lead
+  sequenceStep: number; // index of the next chain step to send (0 = nothing sent yet)
+  nextStepAt: number | null; // unix ms when the next chain step is due; null = chain finished or stopped
+  handoff: boolean; // a human handles this dialog: the AI manager stays silent
+  handoffReason: string | null;
   createdAt: number;
 }
 
@@ -132,6 +162,7 @@ export interface Settings {
   jevBaseUrl: string; // TypeSafe System One endpoint base, e.g. https://api.openlux.ai/v1
   jevApiKey: string; // empty = qualify with the LLM instead of Jev
   jevModel: string; // e.g. jev-1.14.0
+  handoffNotifyTo: string; // @username that gets a summary when the AI manager hands a dialog over; empty = app notification only
 }
 
 // Periodic posting of an offer into chosen chats from the user's accounts.
@@ -226,6 +257,7 @@ export interface Api {
     list(projectId: number, filter?: LeadFilter): Promise<Lead[]>;
     feedback(leadId: number, value: 'up' | 'down' | null): Promise<Lead>;
     setStatus(leadId: number, status: LeadStatus): Promise<Lead>;
+    setHandoff(leadId: number, handoff: boolean): Promise<Lead>; // take the dialog over / give it back to the AI manager
   };
   messages: {
     list(leadId: number): Promise<ChatMessage[]>;
@@ -235,6 +267,10 @@ export interface Api {
   autopilot: {
     set(projectId: number, patch: Partial<AutopilotSettings>): Promise<Project>;
     runNow(projectId: number): Promise<void>;
+  };
+  manager: {
+    // Sandbox: one manager turn for a made-up dialog, without Telegram. history excludes the lead's first message.
+    test(projectId: number, leadText: string, history: { direction: 'in' | 'out'; text: string }[], settings?: ManagerSettings): Promise<ManagerTestResult>;
   };
   broadcasts: {
     list(): Promise<Broadcast[]>;
@@ -248,6 +284,18 @@ export interface Api {
   };
   onEvent(cb: (e: AppEvent) => void): () => void;
 }
+
+export const DEFAULT_MANAGER: ManagerSettings = {
+  enabled: false,
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+  prompt:
+    'Ты — менеджер по продажам. Отвечай коротко и по-человечески, на языке собеседника. Цель — понять задачу, сроки и бюджет и договориться о созвоне. ' +
+    'Не выдумывай цены и обещания, которых нет в описании оффера. Если человек просит смету, договор, звонок прямо сейчас, злится или вопрос вне твоей компетенции — передай диалог человеку.',
+  replyDelaySec: 60,
+  maxReplies: 8,
+};
 
 export const DEFAULT_AUTOPILOT: AutopilotSettings = {
   enabled: false,

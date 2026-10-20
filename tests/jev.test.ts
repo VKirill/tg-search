@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JevQualifier } from '../src/main/ai/jev';
-import { DEFAULT_AUTOPILOT, type Project, type Settings } from '../src/shared/types';
+import { DEFAULT_AUTOPILOT, type Project, type Settings, DEFAULT_MANAGER } from '../src/shared/types';
 import type { TgMessage } from '../src/main/telegram/types';
 
 const settings = (): Settings => ({
@@ -11,7 +11,7 @@ const settings = (): Settings => ({
   llmModel: '',
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: 'test-key',
-  jevModel: 'jev-1.14.0',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '',
 });
 
 const project = (): Project => ({
@@ -21,6 +21,8 @@ const project = (): Project => ({
   target: 'бизнес',
   offer: 'разработка',
   criteria: 'Ищем заказчиков',
+  sequence: [],
+  manager: DEFAULT_MANAGER,
   geo: [],
   languages: ['ru'],
   accountIds: [],
@@ -40,6 +42,7 @@ function msg(id: number, text: string): TgMessage {
     senderChatId: null,
     senderName: 'A',
     senderUsername: 'a',
+    senderIsBot: false,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,

@@ -11,7 +11,7 @@ const emptySettings = () => ({
   llmModel: '',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '',
+  jevModel: '', handoffNotifyTo: '',
 });
 
 describe('TdlEngine smoke', () => {

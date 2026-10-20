@@ -14,7 +14,7 @@ export interface ScannerDeps {
 const MIN_TEXT_LEN = 15;
 
 export function filterIncomingMessages(projectId: number, db: Db, msgs: TgMessage[]): TgMessage[] {
-  const incoming = msgs.filter((m) => !m.isOutgoing && m.text.trim().length >= MIN_TEXT_LEN);
+  const incoming = msgs.filter((m) => !m.isOutgoing && !m.senderIsBot && m.text.trim().length >= MIN_TEXT_LEN);
   return db.filterUnseen(projectId, incoming);
 }
 

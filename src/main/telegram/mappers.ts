@@ -114,6 +114,7 @@ export function mapMessage(
     chatUsername?: string | null;
     senderName?: string | null;
     senderUsername?: string | null;
+    senderIsBot?: boolean;
   } = {},
 ): TgMessage {
   const { senderUserId, senderChatId } = senderIdsFromMessage(msg);
@@ -128,6 +129,7 @@ export function mapMessage(
     senderChatId,
     senderName: opts.senderName ?? null,
     senderUsername: opts.senderUsername ?? null,
+    senderIsBot: opts.senderIsBot ?? false,
     replyToMessageId: replyToMessageId(msg),
     link: buildPublicMessageLink(chatUsername, msg.id),
     isOutgoing: msg.is_outgoing,

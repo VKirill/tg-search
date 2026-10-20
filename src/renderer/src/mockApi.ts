@@ -12,7 +12,9 @@ import type {
   Settings,
   Source,
 } from '../../shared/types';
-import { DEFAULT_AUTOPILOT } from '../../shared/types';
+import { DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../../shared/types';
+
+const leadExtra = { sequenceStep: 0, nextStepAt: null, handoff: false, handoffReason: null };
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -25,6 +27,9 @@ let settings: Settings = {
   llmBaseUrl: 'https://openrouter.ai/api/v1',
   llmApiKey: '',
   llmModel: 'anthropic/claude-haiku-5.5',
+  jevBaseUrl: 'https://api.openlux.ai/v1',
+  jevApiKey: '',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '',
 };
 
 const accounts: Account[] = [
@@ -84,6 +89,9 @@ const projects: Project[] = [
     accountIds: [1, 2],
     materials: [{ kind: 'url', value: 'https://example.com/portfolio' }],
     keywords: ['нужен разработчик', 'mvp telegram', 'автоматизация бизнеса'],
+    criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     autopilot: makeAutopilot({ enabled: true, scanIntervalMin: 60, aiReply: true, minScore: 85 }),
     createdAt: now - 30 * 86400_000,
   },
@@ -98,6 +106,9 @@ const projects: Project[] = [
     accountIds: [1],
     materials: [],
     keywords: ['ищу маркетолога', 'настройка рекламы'],
+    criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     autopilot: makeAutopilot({ enabled: false }),
     createdAt: now - 20 * 86400_000,
   },
@@ -112,6 +123,9 @@ const projects: Project[] = [
     accountIds: [1],
     materials: [],
     keywords: ['партнёрство разработка'],
+    criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     autopilot: makeAutopilot(),
     createdAt: now - 15 * 86400_000,
   },
@@ -126,6 +140,9 @@ const projects: Project[] = [
     accountIds: [2],
     materials: [],
     keywords: ['ищу инвестиции saas'],
+    criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     autopilot: makeAutopilot(),
     createdAt: now - 10 * 86400_000,
   },
@@ -140,6 +157,9 @@ const projects: Project[] = [
     accountIds: [1],
     materials: [],
     keywords: ['ищу работу typescript', 'react удалённо'],
+    criteria: '',
+    sequence: [],
+    manager: DEFAULT_MANAGER,
     autopilot: makeAutopilot({ enabled: true, refreshSources: true }),
     createdAt: now - 5 * 86400_000,
   },
@@ -215,6 +235,7 @@ const leads: Lead[] = [
     score: 96,
     label: 'demand',
     reason: 'Прямой запрос на разработку MVP с Telegram — совпадает с оффером.',
+    ...leadExtra,
     feedback: 'up',
     status: 'dialog',
     accountId: 1,
@@ -235,6 +256,7 @@ const leads: Lead[] = [
     score: 91,
     label: 'demand',
     reason: 'Запрос на автоматизацию лидов — близко к продукту.',
+    ...leadExtra,
     feedback: null,
     status: 'replied',
     accountId: 1,
@@ -255,6 +277,7 @@ const leads: Lead[] = [
     score: 78,
     label: 'interest',
     reason: 'Интерес к разработке, но контакт через канал.',
+    ...leadExtra,
     feedback: null,
     status: 'new',
     accountId: null,
@@ -275,6 +298,7 @@ const leads: Lead[] = [
     score: 88,
     label: 'demand',
     reason: 'Electron — прямое попадание в стек.',
+    ...leadExtra,
     feedback: 'up',
     status: 'new',
     accountId: null,
@@ -295,6 +319,7 @@ const leads: Lead[] = [
     score: 62,
     label: 'interest',
     reason: 'Смежная тема, но не core-оффер.',
+    ...leadExtra,
     feedback: 'down',
     status: 'hidden',
     accountId: null,
@@ -315,6 +340,7 @@ const leads: Lead[] = [
     score: 84,
     label: 'demand',
     reason: 'Запрос на маркетинг.',
+    ...leadExtra,
     feedback: null,
     status: 'new',
     accountId: null,
@@ -503,6 +529,10 @@ export function createMockApi(): Api {
       },
     },
     sources: {
+      async importCsv() {
+        await delay(300);
+        return { added: 0, skipped: 0, failed: [] };
+      },
       async list(projectId) {
         await delay(60);
         return sources.filter((s) => s.projectId === projectId).map((s) => ({ ...s }));
@@ -573,6 +603,11 @@ export function createMockApi(): Api {
       },
     },
     leads: {
+      async setHandoff(leadId, handoff) {
+        const l = leads.find((x) => x.id === leadId)!;
+        Object.assign(l, { handoff, handoffReason: handoff ? 'Взято вручную' : null });
+        return { ...l };
+      },
       async list(projectId, filter) {
         await delay(50);
         return filterLeads(projectId, filter);
@@ -657,6 +692,27 @@ export function createMockApi(): Api {
         emit({ type: 'job', projectId, stage: 'Готово', done: true });
       },
     },
+    manager: {
+      async test() {
+        await delay(400);
+        return { reply: 'Понял задачу. Подскажите сроки и бюджет — и предложу варианты.', handoff: false, reason: '' };
+      },
+    },
+    broadcasts: {
+      async list() {
+        return [];
+      },
+      async create() {
+        throw new Error('Рассылки в демо-режиме не создаются');
+      },
+      async update() {
+        throw new Error('Рассылки в демо-режиме не изменяются');
+      },
+      async remove() {},
+      async runNow() {
+        return { posted: 0, skipped: 0, errors: 0 };
+      },
+    },
     shell: {
       async openExternal(url) {
         window.open(url, '_blank');
@@ -687,6 +743,7 @@ export function createMockApi(): Api {
       score: 89,
       label: 'demand',
       reason: 'Свежий запрос на интеграцию.',
+      ...leadExtra,
       feedback: null,
       status: 'new',
       accountId: null,

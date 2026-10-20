@@ -1,3 +1,4 @@
+import { DEFAULT_MANAGER } from '../../../shared/types';
 import { useEffect, useState } from 'react';
 import type { Account, Material, Project, ProjectInput, ProjectTask } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
@@ -85,6 +86,9 @@ export function ProjectDialog({ project, accounts, onClose, onSaved }: ProjectDi
     task,
     target,
     offer,
+    criteria: project?.criteria ?? '',
+    sequence: project?.sequence ?? [],
+    manager: project?.manager ?? DEFAULT_MANAGER,
     geo,
     languages,
     accountIds,

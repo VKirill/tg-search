@@ -103,6 +103,7 @@ export class FakeEngine implements TelegramEngine {
       senderChatId: null,
       senderName: null,
       senderUsername: null,
+      senderIsBot: false,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -120,6 +121,7 @@ export class FakeEngine implements TelegramEngine {
       senderChatId: null,
       senderName: null,
       senderUsername: null,
+      senderIsBot: false,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -143,7 +145,7 @@ export class FakeEngine implements TelegramEngine {
     this.posted.push({ accountId, chatId, text });
     return {
       chatId, messageId: Date.now(), date: Date.now(), text, senderUserId: null, senderChatId: null,
-      senderName: null, senderUsername: null, replyToMessageId: null, link: null, isOutgoing: true,
+      senderName: null, senderUsername: null, senderIsBot: false, replyToMessageId: null, link: null, isOutgoing: true,
     };
   }
 
@@ -208,6 +210,7 @@ export function makeMsg(
     text,
     senderUserId: 500 + messageId,
     senderChatId: null,
+    senderIsBot: false,
     senderName: 'Author',
     senderUsername: 'author',
     replyToMessageId: null,

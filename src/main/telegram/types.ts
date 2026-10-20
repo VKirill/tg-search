@@ -22,6 +22,7 @@ export interface TgMessage {
   senderChatId: number | null;
   senderName: string | null;
   senderUsername: string | null;
+  senderIsBot: boolean; // chat moderation bots etc.: never leads
   replyToMessageId: number | null;
   link: string | null; // public t.me link when the chat has a username
   isOutgoing: boolean;

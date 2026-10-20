@@ -685,16 +685,18 @@ export class TdlEngine implements TelegramEngine {
     const { senderUserId, senderChatId } = senderIdsFromMessage(msg);
     let senderName: string | null = null;
     let senderUsername: string | null = null;
+    let senderIsBot = false;
     if (senderUserId) {
       const u = await this.getUserCached(slot, senderUserId);
       senderName = displayUserName(u);
       senderUsername = activeUsername(u.usernames);
+      senderIsBot = u.type._ === 'userTypeBot';
     } else if (senderChatId) {
       const senderChat = await this.invoke(slot, { _: 'getChat', chat_id: senderChatId });
       senderName = senderChat.title;
       senderUsername = await this.chatUsername(slot, senderChat);
     }
-    return mapMessage(msg, { chatUsername, senderName, senderUsername });
+    return mapMessage(msg, { chatUsername, senderName, senderUsername, senderIsBot });
   }
 
   private async mapMessages(slot: AccountSlot, messages: message[]): Promise<TgMessage[]> {

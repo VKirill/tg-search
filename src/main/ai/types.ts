@@ -1,6 +1,6 @@
 // Contract of the AI layer. Implemented in ./leadAi.ts over an OpenAI-compatible chat API.
 
-import type { Lead, LeadLabel, Project, ProjectInput } from '../../shared/types';
+import type { Lead, LeadLabel, ManagerSettings, ManagerTestResult, Project, ProjectInput } from '../../shared/types';
 import type { TgChat, TgMessage } from '../telegram/types';
 
 export type ProjectBrief = Pick<ProjectInput, 'task' | 'target' | 'offer' | 'geo' | 'languages' | 'materials'>;
@@ -41,4 +41,12 @@ export interface Qualifier {
 // Spins a broadcast text so every post differs slightly while keeping the meaning.
 export interface TextSpinner {
   spin(text: string): Promise<string>;
+}
+
+// Writes chain messages and runs the AI manager dialog with any OpenAI-compatible model.
+export interface ManagerAi {
+  // Chain step in 'ai' mode: instruction is the step text; history is what was sent so far.
+  writeStep(project: Project, lead: Lead, instruction: string, history: DialogTurn[]): Promise<string>;
+  // Next manager message for the dialog, or a handoff decision. settings override project.manager (sandbox).
+  reply(project: Project, lead: Lead, history: DialogTurn[], settings?: ManagerSettings): Promise<ManagerTestResult>;
 }

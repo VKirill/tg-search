@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiLeadAi } from '../src/main/ai/leadAi';
 import { chatCompletion, parseJsonFromLlm } from '../src/main/ai/llm';
 import { LlmSpinner } from '../src/main/ai/spinner';
-import { DEFAULT_AUTOPILOT, type Lead, type Project, type Settings } from '../src/shared/types';
+import { DEFAULT_AUTOPILOT, type Lead, type Project, type Settings, DEFAULT_MANAGER } from '../src/shared/types';
 import type { TgMessage } from '../src/main/telegram/types';
 
 const baseSettings = (): Settings => ({
@@ -13,7 +13,7 @@ const baseSettings = (): Settings => ({
   llmModel: 'anthropic/claude-haiku-5.5',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '',
+  jevModel: '', handoffNotifyTo: '',
 });
 
 function completionBody(content: string) {
@@ -41,6 +41,8 @@ const sampleProject = (): Project => ({
   target: 'стартапы',
   offer: 'разработка на TypeScript',
   criteria: '',
+  sequence: [],
+  manager: DEFAULT_MANAGER,
   geo: ['Россия'],
   languages: ['русский'],
   accountIds: [1],
@@ -60,6 +62,7 @@ function tgMessage(chatId: number, messageId: number, text: string): TgMessage {
     senderChatId: null,
     senderName: 'U',
     senderUsername: null,
+    senderIsBot: false,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,
@@ -230,6 +233,10 @@ describe('OpenAiLeadAi', () => {
       feedback: null,
       status: 'new',
       accountId: null,
+      sequenceStep: 0,
+      nextStepAt: null,
+      handoff: false,
+      handoffReason: null,
       createdAt: 0,
     };
     await ai.draftReply(sampleProject(), lead, 'dm', []);
