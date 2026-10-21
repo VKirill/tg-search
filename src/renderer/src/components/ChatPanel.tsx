@@ -3,7 +3,6 @@ import type { AgentStep, ChatMessage, Lead, Project, Source } from '../../../sha
 import { formatLeadDate, formatShortTime } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { useToast } from './Toast';
-import { IconExternal } from './Icons';
 import { AudioPlayer } from './AudioPlayer';
 import { AgentTraceSteps, stepsForAutoTurn } from './AgentTraceSteps';
 
@@ -272,13 +271,6 @@ export function ChatPanel({ lead, source, project, onLeadChange, onOpenPublicati
               <>
                 <button type="button" className="btn btn--sm btn--primary" onClick={() => onOpenPublication?.(lead)}>
                   Открыть публикацию
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--sm btn--ghost"
-                  onClick={() => getApi().shell.openExternal(lead.link!).catch(() => window.open(lead.link!, '_blank'))}
-                >
-                  Открыть в Telegram <IconExternal />
                 </button>
               </>
             )}

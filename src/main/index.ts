@@ -24,6 +24,12 @@ import { YooKassaProvider } from './payments/yookassa';
 registerMediaSchemes();
 
 let win: BrowserWindow | null = null;
+const isTelegramLink = (url: string) => /^(tg:|https?:\/\/(www\.)?(t|telegram)\.me\/)/i.test(url);
+// Telegram links open inside the app («Чаты»); other sites (payments, my.telegram.org) in the browser
+const openLink = (url: string) => {
+  if (isTelegramLink(url)) win?.webContents.send(EVENT_CHANNEL, { type: 'link:open', url } satisfies AppEvent);
+  else void shell.openExternal(url);
+};
 let control: { stop(): void } | null = null;
 let stopApp: (() => Promise<void>) | null = null;
 let stopped = false;
@@ -42,8 +48,13 @@ function createWindow() {
     webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openLink(url);
     return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith('file:') || url.startsWith(process.env.ELECTRON_RENDERER_URL ?? '\0')) return;
+    e.preventDefault();
+    openLink(url);
   });
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else win.loadFile(join(__dirname, '../renderer/index.html'));
@@ -106,7 +117,7 @@ app.whenReady().then(async () => {
     dataDir,
     appDir: app.getAppPath(),
     emit,
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: async (url) => openLink(url),
     payments: new YooKassaProvider(getSettings),
     revealInFolder: async (path) => {
       shell.showItemInFolder(path);

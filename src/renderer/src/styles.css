@@ -2928,3 +2928,13 @@ button.chip:hover {
   background: rgba(0, 0, 0, 0.2);
   resize: vertical;
 }
+
+.text-link {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}

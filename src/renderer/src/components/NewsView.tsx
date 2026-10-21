@@ -3,6 +3,7 @@ import type { NewsChannel, NewsItem, NewsStatus } from '../../../shared/types';
 import { formatLeadDate } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { IconExternal } from './Icons';
+import { LinkText } from './LinkText';
 import { useToast } from './Toast';
 
 const TABS: { id: NewsStatus | 'all'; label: string }[] = [
@@ -159,7 +160,7 @@ export function NewsView() {
               {n.why && <p className="crm-muted news-card__why">{n.why}</p>}
               <details className="news-card__text">
                 <summary>Текст поста</summary>
-                <p>{n.text}</p>
+                <p><LinkText text={n.text} /></p>
               </details>
               <div className="spam-card__actions">
                 {n.link && (

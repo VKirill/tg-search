@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Account, ChatInfo, ChatItem, ChatSummary, Project, Source } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
 import { AudioPlayer } from './AudioPlayer';
-import { IconExternal, IconSearch } from './Icons';
+import { IconSearch } from './Icons';
+import { LinkText } from './LinkText';
 import { useToast } from './Toast';
 
 const KIND_LABEL: Record<ChatInfo['kind'], string> = {
@@ -40,7 +41,7 @@ function Avatar({ chat }: { chat: ChatInfo }) {
   );
 }
 
-export type ChatOpenTarget = { accountId: number; chatId: number; messageId: number };
+export type ChatOpenTarget = { accountId: number; chatId: number; messageId: number | null; chat?: ChatInfo };
 
 type Props = {
   accounts: Account[];
@@ -96,6 +97,7 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
         setChats(list);
         const chat =
           list.find((c) => c.chatId === target.chatId) ??
+          target.chat ??
           ({
             chatId: target.chatId,
             title: `Чат ${target.chatId}`,
@@ -105,13 +107,24 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
             isMember: true,
           } as ChatSummary);
         setSelected(chat);
-        const page = await api.chats.around(target.accountId, target.chatId, target.messageId);
+        setDiscussion(null);
+        if (chat.kind === 'channel') api.chats.discussion(target.accountId, chat.chatId).then(setDiscussion, () => {});
+        if (target.messageId == null) {
+          // a link to the chat itself: its latest messages
+          const latest = await api.chats.history(target.accountId, target.chatId, null);
+          setItems(latest);
+          setNoMore(latest.length === 0);
+          requestAnimationFrame(() => timelineRef.current?.scrollTo(0, timelineRef.current.scrollHeight));
+          return;
+        }
+        const messageId = target.messageId;
+        const page = await api.chats.around(target.accountId, target.chatId, messageId);
         setItems(page);
         setNoMore(true);
-        const hit = page.find((m) => m.messageId === target.messageId);
+        const hit = page.find((m) => m.messageId === messageId);
         setPublicationLink(hit?.link ?? null);
         requestAnimationFrame(() => {
-          const el = messageRefs.current[target.messageId];
+          const el = messageRefs.current[messageId];
           if (el) {
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
           } else {
@@ -393,26 +406,15 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
                 </div>
                 {highlightMessageId != null && (
                   <div className="chats-publication-bar">
-                    <span>Публикация лида в чате</span>
-                    {(publicationLink || selected.username) && (
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() =>
-                          api.shell.openExternal(publicationLink ?? `https://t.me/${selected.username}`)
-                        }
-                      >
-                        Открыть в Telegram <IconExternal size={12} />
+                    <span>Сообщение по ссылке</span>
+                    {publicationLink && (
+                      <button type="button" className="btn btn--sm btn--ghost" onClick={() => navigator.clipboard.writeText(publicationLink)}>
+                        Скопировать ссылку
                       </button>
                     )}
                   </div>
                 )}
               </div>
-              {selected.username && highlightMessageId == null && (
-                <button type="button" className="btn btn--sm" onClick={() => api.shell.openExternal(`https://t.me/${selected.username}`)}>
-                  Открыть в Telegram <IconExternal size={12} />
-                </button>
-              )}
               {discussion && !discussion.spamReason && (
                 discussion.isMember ? (
                   <button type="button" className="btn btn--sm" onClick={() => open(discussion)} title="Чат обсуждений канала">
@@ -474,14 +476,14 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
                           Голосовое · {m.voice.durationSec} с — загрузить
                         </button>
                       ))}
-                    {m.text && <div className="chats-text">{m.text}</div>}
+                    {m.text && <div className="chats-text"><LinkText text={m.text} /></div>}
                     <div className="chats-meta">
                       <span>{timeLabel(m.date)}</span>
                       {selected.isMember && (
                         <button type="button" className="chats-reply" onClick={() => setReplyTo(m)}>Ответить</button>
                       )}
                       {m.link && (
-                        <button type="button" className="chats-reply" onClick={() => api.shell.openExternal(m.link!)}>Ссылка</button>
+                        <button type="button" className="chats-reply" onClick={() => navigator.clipboard.writeText(m.link!)}>Скопировать ссылку</button>
                       )}
                     </div>
                   </div>

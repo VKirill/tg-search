@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Account, Category, Lead, Project, Source } from '../../shared/types';
 import { AccountsDialog } from './components/AccountsDialog';
 import { BroadcastsView } from './components/BroadcastsView';
@@ -50,6 +50,8 @@ function AppInner() {
   const toast = useToast();
   const [projects, setProjects] = useState<Project[]>(shotSeed?.projects ?? []);
   const [accounts, setAccounts] = useState<Account[]>(shotSeed?.accounts ?? []);
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
   const [allSources, setAllSources] = useState<Source[]>([]);
   const [leads, setLeads] = useState<Lead[]>(shotSeed?.leads ?? []);
   const [projectFilterId, setProjectFilterId] = useState<number | null>(null);
@@ -119,6 +121,10 @@ function AppInner() {
 
   useEffect(() => {
     const off = getApi().onEvent((e) => {
+      if (e.type === 'link:open') {
+        void openTelegramLink(e.url);
+        return;
+      }
       if (e.type === 'lead:new') {
         setLeads((prev) => [e.lead, ...prev.filter((l) => l.id !== e.lead.id)]);
         setFreshIds((prev) => new Set(prev).add(e.lead.id));
@@ -294,6 +300,23 @@ function AppInner() {
   const onNav = (v: NavView) => {
     setView(v);
     if (v === 'accounts') setAccountsOpen(true);
+  };
+
+  // Any Telegram link (news, statistics, links in messages) opens in «Чаты» at its message
+  const openTelegramLink = async (url: string) => {
+    const accountId = accountsRef.current.find((a) => a.status === 'authorized')?.id;
+    if (accountId == null) {
+      toast('Нет авторизованного аккаунта для просмотра чата');
+      return;
+    }
+    toast('Открываю ссылку в «Чатах»…');
+    try {
+      const { chat, messageId } = await getApi().chats.resolveLink(accountId, url);
+      setChatTarget({ accountId, chatId: chat.chatId, messageId, chat });
+      setView('chats');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const openPublication = (lead: Lead) => {

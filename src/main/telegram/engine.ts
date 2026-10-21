@@ -308,6 +308,26 @@ export class TdlEngine implements TelegramEngine {
     return mapped;
   }
 
+  async resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const link = url.trim().replace(/^(https?:\/\/)?(www\.)?telegram\.me\//i, 'https://t.me/');
+    const invite = parseInviteLink(link);
+    if (invite) {
+      const info = await this.invoke(slot, { _: 'checkChatInviteLink', invite_link: invite });
+      if (!info.chat_id) throw new Error(`Это приглашение в чат «${info.title}» — вступите в него в «Чатах», чтобы открыть`);
+      const chat = await this.loadTgChat(slot, info.chat_id);
+      if (!chat) throw new Error('Чат не найден');
+      return { chat, messageId: null };
+    }
+    if (/^(https?:\/\/)?t\.me\/(c\/\d+|[A-Za-z0-9_]+)\/\d+/i.test(link) || /^tg:\/\/(resolve|privatepost)/i.test(link)) {
+      const info = await this.invoke(slot, { _: 'getMessageLinkInfo', url: link.startsWith('tg:') || /^https?:/i.test(link) ? link : `https://${link}` });
+      const chat = await this.loadTgChat(slot, info.chat_id);
+      if (!chat) throw new Error('Чат по ссылке не найден');
+      return { chat, messageId: info.message?.id ?? null };
+    }
+    return { chat: await this.resolveChat(accountId, link), messageId: null };
+  }
+
   async getChat(accountId: number, chatId: number): Promise<TgChat> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const mapped = await this.loadTgChat(slot, chatId);

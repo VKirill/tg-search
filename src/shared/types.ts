@@ -591,6 +591,7 @@ export interface LoginState {
 
 export type AppEvent =
   | { type: 'news:new'; item: NewsItem }
+  | { type: 'link:open'; url: string } // a Telegram link clicked anywhere: open it in «Чаты», not in the browser
   | { type: 'lead:new'; lead: Lead }
   | { type: 'lead:update'; lead: Lead }
   | { type: 'message:new'; message: ChatMessage }
@@ -808,6 +809,8 @@ export interface Api {
     search(accountId: number, query: string): Promise<ChatInfo[]>; // the account's chats + public chats/channels
     join(accountId: number, chatIdOrLink: number | string): Promise<ChatInfo>; // id, @username, t.me link or invite link
     leave(accountId: number, chatId: number): Promise<void>;
+    // Any Telegram link → the chat and the message to open in-app (never joins)
+    resolveLink(accountId: number, url: string): Promise<{ chat: ChatInfo; messageId: number | null }>;
     // A channel's discussion group (comments), null when the channel has none; join it with join(linked.chatId)
     discussion(accountId: number, channelIdOrLink: number | string): Promise<ChatInfo | null>;
     // Messages around a message (e.g. «Открыть публикацию» of a lead): ~20 before and ~20 after, oldest first

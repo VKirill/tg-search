@@ -64,6 +64,9 @@ export interface TelegramEngine {
   searchMessages(accountId: number, query: string, sinceMs: number, limit: number): Promise<TgMessage[]>; // chats the account is in
   resolveChat(accountId: number, linkOrUsername: string): Promise<TgChat>;
   getChat(accountId: number, chatId: number): Promise<TgChat>;
+  // t.me/<name>, t.me/<name>/<post>, t.me/c/<id>/<post>, tg://… → the chat and the message (if the link has one);
+  // never joins: an invite link to a chat we are not in fails with a hint
+  resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }>;
 
   // Reading: messages newer than sinceMs and newer than afterMessageId, oldest first
   getHistory(accountId: number, chatId: number, sinceMs: number, afterMessageId: number | null, limit: number): Promise<TgMessage[]>;

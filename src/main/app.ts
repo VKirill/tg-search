@@ -688,6 +688,10 @@ export function createApp(deps: AppDeps): AppHandlers {
         return chatInfo(await engine.getChat(accountId, chat.chatId));
       },
       leave: (accountId, chatId) => engine.leaveChat(accountId, chatId),
+      resolveLink: async (accountId, url) => {
+        const { chat, messageId } = await engine.resolveLink(accountId, url);
+        return { chat: { ...chatInfo(chat), spamReason: spamChatReason(db, chat.chatId) }, messageId };
+      },
       discussion: async (accountId, target) => {
         const channel = typeof target === 'number' ? await engine.getChat(accountId, target) : await engine.resolveChat(accountId, target);
         const full = channel.linkedChatId === undefined ? await engine.getChat(accountId, channel.chatId) : channel;

@@ -33,7 +33,7 @@ export const API_METHODS: ApiMap = {
   dossier: ['path', 'open'],
   stats: ['report'],
   categories: ['list', 'create', 'update', 'remove'],
-  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media', 'around', 'discussion'],
+  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media', 'around', 'discussion', 'resolveLink'],
   shell: ['openExternal'],
 };
 

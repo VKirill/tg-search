@@ -2044,6 +2044,10 @@ export function createMockApi(): Api {
       },
     },
     chats: {
+      async resolveLink(_accountId, url) {
+        const m = /t\.me\/([A-Za-z0-9_]+)(?:\/(\d+))?/.exec(url);
+        return { chat: { chatId: -1009101, title: m?.[1] ?? 'Чат', username: m?.[1] ?? null, kind: 'channel' as const, memberCount: 9000, isMember: false }, messageId: m?.[2] ? Number(m[2]) : null };
+      },
       async discussion() {
         return { chatId: -1009002, title: 'Обсуждение канала', username: null, kind: 'supergroup' as const, memberCount: 320, isMember: false };
       },

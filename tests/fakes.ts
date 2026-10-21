@@ -62,6 +62,11 @@ export class FakeEngine implements TelegramEngine {
     if (!chat) throw new Error('no chat');
     return { ...chat, username: linkOrUsername.replace('@', '') };
   }
+  async resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }> {
+    const m = /t\.me\/([A-Za-z0-9_]+)(?:\/(\d+))?/.exec(url);
+    const chat = await this.resolveChat(accountId, `@${m?.[1] ?? url}`);
+    return { chat, messageId: m?.[2] ? Number(m[2]) : null };
+  }
   async getChat(_accountId: number, chatId: number): Promise<TgChat> {
     const c = this.chats.get(chatId);
     if (!c) throw new Error(`chat ${chatId}`);
