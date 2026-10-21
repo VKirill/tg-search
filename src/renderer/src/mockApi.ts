@@ -1,12 +1,19 @@
 import type {
   Account,
+  AgentStep,
   Anamnesis,
   Api,
   AppEvent,
+  Asset,
   AutopilotSettings,
   Broadcast,
   Category,
+  Client,
+  MemoryEpisode,
+  MemoryFact,
   Order,
+  Payment,
+  Plan,
   Service,
   ChatInfo,
   ChatItem,
@@ -21,6 +28,7 @@ import type {
   Settings,
   StatsReport,
   Source,
+  Subscription,
 } from '../../shared/types';
 import { DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../../shared/types';
 import { mockWavDataUrl } from './utils/audio';
@@ -61,7 +69,11 @@ let settings: Settings = {
   auxApiKey: '',
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
-  imageModel: 'fal-ai/nano-banana-2/edit', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
+  imageModel: 'fal-ai/nano-banana-2/edit',
+  operatorBaseUrl: 'https://api.deepseek.com/v1',
+  operatorApiKey: '',
+  operatorModel: 'deepseek-flash',
+  tavilyApiKey: '',
 };
 
 const accounts: Account[] = [
@@ -251,7 +263,7 @@ const leads: Lead[] = [
     feedback: 'up',
     status: 'dialog',
     accountId: 1,
-    clientId: null,
+    clientId: 1,
     sequenceStep: 1,
     nextStepAt: null,
     handoff: false,
@@ -326,7 +338,7 @@ const leads: Lead[] = [
     feedback: 'up',
     status: 'dialog',
     accountId: 1,
-    clientId: null,
+    clientId: 2,
     sequenceStep: 3,
     nextStepAt: null,
     handoff: true,
@@ -541,6 +553,262 @@ const MOCK_IMG = {
   preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFElEQVR42mP8z8BQzwAE/AUIhC6e3QAAAABJRU5ErkJggg==',
   output: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAF0lEQVR42mNkYGD4z0AEYBxVSF+FABJSAQ8bAW0AAAAASUVORK5CYII=',
 };
+
+const mockClients: Client[] = [
+  {
+    id: 1,
+    tgUserId: 5001,
+    name: 'Алексей Морозов',
+    username: 'alexm_dev',
+    leadIds: [1],
+    createdAt: now - 45 * 86400_000,
+    lastSeenAt: now - 3600_000,
+  },
+  {
+    id: 2,
+    tgUserId: 5004,
+    name: 'Дмитрий Соколов',
+    username: 'dmitry_saas',
+    leadIds: [4],
+    createdAt: now - 30 * 86400_000,
+    lastSeenAt: now - 86400_000,
+  },
+];
+
+const mockFacts: MemoryFact[] = [
+  { id: 1, clientId: 1, kind: 'profile', text: 'Стартап в edtech, команда 4 человека, нужен MVP за 6–8 недель.', source: 'сообщение 90002', active: true, createdAt: now - 20 * 3600_000 },
+  { id: 2, clientId: 1, kind: 'profile', text: 'Telegram: @alexm_dev, предпочитает переписку, созвоны — только после ТЗ.', source: 'агент', active: true, createdAt: now - 18 * 3600_000 },
+  { id: 3, clientId: 1, kind: 'preference', text: 'Стек: TypeScript, React Native; бэкенд без жёстких предпочтений.', source: 'голосовое 90003', active: true, createdAt: now - 15 * 3600_000 },
+  { id: 4, clientId: 1, kind: 'deal', text: 'Ориентир по срокам — полтора месяца, бюджет обсуждается после анамнеза.', source: 'агент', active: true, createdAt: now - 12 * 3600_000 },
+  { id: 5, clientId: 1, kind: 'material', text: 'Референс по UX — лента заказов как в Яндекс Еде.', source: 'сообщение 90002', active: true, createdAt: now - 14 * 3600_000 },
+  { id: 6, clientId: 1, kind: 'other', text: 'Спрашивал, бот ли помощник — ответили по скрипту владельца.', source: 'агент', active: true, createdAt: now - 10 * 3600_000 },
+];
+
+const mockEpisodes: MemoryEpisode[] = [
+  {
+    id: 1,
+    clientId: 1,
+    fromMs: now - 5 * 86400_000,
+    toMs: now - 2 * 86400_000,
+    summary: 'Первый контакт: запрос на MVP, уточнили главный сценарий (лента заказов + бот для статусов). Клиент ответил быстро.',
+    messages: 28,
+  },
+  {
+    id: 2,
+    clientId: 1,
+    fromMs: now - 2 * 86400_000,
+    toMs: now - 3600_000,
+    summary: 'Уточнение сроков голосовым, вопрос про бюджет. Параллельно открыт заказ на карточку маркетплейса (сбор хотелок).',
+    messages: 34,
+  },
+];
+
+const mockAssets: Asset[] = [
+  {
+    id: 1,
+    clientId: 1,
+    orderId: 101,
+    path: MOCK_IMG.input,
+    mime: 'image/png',
+    name: 'ref-sneakers.jpg',
+    role: 'from_client',
+    caption: 'Референс Nike Air для карточки кроссовок',
+    tags: ['wb', 'обувь', 'референс'],
+    createdAt: now - 5 * 3600_000,
+  },
+  {
+    id: 2,
+    clientId: 1,
+    orderId: 103,
+    path: MOCK_IMG.preview,
+    mime: 'image/png',
+    name: 'avatar-preview.png',
+    role: 'preview',
+    caption: 'Превью делового портрета для канала',
+    tags: ['нейрофото', 'превью'],
+    createdAt: now - 12 * 3600_000,
+  },
+  {
+    id: 3,
+    clientId: 1,
+    orderId: 105,
+    path: MOCK_IMG.output,
+    mime: 'image/png',
+    name: 'thermos-card.png',
+    role: 'working',
+    caption: 'Черновик инфографики термоса Ozon',
+    tags: ['ozon', 'инфографика'],
+    createdAt: now - 2 * 3600_000,
+  },
+  {
+    id: 4,
+    clientId: 1,
+    orderId: 106,
+    path: 'clients/1/brief-mvp.pdf',
+    mime: 'application/pdf',
+    name: 'brief-mvp.pdf',
+    role: 'delivered',
+    caption: 'Черновик ТЗ по MVP после голосового',
+    tags: ['тз', 'документ'],
+    createdAt: now - 86400_000,
+  },
+];
+
+const mockPlans: Plan[] = [
+  {
+    id: 1,
+    name: 'Старт',
+    priceMonth: 990,
+    tasksPerMonth: 5,
+    description: 'Поиск, краткие поручения, напоминания — для редких задач.',
+    enabled: true,
+  },
+  {
+    id: 2,
+    name: 'Ассистент',
+    priceMonth: 2990,
+    tasksPerMonth: 15,
+    description: 'Исследования, подборки, тексты, контроль дедлайнов — основной тариф.',
+    enabled: true,
+  },
+  {
+    id: 3,
+    name: 'Про',
+    priceMonth: 5990,
+    tasksPerMonth: 40,
+    description: 'Расширенная квота поручений и приоритет на сложные исследования.',
+    enabled: false,
+  },
+];
+
+const mockSubscriptions: Subscription[] = [
+  {
+    id: 1,
+    clientId: 1,
+    planId: 2,
+    status: 'active',
+    periodStart: now - 10 * 86400_000,
+    periodEnd: now + 20 * 86400_000,
+    tasksUsed: 4,
+    createdAt: now - 40 * 86400_000,
+  },
+  {
+    id: 2,
+    clientId: 2,
+    planId: 1,
+    status: 'pending',
+    periodStart: null,
+    periodEnd: null,
+    tasksUsed: 0,
+    createdAt: now - 2 * 86400_000,
+  },
+];
+
+const mockPayments: Payment[] = [
+  {
+    id: 1,
+    clientId: 1,
+    purpose: 'subscription',
+    orderId: null,
+    subscriptionId: 1,
+    amount: 2990,
+    status: 'succeeded',
+    providerId: 'yookassa-sub-1',
+    url: null,
+    createdAt: now - 40 * 86400_000,
+    paidAt: now - 40 * 86400_000,
+  },
+  {
+    id: 2,
+    clientId: 1,
+    purpose: 'order',
+    orderId: 103,
+    subscriptionId: null,
+    amount: 1500,
+    status: 'pending',
+    providerId: 'yookassa-ord-103',
+    url: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=demo-wb-103',
+    createdAt: now - 12 * 3600_000,
+    paidAt: null,
+  },
+  {
+    id: 3,
+    clientId: 1,
+    purpose: 'order',
+    orderId: 104,
+    subscriptionId: null,
+    amount: 600,
+    status: 'succeeded',
+    providerId: 'yookassa-ord-104',
+    url: null,
+    createdAt: now - 5 * 86400_000,
+    paidAt: now - 4 * 86400_000,
+  },
+  {
+    id: 4,
+    clientId: 2,
+    purpose: 'subscription',
+    orderId: null,
+    subscriptionId: 2,
+    amount: 990,
+    status: 'pending',
+    providerId: 'yookassa-sub-2',
+    url: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=demo-sub-2',
+    createdAt: now - 2 * 86400_000,
+    paidAt: null,
+  },
+];
+
+const msg2Date = now - 1.8 * 3600_000;
+const msg5Date = now - 1 * 3600_000;
+
+const mockAgentSteps: AgentStep[] = [
+  {
+    id: 1,
+    leadId: 1,
+    ts: msg2Date - 120_000,
+    tool: 'search_memory',
+    input: '{"query":"MVP Telegram бот"}',
+    output: '[]',
+    ok: true,
+  },
+  {
+    id: 2,
+    leadId: 1,
+    ts: msg2Date - 60_000,
+    tool: 'remember',
+    input: '{"kind":"profile","text":"Главный сценарий — лента заказов"}',
+    output: 'fact #7',
+    ok: true,
+  },
+  {
+    id: 3,
+    leadId: 1,
+    ts: msg2Date - 500,
+    tool: 'reply',
+    input: '{"text":"Алексей, добрый день!..."}',
+    output: 'sent',
+    ok: true,
+  },
+  {
+    id: 4,
+    leadId: 1,
+    ts: msg5Date - 90_000,
+    tool: 'remember',
+    input: '{"kind":"deal","text":"Срок — полтора месяца"}',
+    output: 'fact #4',
+    ok: true,
+  },
+  {
+    id: 5,
+    leadId: 1,
+    ts: msg5Date - 400,
+    tool: 'reply',
+    input: '{"text":"Понял, полтора месяца..."}',
+    output: 'sent',
+    ok: true,
+  },
+];
 
 const mockOrders: Order[] = [
   {
@@ -1159,59 +1427,204 @@ export function createMockApi(): Api {
       },
     },
     clients: {
-      async list() {
-        return [];
+      async list(search) {
+        await delay(40);
+        let list = mockClients.map((c) => ({ ...c, leadIds: [...c.leadIds] }));
+        if (search) {
+          const q = search.toLowerCase();
+          list = list.filter(
+            (c) => c.name.toLowerCase().includes(q) || (c.username ?? '').toLowerCase().includes(q),
+          );
+        }
+        return list;
       },
       async get(id) {
-        return { id, tgUserId: null, name: 'Клиент', username: null, leadIds: [], createdAt: now, lastSeenAt: null };
+        await delay(30);
+        const c = mockClients.find((x) => x.id === id);
+        if (!c) throw new Error('Клиент не найден');
+        return { ...c, leadIds: [...c.leadIds] };
       },
-      async byLead() {
-        return null;
+      async byLead(leadId) {
+        await delay(30);
+        const l = leads.find((x) => x.id === leadId);
+        if (l?.clientId != null) {
+          const c = mockClients.find((x) => x.id === l.clientId);
+          return c ? { ...c, leadIds: [...c.leadIds] } : null;
+        }
+        const c = mockClients.find((x) => x.leadIds.includes(leadId));
+        return c ? { ...c, leadIds: [...c.leadIds] } : null;
       },
     },
     memory: {
-      async facts() {
-        return [];
+      async facts(clientId) {
+        await delay(40);
+        return mockFacts.filter((f) => f.clientId === clientId).map((f) => ({ ...f }));
       },
       async addFact(clientId, kind, text) {
-        return { id: nid(), clientId, kind, text, source: 'owner', active: true, createdAt: Date.now() };
+        await delay(60);
+        const f: MemoryFact = {
+          id: nid(),
+          clientId,
+          kind,
+          text,
+          source: 'владелец',
+          active: true,
+          createdAt: Date.now(),
+        };
+        mockFacts.push(f);
+        emit({ type: 'memory:update', clientId });
+        return { ...f };
       },
-      async removeFact() {},
-      async episodes() {
-        return [];
+      async removeFact(factId) {
+        await delay(40);
+        const f = mockFacts.find((x) => x.id === factId);
+        if (f) {
+          f.active = false;
+          emit({ type: 'memory:update', clientId: f.clientId });
+        }
       },
-      async assets() {
-        return [];
+      async episodes(clientId) {
+        await delay(40);
+        return mockEpisodes.filter((e) => e.clientId === clientId).map((e) => ({ ...e }));
       },
-      async sendAsset() {},
+      async assets(clientId, query) {
+        await delay(query ? 120 : 40);
+        let list = mockAssets.filter((a) => a.clientId === clientId);
+        if (query?.trim()) {
+          const q = query.toLowerCase();
+          list = list.filter(
+            (a) =>
+              a.caption.toLowerCase().includes(q) ||
+              a.name.toLowerCase().includes(q) ||
+              a.tags.some((t) => t.toLowerCase().includes(q)),
+          );
+        }
+        return list.map((a) => ({ ...a, tags: [...a.tags] }));
+      },
+      async sendAsset(leadId, assetId) {
+        await delay(200);
+        const a = mockAssets.find((x) => x.id === assetId);
+        if (!a) throw new Error('Файл не найден');
+        const l = leads.find((x) => x.id === leadId);
+        if (!l) throw new Error('Лид не найден');
+        const msg: ChatMessage = {
+          id: nid(),
+          leadId,
+          accountId: 1,
+          direction: 'out',
+          where: 'dm',
+          kind: 'text',
+          text: `Отправил файл: ${a.caption || a.name}`,
+          mediaPath: a.path,
+          durationSec: null,
+          tgChatId: l.tgChatId,
+          tgMessageId: nid(),
+          date: Date.now(),
+          auto: true,
+        };
+        messages.push(msg);
+        emit({ type: 'message:new', message: { ...msg } });
+      },
     },
     billing: {
       async plans() {
-        return [];
+        await delay(40);
+        return mockPlans.map((p) => ({ ...p }));
       },
       async savePlan(plan) {
-        return { ...plan, id: plan.id ?? nid() };
+        await delay(80);
+        if (plan.id != null) {
+          const p = mockPlans.find((x) => x.id === plan.id);
+          if (!p) throw new Error('Тариф не найден');
+          Object.assign(p, plan);
+          return { ...p };
+        }
+        const p: Plan = { ...plan, id: nid() };
+        mockPlans.push(p);
+        return { ...p };
       },
-      async removePlan() {},
-      async subscriptions() {
-        return [];
+      async removePlan(planId) {
+        const i = mockPlans.findIndex((x) => x.id === planId);
+        if (i >= 0) mockPlans.splice(i, 1);
       },
-      async subscribe() {
-        throw new Error('Подписки в демо-режиме не оформляются');
+      async subscriptions(clientId) {
+        await delay(40);
+        const list = clientId == null ? mockSubscriptions : mockSubscriptions.filter((s) => s.clientId === clientId);
+        return list.map((s) => ({ ...s }));
       },
-      async cancelSubscription() {
-        throw new Error('Подписки в демо-режиме не изменяются');
+      async subscribe(clientId, planId) {
+        await delay(300);
+        const plan = mockPlans.find((p) => p.id === planId);
+        if (!plan) throw new Error('Тариф не найден');
+        const sub: Subscription = {
+          id: nid(),
+          clientId,
+          planId,
+          status: 'pending',
+          periodStart: null,
+          periodEnd: null,
+          tasksUsed: 0,
+          createdAt: Date.now(),
+        };
+        mockSubscriptions.push(sub);
+        const pay: Payment = {
+          id: nid(),
+          clientId,
+          purpose: 'subscription',
+          orderId: null,
+          subscriptionId: sub.id,
+          amount: plan.priceMonth,
+          status: 'pending',
+          providerId: `yookassa-sub-${sub.id}`,
+          url: `https://yoomoney.ru/checkout/payments/v2/contract?orderId=demo-sub-${sub.id}`,
+          createdAt: Date.now(),
+          paidAt: null,
+        };
+        mockPayments.unshift(pay);
+        emit({ type: 'billing:update', clientId });
+        return { ...sub };
       },
-      async payments() {
-        return [];
+      async cancelSubscription(subscriptionId) {
+        await delay(120);
+        const s = mockSubscriptions.find((x) => x.id === subscriptionId);
+        if (!s) throw new Error('Подписка не найдена');
+        s.status = 'canceled';
+        emit({ type: 'billing:update', clientId: s.clientId });
+        return { ...s };
       },
-      async checkPayment() {
-        throw new Error('Платежи в демо-режиме не проверяются');
+      async payments(clientId) {
+        await delay(40);
+        const list = clientId == null ? mockPayments : mockPayments.filter((p) => p.clientId === clientId);
+        return list.map((p) => ({ ...p }));
+      },
+      async checkPayment(paymentId) {
+        await delay(400);
+        const p = mockPayments.find((x) => x.id === paymentId);
+        if (!p) throw new Error('Платёж не найден');
+        if (p.status === 'pending') {
+          p.status = 'succeeded';
+          p.paidAt = Date.now();
+          if (p.subscriptionId != null) {
+            const sub = mockSubscriptions.find((s) => s.id === p.subscriptionId);
+            if (sub) {
+              sub.status = 'active';
+              sub.periodStart = Date.now();
+              sub.periodEnd = Date.now() + 30 * 86400_000;
+            }
+          }
+        }
+        emit({ type: 'billing:update', clientId: p.clientId });
+        return { ...p };
       },
     },
     agent: {
-      async trace() {
-        return [];
+      async trace(leadId, limit = 50) {
+        await delay(30);
+        return mockAgentSteps
+          .filter((s) => s.leadId === leadId)
+          .sort((a, b) => b.ts - a.ts)
+          .slice(0, limit)
+          .map((s) => ({ ...s }));
       },
     },
     services: {

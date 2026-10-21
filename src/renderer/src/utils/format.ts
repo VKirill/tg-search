@@ -1,4 +1,11 @@
-import type { DealStage, OrderStatus, ServiceKind } from '../../../shared/types';
+import type {
+  AssetRole,
+  DealStage,
+  FactKind,
+  OrderStatus,
+  ServiceKind,
+  SubscriptionStatus,
+} from '../../../shared/types';
 
 const MONTHS = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
 
@@ -165,4 +172,84 @@ export function formatRub(n: number): string {
 
 export function formatPriceRange(min: number, max: number): string {
   return `${min.toLocaleString('ru-RU')}–${max.toLocaleString('ru-RU')} ₽`;
+}
+
+export function factKindLabel(kind: FactKind): string {
+  const map: Record<FactKind, string> = {
+    profile: 'Профиль',
+    preference: 'Предпочтения',
+    deal: 'Договорённости',
+    material: 'Материалы',
+    other: 'Прочее',
+  };
+  return map[kind];
+}
+
+export const FACT_KINDS: FactKind[] = ['profile', 'preference', 'deal', 'material', 'other'];
+
+export function assetRoleLabel(role: AssetRole): string {
+  const map: Record<AssetRole, string> = {
+    from_client: 'От клиента',
+    preview: 'Превью',
+    delivered: 'Сдано',
+    working: 'Рабочие',
+  };
+  return map[role];
+}
+
+export function subscriptionStatusLabel(status: SubscriptionStatus): string {
+  const map: Record<SubscriptionStatus, string> = {
+    pending: 'Ожидает оплаты',
+    active: 'Активна',
+    past_due: 'Просрочена',
+    canceled: 'Отменена',
+  };
+  return map[status];
+}
+
+export function paymentStatusLabel(status: 'pending' | 'succeeded' | 'canceled'): string {
+  const map: Record<'pending' | 'succeeded' | 'canceled', string> = {
+    pending: 'Ждёт оплаты',
+    succeeded: 'Оплачен',
+    canceled: 'Отменён',
+  };
+  return map[status];
+}
+
+export function formatDateShort(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export function formatEpisodePeriod(fromMs: number, toMs: number): string {
+  const a = new Date(fromMs);
+  const b = new Date(toMs);
+  const sameYear = a.getFullYear() === b.getFullYear();
+  const left = `${a.getDate()} ${MONTHS[a.getMonth()]}${sameYear ? '' : ` ${a.getFullYear()}`}`;
+  const right = `${b.getDate()} ${MONTHS[b.getMonth()]} ${b.getFullYear()}`;
+  return `${left} — ${right}`;
+}
+
+export function daysRemaining(periodEnd: number | null): number | null {
+  if (periodEnd == null) return null;
+  return Math.max(0, Math.ceil((periodEnd - Date.now()) / 86_400_000));
+}
+
+export function agentToolLabel(tool: string): string {
+  const map: Record<string, string> = {
+    reply: 'Ответ клиенту',
+    search_memory: 'Поиск в памяти',
+    remember: 'Запомнил',
+    create_order: 'Заказ',
+    preview: 'Превью',
+    request_payment: 'Оплата',
+    payment_status: 'Оплата',
+    subscription: 'Подписка',
+    run_task: 'Поручение',
+    web_search: 'Поиск в интернете',
+    fetch_url: 'Чтение страницы',
+    send_asset: 'Отправка файла',
+    handoff: 'Передача человеку',
+  };
+  return map[tool] ?? tool;
 }
