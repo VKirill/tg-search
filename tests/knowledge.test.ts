@@ -65,3 +65,22 @@ describe('knowledge bases', () => {
     expect(ctx).toContain('Отвечай только по этим материалам');
   });
 });
+
+describe('knowledge rerank', () => {
+  it('a reranker reorders the candidates; its failure keeps the fused order', async () => {
+    const make = (rerank?: (q: string, p: string[]) => Promise<number[]>) => {
+      const kb = createKnowledge({ db: new Db(':memory:'), embedder: createFakeEmbedder(), rerank });
+      const [base] = kb.createBase('Директ', '');
+      for (let i = 0; i < 8; i++) kb.addText(base.id, `Документ ${i}`, `# Раздел ${i}\nТекст про бюджет номер ${i}.`, '');
+      return { kb, base };
+    };
+    const { kb, base } = make(async (_q, passages) => passages.map((p) => (p.includes('Документ 5') ? 1 : 0)));
+    await kb.idle();
+    expect((await kb.search([base.id], 'бюджет', 3))[0].docTitle).toBe('Документ 5');
+    const broken = make(async () => {
+      throw new Error('Jev недоступен');
+    });
+    await broken.kb.idle();
+    expect(await broken.kb.search([broken.base.id], 'бюджет', 3)).toHaveLength(3);
+  });
+});

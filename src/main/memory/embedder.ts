@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +20,10 @@ let nextId = 1;
 
 export function createWorkerEmbedder(dataDir: string): Embedder {
   const cacheDir = join(dataDir, 'models');
-  const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'embedder.worker.js');
+  // the build puts the worker in out/main/memory/ next to the bundle's out/main/index.js (it was looked for one folder up
+  // and never found: no embeddings were made, the semantic half of memory and knowledge search silently did nothing)
+  const here = dirname(fileURLToPath(import.meta.url));
+  const workerPath = [join(here, 'memory', 'embedder.worker.js'), join(here, 'embedder.worker.js')].find((p) => existsSync(p)) ?? join(here, 'embedder.worker.js');
   let worker: Worker | null = null;
   let available = true;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,10 +61,11 @@ export function createWorkerEmbedder(dataDir: string): Embedder {
           scheduleIdle();
           return;
         }
-        p.resolve(new Float32Array(msg.vec));
+        p.resolve(normalize(new Float32Array(msg.vec))); // unit length: dot products are cosines, long texts get no edge
         scheduleIdle();
       });
-      worker.on('error', () => {
+      worker.on('error', (err) => {
+        console.error('embedder worker failed — semantic search is off until restart:', err);
         available = false;
         for (const [, p] of pending) p.resolve(null);
         pending.clear();

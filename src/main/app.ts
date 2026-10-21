@@ -54,6 +54,7 @@ import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
 import { createGroupHelper, helperAgent } from './groupHelper';
 import { createKnowledge, knowledgeContext } from './knowledge';
+import { createIntegrations } from './integrations';
 import { createWorkerEmbedder } from './memory/embedder';
 import { RICH_FORMAT } from './agent/style';
 import { FIGURES_GUIDE } from './figures';
@@ -106,7 +107,22 @@ export function createApp(deps: AppDeps): AppHandlers {
   const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
   // one embedding model for client memory and knowledge bases (a second copy would double the memory it takes)
   const embedder = createWorkerEmbedder(dataDir);
-  const knowledge = createKnowledge({ db, embedder });
+  const knowledge = createKnowledge({
+    db, embedder,
+    // Jev picks which candidate passages actually answer the question (words and meaning only find candidates)
+    rerank: async (question, passages) => {
+      if (!getSettings().jevApiKey.trim()) throw new Error('нет ключа Jev');
+      const criteria = Object.fromEntries(passages.map((p, i) => [`p${i + 1}`, p]));
+      const data = await postSystemOne(getSettings, {
+        state: { question: question.slice(0, 1500) },
+        questions: { pick: { type: 'choice', instructions: 'Which passage best answers `question` — states the facts it asks about?', criteria } },
+      });
+      const probs = (data.answers?.pick as { probabilities?: Record<string, number> } | undefined)?.probabilities ?? {};
+      return passages.map((_, i) => Number(probs[`p${i + 1}`] ?? 0));
+    },
+  });
+  // the skill and the MCP server for Claude Code, Codex and other assistants; scripts run on this app's runtime
+  const integrations = createIntegrations({ appDir: deps.appDir ?? process.cwd(), execPath: process.execPath });
   const memory = createMemoryStore({
     db,
     engine,
@@ -876,6 +892,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       chats: async () => spamChats.list(),
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
+    },
+    assistants: {
+      status: async () => integrations.status(),
+      install: async (target) => integrations.install(target),
+      installTools: async () => integrations.installTools(),
     },
     knowledge: {
       bases: async () => knowledge.listBases(),

@@ -92,7 +92,10 @@ export function chunkText(text: string): { heading: string; text: string }[] {
 
 type Row = Record<string, any>;
 
-export function createKnowledge(deps: { db: Db; embedder: Embedder; fetchFn?: typeof fetch }) {
+// Re-ranks candidate passages for a question: a score per passage (higher — answers it better); the app uses Jev
+export type Reranker = (question: string, passages: string[]) => Promise<number[]>;
+
+export function createKnowledge(deps: { db: Db; embedder: Embedder; fetchFn?: typeof fetch; rerank?: Reranker }) {
   const raw = deps.db.raw;
   raw.exec(`CREATE TABLE IF NOT EXISTS kb_bases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,13 +196,23 @@ export function createKnowledge(deps: { db: Db; embedder: Embedder; fetchFn?: ty
       }
       near = scored.sort((a, b) => b.s - a.s).slice(0, 30).map((x) => ({ ownerType: 'c', ownerId: x.id }));
     }
-    const ids = reciprocalRankFusion([fts, near]).slice(0, k).map((h) => h.ownerId);
-    if (!ids.length) return [];
+    // a wider pool when a reranker reads them: words and meaning find candidates, the reranker picks what answers
+    const pool = reciprocalRankFusion([fts, near]).slice(0, deps.rerank ? Math.max(k, 16) : k).map((h) => h.ownerId);
+    if (!pool.length) return [];
     const rows = raw.prepare(`SELECT c.id, c.heading, c.text, d.title, d.source FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id
-      WHERE c.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as Row[];
+      WHERE c.id IN (${pool.map(() => '?').join(',')})`).all(...pool) as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
-    return ids.map((id) => byId.get(id)).filter((r): r is Row => !!r)
+    let hits = pool.map((id) => byId.get(id)).filter((r): r is Row => !!r)
       .map((r) => ({ docTitle: r.title, source: r.source, heading: r.heading, text: r.text }));
+    if (deps.rerank && hits.length > k) {
+      try {
+        const scores = await deps.rerank(query, hits.map((h) => `${h.docTitle}${h.heading ? ` — ${h.heading}` : ''}\n${h.text.slice(0, 700)}`));
+        hits = hits.map((h, i) => ({ h, s: scores[i] ?? 0, i })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.h);
+      } catch (err) {
+        console.warn('knowledge rerank', err instanceof Error ? err.message : err); // the fused order still works
+      }
+    }
+    return hits.slice(0, k);
   }
 
   return {

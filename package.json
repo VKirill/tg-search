@@ -10,7 +10,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "dist": "electron-vite build && electron-builder --mac dmg"
+    "dist": "electron-vite build && electron-builder --mac dmg",
+    "skill:refs": "node scripts/gen-skill-refs.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",

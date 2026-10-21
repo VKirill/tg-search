@@ -27,6 +27,7 @@ export const API_METHODS: ApiMap = {
   skills: ['list', 'save', 'remove', 'approve', 'removeLesson'],
   ai: ['status', 'models', 'setModels', 'providers', 'saveProvider', 'removeProvider', 'importOpencode', 'checkUpdate', 'route', 'stats'],
   helper: ['chats', 'addChat', 'saveChats', 'requests', 'scenarios', 'saveScenario', 'removeScenario', 'test', 'preview'],
+  assistants: ['status', 'install', 'installTools'],
   knowledge: ['bases', 'createBase', 'updateBase', 'removeBase', 'docs', 'addFiles', 'addUrl', 'addText', 'removeDoc', 'search'],
   trusted: ['list', 'save', 'remove', 'checkinNow'],
   news: ['channels', 'addChannel', 'updateChannel', 'removeChannel', 'items', 'setStatus', 'draft', 'runNow'],

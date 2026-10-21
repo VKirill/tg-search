@@ -1968,6 +1968,17 @@ export function createMockApi(): Api {
         if (i >= 0) mockSpamChats.splice(i, 1);
       },
     },
+    assistants: {
+      async status() {
+        return { tools: true, claude: { skill: true, cli: true }, codex: { skill: false, cli: false, mcp: false }, mcpCommand: '~/.local/bin/tgs-mcp', mcpConfig: '{\n  "mcpServers": {\n    "tg-search": { "command": "~/.local/bin/tgs-mcp" }\n  }\n}' };
+      },
+      async install(target) {
+        return ['Команды tgs и tgs-mcp — в ~/.local/bin', `Навык tg-search — в ~/.${target}/skills/tg-search`, 'MCP-сервер tg-search добавлен'];
+      },
+      async installTools() {
+        return ['Команды tgs и tgs-mcp — в ~/.local/bin'];
+      },
+    },
     knowledge: {
       async bases() {
         return mockKnowledgeBases;

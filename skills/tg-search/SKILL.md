@@ -1,235 +1,114 @@
 ---
 name: tg-search
 description: >-
-  Управление десктопным приложением TG Search через CLI tgs: тематики и правила Jev,
-  лиды, источники, цепочки, ИИ-менеджер, автопилот, рассылки, импорт CSV.
-  Triggers: tg search, тематика для поиска лидов, правило для Jev, найди лидов в Telegram,
-  настрой цепочку сообщений, ИИ-менеджер, рассылка по чатам, импорт чатов csv.
+  Настройка и работа с приложением TG Search (macOS) через его локальный API: поиск клиентов в Telegram (тематики, источники,
+  лиды, Jev), ИИ-менеджер и агенты, заказы и подписки, ИИ-движок OpenCode (модели, провайдеры, маршрутизация, проверка),
+  помощник групп (группы, сценарии, базы знаний), рассылки, новости, статистика. Используй, когда пользователь просит
+  настроить TG Search, найти лидов в Telegram, подключить группу к помощнику, создать сценарий или базу знаний, выбрать
+  модели, посмотреть статистику. Triggers: tg search, тематика лидов, помощник группы, сценарий помощника, база знаний,
+  ИИ-движок, лиды в телеграм, рассылка по чатам, TG Search setup, group assistant, knowledge base.
 ---
 
-# TG Search control skill
+# TG Search
 
-TG Search — macOS-приложение: ищет сообщения в Telegram (TDLib), квалифицирует лиды через **Jev** (поле `criteria` проекта) или LLM, ведёт переписку вручную, цепочкой, ИИ-менеджером или автопилотом. Все исходящие сообщения ограничены дневным лимитом и паузой на аккаунт.
+TG Search — настольное приложение для macOS. Оно находит клиентов в Telegram и доводит их до заказа, а ещё работает помощником в группах. Всё, что видно в интерфейсе, доступно и через локальный API приложения — через него ты настраиваешь и запускаешь приложение по просьбе пользователя.
 
-## Модель объектов
+## Подключение
 
-| Термин | В API | Смысл |
-|--------|--------|--------|
-| Тематика | `projects` | Проект: кого ищем, оффер, **criteria** = правило Jev |
-| Источник | `sources` | Чат/канал в тематике (candidate / active / rejected) |
-| Лид | `leads` | Сообщение с score 0–100, label, status |
-| Цепочка | `project.sequence` | Шаги outreach до ответа лида |
-| ИИ-менеджер | `project.manager` | Диалог после ответа лида (OpenAI-compatible) |
-| Автопилот | `project.autopilot` | Фон: обновление источников, скан, автоответы |
-| Рассылка | `broadcasts` | Периодический пост оффера в выбранные чаты |
-| Аккаунты | `accounts` | Рабочие Telegram-аккаунты и лимиты |
+Приложение должно быть открыто: API живёт, пока оно запущено (только `127.0.0.1`, токен в `~/Library/Application Support/TG Search/control.json`).
 
-Точные JSON-формы: [references/types.md](references/types.md).
+- **MCP** (Claude Code, Codex, Cursor, Claude Desktop) — сервер `tg-search` с инструментами:
+  - `status` — что запущено: аккаунты, тематики, ИИ-движок, группы. **Начинай с него.**
+  - `describe` — справочник методов: без аргумента все разделы, `{"namespace": "helper"}` — один.
+  - `call` — вызов: `{"method": "helper.chats", "args": []}`; аргументы — массив по порядку сигнатуры.
+  - `events` — события за N секунд (новые лиды, сообщения, шаги агента).
+- **CLI** `tgs`: `tgs status --pretty`, `tgs call <раздел.метод> <json-аргумент> <json-аргумент>…`, `tgs events --seconds 30`.
 
-## Проверка, что приложение запущено
+Ошибка «Приложение TG Search не запущено» — попроси пользователя открыть приложение. Подключить навык и MCP: в приложении «Настройки → ИИ-ассистенты» или `scripts/install-skill.sh` из репозитория.
 
-```bash
-tgs status --pretty
-```
+Ниже примеры в форме CLI; в MCP то же самое — `call` с `method` и массивом `args`.
 
-Если ошибка «Приложение TG Search не запущено — откройте его» — попросите пользователя открыть приложение на Mac.
+## Как узнать API
 
-Список методов API:
+Перед вызовом незнакомого метода прочитай его сигнатуру: инструмент `describe` или [references/api.md](references/api.md) (все методы с комментариями), типы параметров — [references/types.md](references/types.md). Оба файла генерируются из кода приложения, им можно доверять.
 
-```bash
-tgs methods --pretty
-```
+## Карта приложения
 
-Универсальный вызов (аргументы — JSON; слова без кавычек передаются как строки):
-
-```bash
-tgs call projects.list
-tgs call projects.create '{"name":"...","task":"clients",...}'
-```
-
-События прогресса (SSE → JSON lines):
-
-```bash
-tgs events --seconds 120
-```
+| Раздел в интерфейсе | API | Что это |
+|---|---|---|
+| Тематики | `projects`, `sources`, `categories` | Кого ищем, оффер, правило Jev (`criteria`), чаты-источники, категории спроса |
+| Входящие, Лиды, Воронка | `leads`, `messages`, `crm` | Найденные запросы с оценкой 0–100, переписка, карточка клиента |
+| Чаты | `chats` | Встроенный клиент Telegram: история, вступление, отправка вручную |
+| Помощник групп | `helper`, `knowledge` | Агент в группах и обсуждениях каналов: группы, сценарии, базы знаний, песочница, журнал |
+| Рассылки | `broadcasts` | Периодические посты оффера в чаты |
+| Исполнители, Подписки | `services`, `orders`, `billing` | Каталог услуг, заказы, оплата ЮKassa, тарифы |
+| Агенты, Умения, Согласования | `agents`, `skills`, `approvals` | Роли ИИ (opencode-формат), инструкции `SKILL.md`, действия на одобрение |
+| Новости, Спам, Статистика | `news`, `spam`, `stats` | Посты каналов, спам-шаблоны и чаты, расходы и спрос |
+| Аккаунты | `accounts` | Рабочие аккаунты Telegram, лимиты |
+| Настройки | `settings`, `ai`, `trusted` | Ключи, ИИ-движок (модели, провайдеры, маршрут, статистика моделей), «свои люди» |
 
 ## Рецепты
 
-### 1. Создать тематику из описания пользователя
+### Тематика: найти клиентов
 
-1. Сформулируйте `criteria` по-русски: что **подходит** (явный запрос, бюджет, сроки) и что **отсекаем** (реклама конкурентов, вакансии не по профилю, спам).
-2. Заполните `target`, `offer`, `task`, `accountIds` (из `tgs status`), `geo`, `languages`.
-3. Создайте проект:
+1. `criteria` — по-русски: что **подходит** (явный запрос, бюджет, сроки) и что **отсекаем** (реклама конкурентов, вакансии, спам).
+2. `tgs call projects.create '{"name":"Клиенты на автоматизацию","task":"clients","target":"владельцы бизнеса","offer":"боты и интеграции","criteria":"Подходит: явный запрос на разработку… Не подходит: вакансии, реклама…","geo":["RU"],"languages":["ru"],"accountIds":[1],"materials":[],"keywords":[],"sequence":[]}'`
+3. Ключевые фразы: `projects.suggestKeywords`, затем `projects.update <id> '{"keywords":[…]}'`.
+4. Источники и скан: `sources.discover <id>`, `sources.scan <id>`; импорт чатов CSV — `tgs import <id> chats.csv`.
+5. Лиды: `tgs leads <id> --min 70 --status new --pretty`; оценка лида — `leads.feedback <leadId> '"up"'`.
 
-```bash
-tgs call projects.create '{
-  "name": "Клиенты на автоматизацию",
-  "task": "clients",
-  "target": "владельцы бизнеса, которым нужна автоматизация",
-  "offer": "разработка ботов и интеграций",
-  "criteria": "Подходит: явный запрос на разработку, интеграцию, бота. Не подходит: вакансии, реклама услуг конкурентов, общие обсуждения без запроса.",
-  "geo": ["RU"],
-  "languages": ["ru"],
-  "accountIds": [1],
-  "materials": [],
-  "keywords": [],
-  "sequence": [],
-  "manager": { "enabled": false, "baseUrl": "", "apiKey": "", "model": "", "prompt": "", "replyDelaySec": 60, "maxReplies": 8 }
-}'
-```
+### ИИ-менеджер, цепочки, автопилот
 
-4. Ключевые слова (опционально):
+- Цепочка: `projects.update <id> '{"sequence":[{"delayHours":0,"mode":"ai","text":"…"}]}'`.
+- Менеджер: **сначала** `manager.test <projectId> '"текст лида"' '[]'` (песочница), включать `manager.enabled` — только с согласия пользователя.
+- Автопилот: `autopilot.set <id> '{"enabled":true,"aiReply":false}'` — только после явного «да».
 
-```bash
-tgs call projects.suggestKeywords '{"task":"clients","target":"...","offer":"...","geo":["RU"],"languages":["ru"],"materials":[]}'
-tgs call projects.update <id> '{"keywords":["..."]}'
-```
+### ИИ-движок: модели и маршрутизация
 
-5. Поиск источников и скан:
+- `ai.status` — версия OpenCode и состояние; `ai.checkUpdate` — обновить.
+- `ai.models` — каталог: основная модель (`main`), отмеченные помощники (`helpers`), бесплатные (`free`), описания и сильные стороны.
+- `ai.setModels '{"main":"zai-coding-plan/glm-5.3-flash","helpers":["router9/…"],"useFree":true}'` — основная модель общается с клиентами; помощники и бесплатные модели OpenRouter делают поручения.
+- `ai.providers`, `ai.saveProvider`, `ai.importOpencode` — провайдеры; ключи не выводи.
+- `ai.route '"solver"' '"Реши задачу…"'` — кому достанется задача (Jev по описаниям моделей × история моделей).
+- `ai.stats 7` — как модели справлялись за 7 дней: принято, отклонил проверяющий, переделки, правки клиента.
 
-```bash
-tgs call sources.discover <projectId>
-tgs call sources.scan <projectId>
-```
+### Агенты и умения
 
-### 2. Список и отбор лидов
+- `agents.list` / `agents.save` — агент в формате opencode: роль модели (`model`: main / fast / vision / smart), что нужно от модели (`needs`), проверка результата (`verify`: always / free / off, `check` — список проверок), права на инструменты (`permission`), промпт.
+- `skills.list` / `skills.save` — умения `SKILL.md`; черновики из повторяющихся задач — `skills.approve`.
 
-```bash
-tgs leads <projectId> --min 70 --status new --pretty
-tgs call leads.feedback <leadId> '"up"'
-```
+### Помощник групп
 
-### 3. Импорт чатов из CSV
+Модель: **сценарий** — как отвечать, **группа** — где и о чём; группа следует одному сценарию, сценарий — во многих группах.
 
-Первая колонка — ссылка или @username (заголовок опционален).
+1. Подключить: `helper.addChat <accountId> '"https://t.me/группа"'` (канал — помощник работает в его обсуждении).
+2. Сценарий: `helper.scenarios` — встроенные «Решение задач» (`tasks`), «Ответы на вопросы» (`questions`), «Ответы по базе знаний» (`knowledge`), «Только по обращению» (`mentions`) и свои. Свой — `helper.saveScenario '{"id":"","name":"…","description":"…","kind":"questions",…}'`. Поля поведения — в `HelperBehavior` ([types.md](references/types.md)):
+   - какие сообщения: `jevCheck`, `jevPrompt` (вопрос Jev по-английски; `message`, `picture`, `group`), `threshold`, `repliesOnly`, `keywords`, `askWhich`;
+   - как отвечать: `mode` (`agent` — главный `agent` плюс `helpers`, или `model` — сразу модель), `model`, `verify`, `verifier`, `knowledge` (id баз), `knowledgeOnly`, `skills`;
+   - тексты: `texts.ack` / `fail` / `limit` (`{cap}` — число).
+3. Группа: `helper.chats`, затем `helper.saveChats` со всем списком — у группы `scenario` (id), `about` (о чём группа), `instructions`, `asGroup`, `dailyCap`, `enabled`.
+4. **Проверь до включения:** `helper.test <chat> '"сообщение"'` — ответит ли (фильтры и Jev); `helper.preview <chat> '"сообщение"'` — весь ответ, без отправки. Третьим аргументом можно передать несохранённый сценарий.
+5. Журнал: `helper.requests 30 <chatId>` — статус, оценка Jev, агент, текст ответа.
 
-```bash
-tgs import <projectId> /path/to/chats.csv --pretty
-```
+### База знаний
 
-### 4. Цепочка сообщений
+1. `knowledge.createBase '"Справка Директа"' '"документация и методички"'`.
+2. Материалы: `knowledge.addUrl <baseId> '"https://…"'`, `knowledge.addText <baseId> '"Название"' '"текст или Markdown"'`; файлы (.md, .txt, .html, .pdf) — `knowledge.addFiles <baseId>` открывает диалог выбора у пользователя.
+3. Индексация идёт в фоне: `knowledge.docs <baseId>` — `embedded` из `chunks`.
+4. Проверь поиск: `knowledge.search '[<baseId>]' '"вопрос"'`.
+5. Подключи к сценарию: `knowledge: [<baseId>]`, при необходимости `knowledgeOnly: true`; проверь `helper.preview`.
 
-Обновите `sequence` у проекта (шаг 0 — первое сообщение; дальше только пока лид молчит):
+### Ещё
 
-```bash
-tgs call projects.update <projectId> '{
-  "sequence": [
-    { "delayHours": 0, "mode": "ai", "text": "Коротко представиться и уточнить задачу. Без давления." },
-    { "delayHours": 48, "mode": "template", "text": "Добрый день, {name}! По вашему запросу про {request} — актуально ещё?" }
-  ]
-}'
-```
+- Новости: `settings.set '{"newsInterests":"…"}'`, `news.addChannel '"@channel"'`, `news.items`, `news.draft <id> '"review"'`.
+- Спам: `spam.chats`, `spam.blockChat` (только по просьбе).
+- «Свои люди»: `trusted.save '{"username":"name","free":true}'`.
+- Рассылки: `broadcasts.create` без `enabled: true` до согласия.
 
-### 5. ИИ-менеджер: настройка и песочница
+## Правила
 
-**Сначала всегда** `manager.test` с вымышленным диалогом. Не включайте `manager.enabled` без явного согласия пользователя.
-
-```bash
-tgs call manager.test <projectId> '"Нужен бот для CRM"' '[]' '{
-  "enabled": false,
-  "baseUrl": "https://openrouter.ai/api/v1",
-  "apiKey": "",
-  "model": "anthropic/claude-haiku-5.5",
-  "prompt": "Ты менеджер...",
-  "replyDelaySec": 60,
-  "maxReplies": 8
-}'
-```
-
-После одобрения пользователем:
-
-```bash
-tgs call projects.update <projectId> '{"manager":{...,"enabled":true}}'
-```
-
-### 6. Автопилот (только с подтверждением)
-
-Не включайте `autopilot.enabled` или `autopilot.aiReply` без явного «да» от пользователя. Сначала настройте консервативные лимиты аккаунтов (`accounts.update`).
-
-```bash
-tgs call autopilot.set <projectId> '{"enabled":true,"scanIntervalMin":60,"aiReply":false}'
-tgs call autopilot.runNow <projectId>
-```
-
-### 7. Рассылка по чатам
-
-Создание без `enabled: true` до подтверждения:
-
-```bash
-tgs call broadcasts.create '{
-  "name": "Оффер в чаты",
-  "text": "Текст оффера",
-  "accountIds": [1],
-  "chatLinks": ["@example_chat"],
-  "intervalHours": 48,
-  "spin": true
-}'
-```
-
-### 8. Настройки (без вывода ключей)
-
-```bash
-tgs call settings.get
-tgs call settings.set '{"handoffNotifyTo":"@username"}'
-```
-
-Никогда не печатайте `llmApiKey`, `jevApiKey`, `tgApiHash`, `manager.apiKey` в чат.
-
-### 9. Чат канала (без подписки на канал)
-
-Комментарии к постам канала — его чат обсуждений; лиды пишут там. Вступить только в чат:
-
-```bash
-tgs call chats.discussion 1 '"@channel"'          # null — у канала нет чата
-tgs call chats.join 1 <chatId из ответа>
-tgs call sources.add <projectId> '"@channel"'     # канал как источник = его чат обсуждений
-```
-
-### 10. Новости каналов
-
-Каналы читаются без подписки раз в час; Jev оценивает посты по `settings.newsInterests`, в список попадают от 50%.
-
-```bash
-tgs call settings.set '{"newsInterests":"ИИ в маркетинге, новые нейросети, Яндекс Директ"}'
-tgs call news.addChannel '"@channel"'
-tgs call news.runNow                       # прочитать сейчас; вернёт число новых постов
-tgs call news.items                        # новые; 'saved' | 'used' | 'all'
-tgs call news.draft <itemId> '"review"'    # или "repost" — черновик поста
-tgs call news.setStatus <itemId> '"saved"' # saved | used | dismissed
-```
-
-### 11. Категории лидов и спам-чаты
-
-```bash
-tgs call categories.list                   # у лида categoryId — фильтр «Тематики» во «Входящих»
-tgs call spam.chats                        # чаты, из которых вышли: спам и повторы или неделю без сообщений
-tgs call spam.blockChat 1 <chatId>         # выйти и заблокировать — только по просьбе пользователя
-tgs call spam.unblockChat <chatId>
-```
-
-Каналы и чаты, где аккаунт админ, автоматически не блокируются.
-
-### 12. Свои люди (задания бесплатно, ежедневное касание)
-
-```bash
-tgs call trusted.list
-tgs call trusted.save '{"username":"name","free":true,"dailyCheckin":true,"checkinHour":11}'
-tgs call trusted.remove '"name"'
-tgs call trusted.checkinNow     # написать сейчас тем, с кем сегодня не общались — только по просьбе пользователя
-```
-
-## Правила безопасности для Claude
-
-1. **Отправка сообщений**: не включать `autopilot.aiReply`, `manager.enabled`, `broadcasts.enabled` без явного подтверждения пользователя в этом разговоре.
-2. **Менеджер**: всегда `manager.test` перед включением.
-3. **Лимиты**: не предлагать снимать дневные лимиты и паузы; напоминать о рисках блокировок Telegram.
-4. **Секреты**: не выводить API-ключи; не просить пользователя вставлять ключи в команды — они хранятся в приложении.
-5. **Ручная отправка**: `messages.send` — только если пользователь явно просит отправить конкретный текст конкретному лиду.
-
-## Полезные команды
-
-```bash
-tgs projects --pretty
-tgs sources <projectId> --pretty
-tgs status --pretty
-```
+1. **Сообщения людям** — рассылки, автопилот, ИИ-менеджер, помощник в группе (`enabled`), `messages.send`, `trusted.checkinNow` — только с явного согласия пользователя в этом разговоре. Сначала песочница: `manager.test`, `helper.test`, `helper.preview`.
+2. **Секреты** — не выводи ключи и токены (`settings.get` их содержит), не проси вставлять ключи в команды.
+3. **Лимиты** — не предлагай снимать дневные лимиты и паузы аккаунтов: Telegram блокирует за массовые непрошеные сообщения.
+4. **Изменения** — сохраняй списки целиком (`helper.saveChats` заменяет весь список: сначала прочитай `helper.chats`); перед удалением (сценария, базы, группы) переспроси.
+5. **Неизвестно** — смотри `describe`/`references`, не угадывай поля.

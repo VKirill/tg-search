@@ -573,6 +573,17 @@ export interface HelperRequest {
   updatedAt: number;
 }
 
+// AI assistants that set up and run the app: the tg-search skill, the tgs CLI and the tgs-mcp MCP server
+export type AiAssistant = 'claude' | 'codex';
+
+export interface AiAssistantsStatus {
+  tools: boolean; // tgs and tgs-mcp are in ~/.local/bin
+  claude: { skill: boolean; cli: boolean };
+  codex: { skill: boolean; cli: boolean; mcp: boolean };
+  mcpCommand: string; // the MCP server's command for any client
+  mcpConfig: string; // a ready «mcpServers» block for clients configured by JSON (Cursor, Claude Desktop)
+}
+
 // Knowledge bases: the owner's materials an assistant answers from (books, articles, manuals, docs)
 export interface KnowledgeBase {
   id: number;
@@ -1052,6 +1063,11 @@ export interface Api {
     // the sandbox; `scenario` — unsaved edits of the group's scenario
     test(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ score: number; answer: boolean; reason: string }>;
     preview(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
+  };
+  assistants: {
+    status(): Promise<AiAssistantsStatus>;
+    install(target: AiAssistant): Promise<string[]>; // the skill, the commands and the MCP server; what was done
+    installTools(): Promise<string[]>; // only tgs and tgs-mcp — for other MCP clients
   };
   knowledge: {
     bases(): Promise<KnowledgeBase[]>;

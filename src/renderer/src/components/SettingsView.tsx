@@ -3,6 +3,7 @@ import type { Settings } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
 import { TrustedSection } from './TrustedSection';
 import { AiEngineSection } from './AiEngineSection';
+import { AssistantsSection } from './AssistantsSection';
 import { useToast } from './Toast';
 
 const TTS_VOICES = ['alloy', 'nova', 'shimmer', 'echo', 'onyx', 'fable', 'sage', 'coral'];
@@ -10,6 +11,7 @@ const TTS_VOICES = ['alloy', 'nova', 'shimmer', 'echo', 'onyx', 'fable', 'sage',
 // Settings by area; «ИИ-движок» saves on every change, the rest with the «Сохранить» button
 const TABS = [
   { id: 'ai', label: 'ИИ-движок', hint: 'Модели, провайдеры и сам OpenCode' },
+  { id: 'assistants', label: 'ИИ-ассистенты', hint: 'Claude Code, Codex и другие ассистенты настраивают приложение из чата' },
   { id: 'agent', label: 'Агент', hint: 'От чьего имени пишет агент, и кому задания бесплатно' },
   { id: 'telegram', label: 'Telegram', hint: 'Доступ к Telegram API для аккаунтов' },
   { id: 'search', label: 'Поиск и анализ', hint: 'Квалификация лидов (Jev) и поиск в интернете' },
@@ -17,7 +19,7 @@ const TABS = [
   { id: 'payments', label: 'Оплата', hint: 'Приём оплаты от клиентов' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
-const AUTOSAVED: TabId[] = ['ai'];
+const AUTOSAVED: TabId[] = ['ai', 'assistants'];
 
 export function SettingsView() {
   const toast = useToast();
@@ -81,6 +83,7 @@ export function SettingsView() {
       <p className="field-hint">{current.hint}</p>
       <div className="settings-grid">
         {tab === 'ai' && <AiEngineSection />}
+        {tab === 'assistants' && <AssistantsSection />}
         {tab === 'agent' && (
           <>
             <section>
