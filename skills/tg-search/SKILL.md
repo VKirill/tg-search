@@ -99,8 +99,9 @@ TG Search — настольное приложение для macOS. Оно н�
 1. Подключить канал (аккаунт — его администратор): `channels.createDesk <accountId> '"https://t.me/канал"'`.
 2. Настроить: `channels.desks`, затем `channels.saveDesk` с полями `about` (о чём канал и для кого — по нему отбирает Jev), `language`, `editorPrompt`, `slots` (`[{"time":"09:00","kind":"digest"}]`; `kind` — `digest`, `deals`, `top`), `threshold`, `autopublish` (`false` — черновики на одобрение).
 3. Источники: `channels.saveSource '{"deskId":1,"kind":"rss","title":"…","target":"https://…","enabled":true,"intervalMin":30}'`; `kind` — `telegram` (@username), `rss`, `web` (страница, материалы вытащит модель), `search` (запрос в интернете), `browser` (Facebook-группа или Instagram-профиль; вход — `channels.browserLogin '"https://www.facebook.com/"'` открывает окно у пользователя). Telegram-каналы по слову: `channels.findTelegram <accountId> '"<город>"'`.
-4. Проверь: `channels.runSource <id>` — сколько новых, `channels.items <deskId> 50` — что найдено и как оценено.
-5. Пост: `channels.compose <deskId> '"digest"'` — черновик; `channels.posts <deskId> 10`; публикация `channels.publish <postId>` — только с согласия пользователя.
+4. Проверь: `channels.runSource <id>` — сколько новых; лента — `channels.stories <deskId> '"new"' 50` (сюжеты с рубрикой, аудиториями и всеми источниками), `channels.feedStats <deskId> 1` (повторы и польза каждого источника).
+   Ещё поля канала: `area` (география — Jev проверяет), `links` (`none` — посты без ссылок и упоминаний источников), `categories` (рубрики с подрубриками), `audiences` (для кого); у слота — `categories` и `audiences`. После их смены — `channels.rescore <deskId>`. Источник `gnews` — запрос в Google Новости.
+5. Пост: `channels.compose <deskId> '"digest"' null '{"audiences":["kids"]}'` — черновик; к слоту заранее — `'{"slotKey":"YYYY-MM-DD HH:MM"}'`; `channels.calendar <deskId> -1 6` — календарь; `channels.schedule <postId> <ms>` — на время; публикация `channels.publish <postId>` — только с согласия пользователя.
 
 ### База знаний
 

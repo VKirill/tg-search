@@ -582,13 +582,14 @@ export interface HelperRequest {
 // pages, web search, pages read in the app's browser with the owner's login — Facebook groups, Instagram profiles) are
 // collected non-stop; Jev keeps what fits the channel and tells news from deals and events; at the slots' times an editor
 // writes a post in the channel's language from the best fresh items, with links — published or left for approval.
-export type ChannelSourceKind = 'telegram' | 'rss' | 'web' | 'search' | 'browser';
+export type ChannelSourceKind = 'telegram' | 'rss' | 'gnews' | 'web' | 'search' | 'browser';
 export type ChannelItemKind = 'news' | 'deal' | 'event';
 export type ChannelSlotKind = 'digest' | 'deals' | 'top';
 
 export const CHANNEL_SOURCE_KINDS: Record<ChannelSourceKind, { label: string; hint: string; interval: number }> = {
   telegram: { label: 'Telegram', hint: 'публичный канал или группа: @username или t.me/…', interval: 15 },
   rss: { label: 'RSS', hint: 'лента новостей сайта: https://…/rss', interval: 30 },
+  gnews: { label: 'Google Новости', hint: 'запрос, как в поиске Google Новостей: новости всех изданий за последние сутки, с текстом статей', interval: 60 },
   web: { label: 'Страница сайта', hint: 'страница с новостями или акциями — модель вытащит из неё материалы', interval: 120 },
   search: { label: 'Поиск в интернете', hint: 'запрос, например «скидки рестораны <город> сегодня»', interval: 180 },
   browser: { label: 'Браузер со входом', hint: 'Facebook-группа или профиль Instagram — читается во встроенном браузере с вашим входом', interval: 240 },
@@ -603,6 +604,66 @@ export const CHANNEL_SLOT_KINDS: Record<ChannelSlotKind, string> = {
 export interface ChannelSlot {
   time: string; // «HH:MM», local time
   kind: ChannelSlotKind;
+  categories?: string[]; // rubrics («events») or sub-rubrics («events.music») the post is made of; empty — by kind
+  audiences?: string[]; // audiences («kids», «evening») the post is for; empty — anyone
+}
+
+// Who a story suits — across rubrics: one event can be for kids and for the weekend at once
+export interface ChannelAudience {
+  id: string;
+  name: string;
+  hint: string; // Jev reads it
+}
+
+export const DEFAULT_CHANNEL_AUDIENCES: ChannelAudience[] = [
+  { id: 'family', name: 'Для семьи', hint: 'a good plan or useful news for a family: parents together with children or grandparents' },
+  { id: 'kids', name: 'С детьми', hint: 'made for children: kids activities, workshops, shows, playgrounds, parks, children menus, school matters' },
+  { id: 'evening', name: 'Куда сходить вечером', hint: 'an evening plan for adults: concerts, bars, dinners, shows, nightlife, after-work' },
+  { id: 'weekend', name: 'На выходные', hint: 'a plan that happens on the coming weekend (Saturday or Sunday)' },
+  { id: 'free', name: 'Бесплатно', hint: 'free of charge for the public' },
+];
+
+// The channel's rubrics: Jev files every story under one sub-rubric; posts can be made of chosen rubrics
+export interface ChannelCategory {
+  id: string;
+  name: string;
+  hint: string; // what belongs here — Jev reads it
+  subs: { id: string; name: string; hint: string }[];
+}
+
+export const DEFAULT_CHANNEL_CATEGORIES: ChannelCategory[] = [
+  { id: 'city', name: 'Город', hint: 'city life', subs: [
+    { id: 'transport', name: 'Транспорт и дороги', hint: 'metro, buses, trains, traffic, road works, street closures, parking' },
+    { id: 'services', name: 'Решения и городские службы', hint: 'city council decisions, public services, housing, works in neighbourhoods, cleaning, schools' },
+    { id: 'weather', name: 'Погода и предупреждения', hint: 'weather forecasts, alerts, storms, heat, floods, emergencies' },
+  ] },
+  { id: 'deals', name: 'Акции и скидки', hint: 'offers people can use', subs: [
+    { id: 'food', name: 'Еда и рестораны', hint: 'restaurant, bar and café offers, menus, happy hours, food promotions' },
+    { id: 'shops', name: 'Магазины', hint: 'shop discounts, sales, outlets, markets with discounts' },
+    { id: 'services', name: 'Услуги и развлечения', hint: 'discounts on services, gyms, beauty, cinema, attractions, free entry days' },
+  ] },
+  { id: 'events', name: 'События', hint: 'things to do with a date', subs: [
+    { id: 'music', name: 'Концерты и вечеринки', hint: 'concerts, DJ sessions, parties, nightlife' },
+    { id: 'fairs', name: 'Ярмарки, рынки, фестивали', hint: 'fairs, markets, street festivals, local fiestas, food festivals' },
+    { id: 'culture', name: 'Выставки, театр, кино', hint: 'exhibitions, museums, theatre, cinema, talks, books' },
+    { id: 'family', name: 'Для детей и семьи', hint: 'activities for children and families' },
+    { id: 'sport', name: 'Спорт', hint: 'matches, races, sport events open to the public' },
+  ] },
+  { id: 'openings', name: 'Новые места', hint: 'openings and closures of restaurants, shops, venues, parks', subs: [] },
+  { id: 'useful', name: 'Полезное', hint: 'practical information for residents', subs: [
+    { id: 'money', name: 'Выплаты, льготы, цены', hint: 'benefits, grants, subsidies, prices, taxes and fees changes' },
+    { id: 'rules', name: 'Документы и правила', hint: 'paperwork, appointments, new rules and laws that affect residents' },
+  ] },
+];
+
+// «Рубрика › подрубрика» for a category id such as «events.music»
+export function channelCategoryName(categories: ChannelCategory[], id: string | null): string {
+  if (!id) return '';
+  const [c, s] = id.split('.');
+  const cat = categories.find((x) => x.id === c);
+  if (!cat) return id;
+  const sub = cat.subs.find((x) => x.id === s);
+  return sub ? `${cat.name} › ${sub.name}` : cat.name;
 }
 
 export interface ChannelDesk {
@@ -618,6 +679,10 @@ export interface ChannelDesk {
   slots: ChannelSlot[];
   autopublish: boolean; // off — posts wait for approval as drafts
   threshold: number; // Jev probability that an item fits, 0–1
+  area: string; // where stories must happen, e.g. «the city and its suburbs»; empty — no check
+  links: 'none' | 'sources'; // none — posts are the channel's own stories: no links, no mention of sources
+  categories: ChannelCategory[];
+  audiences: ChannelAudience[];
   createdAt: number;
 }
 
@@ -647,8 +712,47 @@ export interface ChannelItem {
   image: string | null; // a local file or URL
   publishedAt: number;
   score: number | null; // Jev: how well it fits the channel
+  local: number | null; // Jev: it happens in the channel's area
+  category: string | null; // «events.music»
+  storyId: number | null; // the first item of the same story from any source
+  audiences: string[]; // ids of the desk's audiences it suits
   status: 'new' | 'used' | 'skipped';
   createdAt: number;
+}
+
+// One story told by one or more sources
+export interface ChannelStory {
+  id: number; // its first item
+  title: string;
+  text: string;
+  kind: ChannelItemKind | null;
+  category: string | null;
+  score: number | null;
+  local: number | null;
+  audiences: string[];
+  status: ChannelItem['status'];
+  publishedAt: number;
+  items: { id: number; sourceTitle: string; title: string; url: string | null; publishedAt: number }[];
+}
+
+export interface ChannelSourceStat {
+  sourceId: number;
+  title: string;
+  kind: ChannelSourceKind;
+  items: number; // collected in the period
+  first: number; // stories this source brought first
+  duplicates: number; // items that repeat a story already found
+  kept: number; // items of stories that fit the channel
+}
+
+export interface ChannelFeedStats {
+  items: number;
+  stories: number;
+  duplicates: number;
+  kept: number; // stories that fit
+  byCategory: Record<string, number>; // fitting fresh stories per category
+  byAudience: Record<string, number>; // fitting fresh stories per audience
+  sources: ChannelSourceStat[];
 }
 
 export interface ChannelPost {
@@ -659,10 +763,22 @@ export interface ChannelPost {
   image: string | null;
   itemIds: number[];
   status: 'draft' | 'published' | 'rejected' | 'failed';
+  scheduledAt: number | null; // a draft published at this time by itself
+  slotKey: string | null; // «YYYY-MM-DD HH:MM» — the schedule slot it was made for
   error: string | null;
   messageId: number | null;
   publishedAt: number | null;
   createdAt: number;
+}
+
+// The publishing calendar: the schedule's slots on each day and the posts made for them or scheduled by hand
+export interface ChannelCalendarEntry {
+  at: number;
+  slot: ChannelSlot | null; // null — a post outside the schedule
+  slotKey: string | null;
+  post: ChannelPost | null;
+  state: 'planned' | 'draft' | 'scheduled' | 'published' | 'rejected' | 'failed' | 'missed';
+  ready: number | null; // planned slots in the next day and a half: how many fresh stories would go into the post now
 }
 
 // AI assistants that set up and run the app: the tg-search skill, the tgs CLI and the tgs-mcp MCP server
@@ -1171,8 +1287,15 @@ export interface Api {
     browserLogin(url: string): Promise<void>; // the app's browser window: log in to Facebook / Instagram once
     items(deskId: number, limit: number): Promise<ChannelItem[]>;
     setItemStatus(id: number, status: ChannelItem['status']): Promise<void>;
+    stories(deskId: number, status: ChannelItem['status'], limit: number): Promise<ChannelStory[]>;
+    setStoryStatus(storyId: number, status: ChannelItem['status']): Promise<void>; // every item of the story
+    feedStats(deskId: number, days: number): Promise<ChannelFeedStats>;
+    rescore(deskId: number): Promise<number>; // fresh items sorted into stories and scored again (after changing rubrics, area…)
     posts(deskId: number, limit: number): Promise<ChannelPost[]>;
-    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[]): Promise<ChannelPost>; // a draft now
+    // a draft now; `itemIds` — these stories; `slotKey` — prepared for that slot (scheduled at its time, the slot will not write another)
+    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[], opts?: { categories?: string[]; audiences?: string[]; slotKey?: string }): Promise<ChannelPost>;
+    schedule(postId: number, at: number | null): Promise<ChannelPost>; // a draft published at `at` by itself; null — unscheduled
+    calendar(deskId: number, fromDays: number, toDays: number): Promise<ChannelCalendarEntry[]>; // days relative to today
     savePost(id: number, text: string): Promise<ChannelPost>;
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;

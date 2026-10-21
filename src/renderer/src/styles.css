@@ -24,6 +24,7 @@
   --danger: #ff6b6b;
   --success: #34c759;
   --highlight: rgba(61, 139, 253, 0.12);
+  color-scheme: dark; /* native popups (select menus, date pickers, scrollbars) follow the dark theme */
 }
 
 *,
@@ -52,6 +53,41 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+}
+
+/* One look for every dropdown: dark field, thin border, our own chevron; the open menu is the dark native one */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 100%;
+  padding: 6px 28px 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background-color: rgba(0, 0, 0, 0.2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  color: var(--text);
+  line-height: 1.35;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+select:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+select:focus-visible {
+  border-color: var(--accent);
+}
+select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+select option,
+select optgroup {
+  background: var(--surface-elevated);
+  color: var(--text);
 }
 
 .app-shell {
@@ -746,8 +782,12 @@ select {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  background-color: rgba(0, 0, 0, 0.2);
   outline: none;
+}
+
+.field select {
+  padding-right: 28px;
 }
 
 .field textarea {
@@ -1040,10 +1080,7 @@ select {
 
 .project-switcher {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 28px 6px 8px;
 }
 
 .project-switcher + .project-switcher {
@@ -1972,10 +2009,7 @@ button.chip:hover {
 
 .order-new select {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 28px 6px 8px;
 }
 
 .manager-catalog {
@@ -3030,16 +3064,9 @@ button.chip:hover {
   background: rgba(0, 0, 0, 0.2);
 }
 
-.ai-engine select {
-  color: var(--text);
-}
 
 .trusted-list select {
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text-primary, inherit);
+  padding: 4px 28px 4px 6px;
 }
 
 .ai-models input[type='checkbox'] {
@@ -3392,10 +3419,7 @@ button.chip:hover {
 }
 
 .route-check select {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 28px 8px 10px;
 }
 
 .route-check .btn {
@@ -3579,15 +3603,11 @@ button.chip:hover {
 }
 
 .groups-editor select {
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text);
+  padding: 4px 28px 4px 6px;
 }
 
 .groups-editor .field select {
-  padding: 8px 10px;
+  padding: 8px 28px 8px 10px;
 }
 
 .groups-scenarios {
@@ -3768,10 +3788,139 @@ button.chip:hover {
   min-width: 0;
 }
 .channel-items__title {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
   font-weight: 500;
+  line-height: 1.35;
+}
+.channel-items__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 3px;
+  font-size: 12px;
+}
+.channel-items__sources {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.channel-items__from {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 0 0 10px;
+  border-left: 2px solid var(--border);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.channel-items a,
+.channel-items__from a {
+  color: var(--text);
+  text-decoration: none;
+}
+.channel-items__from a:hover {
+  color: var(--accent);
+}
+.tag--soft {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+.channel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+.channel-feed__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+.channel-feed__rubrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.channel-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.channel-chip--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.channel-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.channel-stats div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+.channel-stats b {
+  font-size: 18px;
+}
+.channel-stats span {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.channel-source-stats table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-top: 6px;
+}
+.channel-source-stats th,
+.channel-source-stats td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.channel-source-stats td:not(:first-child),
+.channel-source-stats th:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+.channel-rubrics {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.channel-rubrics select {
+  min-width: 120px;
+}
+.channel-rubrics__x {
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 0 0 2px;
+}
+.channel-rubric {
+  margin: 8px 0;
+}
+.channel-rubric__sub {
+  margin-left: 18px;
 }
 .channel-items__text {
   margin: 4px 0 0;
@@ -3801,4 +3950,57 @@ button.chip:hover {
   white-space: pre-wrap;
   font-family: inherit;
   margin: 0;
+}
+.channel-calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+.channel-calendar__day h3 {
+  font-size: 12.5px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+}
+.channel-calendar__entry {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.channel-calendar__entry--published {
+  border-color: var(--accent);
+}
+.channel-calendar__entry--missed {
+  opacity: 0.55;
+}
+.channel-calendar__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  flex: 1;
+}
+.channel-calendar__line:disabled {
+  cursor: default;
+}
+.channel-calendar__text {
+  flex-basis: 100%;
+  font-size: 12px;
+  max-height: 260px;
+  overflow: auto;
+}
+.channel-post__when {
+  width: auto;
 }

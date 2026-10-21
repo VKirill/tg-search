@@ -439,23 +439,52 @@ export function createApp(deps: AppDeps): AppHandlers {
       if (!gw) throw new Error('ИИ-движок не запущен');
       return gw.complete({ role, json, title, messages: [{ role: 'user', text: prompt }] });
     },
-    async score(about, items) {
-      if (!getSettings().jevApiKey.trim()) return items.map(() => ({ p: 0.7, kind: 'news' as const })); // no Jev: the editor decides
+    async score(desk, items) {
+      if (!getSettings().jevApiKey.trim()) return items.map(() => ({ p: 0.7, local: null, kind: 'news' as const, category: null, audiences: [] })); // no Jev: the editor decides
+      // rubrics: one choice among every sub-rubric (a rubric without subs is a choice itself)
+      const rubrics: Record<string, string> = {};
+      for (const c of desk.categories) {
+        if (!c.subs.length) rubrics[c.id] = `${c.name}: ${c.hint}`;
+        for (const sub of c.subs) rubrics[`${c.id}.${sub.id}`] = `${c.name} › ${sub.name}: ${sub.hint}`;
+      }
+      rubrics.other = 'none of these';
       const questions: Record<string, object> = {};
       items.forEach((_, i) => {
-        questions[`fit${i}`] = { type: 'noul', instructions: `Is \`item${i}\` worth posting today in the channel described in \`channel\` — local, timely, useful or interesting for its audience? Old news, ads and opinion pieces are not.` };
+        questions[`fit${i}`] = { type: 'noul', instructions: `Is \`item${i}\` worth posting today in the channel described in \`channel\` — timely, useful or interesting for its audience? Old news, ads, job offers and opinion pieces are not.` };
+        if (desk.area) questions[`local${i}`] = { type: 'noul', instructions: `Does \`item${i}\` happen in, or directly concern people in, the area described in \`area\`? Places elsewhere in the region, the country or abroad do not count.` };
         questions[`kind${i}`] = {
           type: 'choice', instructions: `What is \`item${i}\`?`,
           criteria: { news: 'local news', deal: 'a discount, promotion, offer or sale', event: 'an event with a date: concert, fair, exhibition, festival, opening', other: 'none of these, or not relevant' },
         };
+        questions[`rubric${i}`] = { type: 'choice', instructions: `Which rubric of the channel does \`item${i}\` belong to?`, criteria: rubrics };
+        for (const au of desk.audiences) questions[`aud${i}_${au.id}`] = { type: 'noul', instructions: `Does \`item${i}\` suit this audience: ${au.name} — ${au.hint}?` };
       });
-      const state: Record<string, string> = { channel: about.slice(0, 800) };
+      const state: Record<string, string> = { channel: desk.about.slice(0, 800), ...(desk.area ? { area: desk.area.slice(0, 300) } : {}) };
       items.forEach((it, i) => (state[`item${i}`] = `${it.title}\n${it.text}`.slice(0, 1200)));
       const data = await postSystemOne(getSettings, { state, questions });
-      return items.map((_, i) => ({
-        p: (data.answers?.[`fit${i}`] as { noul?: number } | undefined)?.noul ?? 0,
-        kind: ((data.answers?.[`kind${i}`] as { choice?: string } | undefined)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
-      }));
+      const a = (k: string) => data.answers?.[k] as { noul?: number; choice?: string } | undefined;
+      return items.map((_, i) => {
+        const rubric = a(`rubric${i}`)?.choice;
+        return {
+          p: a(`fit${i}`)?.noul ?? 0,
+          local: desk.area ? a(`local${i}`)?.noul ?? 0 : null,
+          kind: (a(`kind${i}`)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
+          category: rubric && rubric !== 'other' ? rubric : null,
+          audiences: desk.audiences.filter((au) => (a(`aud${i}_${au.id}`)?.noul ?? 0) >= 0.5).map((au) => au.id),
+        };
+      });
+    },
+    embed: (text) => embedder.embedDocument(text),
+    async sameStory(item, candidates) {
+      if (!getSettings().jevApiKey.trim()) throw new Error('no Jev'); // similarity alone decides
+      const questions: Record<string, object> = {};
+      const state: Record<string, string> = { item: `${item.title}\n${item.text}` };
+      candidates.forEach((c, i) => {
+        state[`other${i}`] = `${c.title}\n${c.text}`;
+        questions[`same${i}`] = { type: 'noul', instructions: `Do \`item\` and \`other${i}\` report the same event or piece of news (same happening, same decision, same offer), possibly in different words or languages? Two different news items on the same topic are not the same.` };
+      });
+      const data = await postSystemOne(getSettings, { state, questions });
+      return candidates.map((_, i) => (data.answers?.[`same${i}`] as { noul?: number } | undefined)?.noul ?? 0);
     },
     async search(query) {
       const s = getSettings();
@@ -955,8 +984,17 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
       items: async (deskId, limit) => channels.items(deskId, limit),
       setItemStatus: async (id, status) => channels.setItemStatus(id, status),
+      stories: async (deskId, status, limit) => channels.stories(deskId, status, limit),
+      setStoryStatus: async (storyId, status) => channels.setStoryStatus(storyId, status),
+      feedStats: async (deskId, days) => channels.feedStats(deskId, days),
+      rescore: async (deskId) => channels.rescore(deskId),
       posts: async (deskId, limit) => channels.posts(deskId, limit),
-      compose: async (deskId, kind, itemIds) => channels.compose(deskId, kind, itemIds),
+      // prepared for a slot: scheduled at the slot's time
+      compose: async (deskId, kind, itemIds, opts) => channels.compose(deskId, kind, itemIds, {
+        ...opts, scheduledAt: opts?.slotKey ? new Date(opts.slotKey.replace(' ', 'T')).getTime() : undefined,
+      }),
+      schedule: async (postId, at) => channels.schedule(postId, at),
+      calendar: async (deskId, fromDays, toDays) => channels.calendar(deskId, fromDays, toDays),
       savePost: async (id, text) => channels.savePost(id, text),
       publish: async (id) => channels.publish(id),
       rejectPost: async (id) => channels.rejectPost(id),

@@ -1,3 +1,4 @@
+import { DEFAULT_CHANNEL_AUDIENCES, DEFAULT_CHANNEL_CATEGORIES } from '../../shared/types';
 import type {
   ChannelDesk,
   ChannelItem,
@@ -551,6 +552,7 @@ const mockScenarios: HelperScenarioDef[] = BUILTIN_HELPER_SCENARIOS.map((x) => (
 const mockDesks: ChannelDesk[] = [{
   id: 1, chatId: -1009000000001, title: 'Sevilla al día', username: 'city_demo', accountId: 1, enabled: true, language: 'español',
   about: 'Noticias, ofertas y eventos de Sevilla para residentes', editorPrompt: '', autopublish: false, threshold: 0.6,
+  area: 'Sevilla y su área metropolitana', links: 'none', categories: DEFAULT_CHANNEL_CATEGORIES, audiences: DEFAULT_CHANNEL_AUDIENCES,
   slots: [{ time: '09:00', kind: 'digest' }, { time: '19:00', kind: 'deals' }], createdAt: Date.now() - 86400_000,
 }];
 const mockChannelSources: ChannelSource[] = [
@@ -558,8 +560,8 @@ const mockChannelSources: ChannelSource[] = [
   { id: 2, deskId: 1, kind: 'search', title: 'Ofertas hoy', target: 'oferta hoy Sevilla restaurante', enabled: true, intervalMin: 180, lastRunAt: Date.now() - 3600_000, lastError: null, found: 9, createdAt: Date.now() - 86400_000 },
 ];
 const mockChannelItems: ChannelItem[] = [
-  { id: 1, deskId: 1, sourceId: 1, sourceTitle: 'Diario local', kind: 'news', title: 'El autobús amplía horarios nocturnos', text: 'Desde el lunes, nuevas líneas nocturnas…', url: 'https://example.com/emt', image: null, publishedAt: Date.now() - 3600_000, score: 0.86, status: 'new', createdAt: Date.now() - 3000_000 },
-  { id: 2, deskId: 1, sourceId: 2, sourceTitle: 'Ofertas hoy', kind: 'deal', title: '2x1 en horchata en Triana', text: 'Solo este fin de semana…', url: 'https://example.com/horchata', image: null, publishedAt: Date.now() - 7200_000, score: 0.74, status: 'new', createdAt: Date.now() - 7000_000 },
+  { id: 1, deskId: 1, sourceId: 1, sourceTitle: 'Diario local', kind: 'news', title: 'El autobús amplía horarios nocturnos', text: 'Desde el lunes, nuevas líneas nocturnas…', url: 'https://example.com/emt', image: null, publishedAt: Date.now() - 3600_000, score: 0.86, local: 0.9, category: 'city.transport', storyId: 1, audiences: [], status: 'new', createdAt: Date.now() - 3000_000 },
+  { id: 2, deskId: 1, sourceId: 2, sourceTitle: 'Ofertas hoy', kind: 'deal', title: '2x1 en horchata en Triana', text: 'Solo este fin de semana…', url: 'https://example.com/horchata', image: null, publishedAt: Date.now() - 7200_000, score: 0.74, local: 0.95, category: 'deals.food', storyId: 2, audiences: ['evening', 'free'], status: 'new', createdAt: Date.now() - 7000_000 },
 ];
 const mockChannelPosts: ChannelPost[] = [];
 const mockHelperChats: HelperChat[] = [{ chatId: -1001234567890, title: 'Помощь с уроками', username: 'study_help_chat', accountId: 1, enabled: true, scenario: 'tasks', about: 'помощь с домашкой для школьников' }];
@@ -2028,6 +2030,36 @@ export function createMockApi(): Api {
       async items(deskId) {
         return mockChannelItems.filter((i) => i.deskId === deskId);
       },
+      async stories(deskId, status) {
+        return mockChannelItems.filter((i) => i.deskId === deskId && i.status === status).map((i) => ({
+          id: i.id, title: i.title, text: i.text, kind: i.kind, category: i.category, score: i.score, local: i.local, audiences: i.audiences, status: i.status, publishedAt: i.publishedAt,
+          items: [{ id: i.id, sourceTitle: i.sourceTitle, title: i.title, url: i.url, publishedAt: i.publishedAt }],
+        }));
+      },
+      async setStoryStatus(storyId, status) {
+        const it = mockChannelItems.find((i) => i.id === storyId);
+        if (it) it.status = status;
+      },
+      async feedStats() {
+        return { items: 51, stories: 38, duplicates: 13, kept: 17, byCategory: { 'city.transport': 3, 'deals.food': 2 }, byAudience: { evening: 2, free: 1 }, sources: mockChannelSources.map((x) => ({ sourceId: x.id, title: x.title, kind: x.kind, items: 20, first: 14, duplicates: 6, kept: 8 })) };
+      },
+      async schedule(id, at) {
+        const p = mockChannelPosts.find((x) => x.id === id)!;
+        p.scheduledAt = at;
+        return p;
+      },
+      async calendar() {
+        const day = new Date();
+        const at = (d: number, h: number) => new Date(day.getFullYear(), day.getMonth(), day.getDate() + d, h).getTime();
+        return [
+          { at: at(0, 9), slot: mockDesks[0].slots[0], slotKey: null, post: mockChannelPosts[0] ?? null, state: mockChannelPosts[0] ? 'published' : 'missed', ready: null },
+          { at: at(0, 19), slot: mockDesks[0].slots[1], slotKey: null, post: null, state: 'planned', ready: 4 },
+          { at: at(1, 9), slot: mockDesks[0].slots[0], slotKey: null, post: null, state: 'planned', ready: 6 },
+        ];
+      },
+      async rescore() {
+        return 12;
+      },
       async setItemStatus(id, status) {
         const it = mockChannelItems.find((i) => i.id === id);
         if (it) it.status = status;
@@ -2036,7 +2068,7 @@ export function createMockApi(): Api {
         return mockChannelPosts.filter((p) => p.deskId === deskId);
       },
       async compose(deskId, kind) {
-        const p: ChannelPost = { id: Date.now(), deskId, kind, text: '**🌆 Sevilla hoy**\n\n- Nueva línea de metro abre el lunes. [Fuente](https://example.com)', image: null, itemIds: [], status: 'draft', error: null, messageId: null, publishedAt: null, createdAt: Date.now() };
+        const p: ChannelPost = { id: Date.now(), deskId, kind, text: '**🌆 Sevilla hoy**\n\n- Nueva línea de metro abre el lunes. [Fuente](https://example.com)', image: null, itemIds: [], status: 'draft', scheduledAt: null, slotKey: null, error: null, messageId: null, publishedAt: null, createdAt: Date.now() };
         mockChannelPosts.unshift(p);
         return p;
       },

@@ -167,8 +167,15 @@ export interface Api {
     browserLogin(url: string): Promise<void>; // the app's browser window: log in to Facebook / Instagram once
     items(deskId: number, limit: number): Promise<ChannelItem[]>;
     setItemStatus(id: number, status: ChannelItem['status']): Promise<void>;
+    stories(deskId: number, status: ChannelItem['status'], limit: number): Promise<ChannelStory[]>;
+    setStoryStatus(storyId: number, status: ChannelItem['status']): Promise<void>; // every item of the story
+    feedStats(deskId: number, days: number): Promise<ChannelFeedStats>;
+    rescore(deskId: number): Promise<number>; // fresh items sorted into stories and scored again (after changing rubrics, area…)
     posts(deskId: number, limit: number): Promise<ChannelPost[]>;
-    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[]): Promise<ChannelPost>; // a draft now
+    // a draft now; `itemIds` — these stories; `slotKey` — prepared for that slot (scheduled at its time, the slot will not write another)
+    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[], opts?: { categories?: string[]; audiences?: string[]; slotKey?: string }): Promise<ChannelPost>;
+    schedule(postId: number, at: number | null): Promise<ChannelPost>; // a draft published at `at` by itself; null — unscheduled
+    calendar(deskId: number, fromDays: number, toDays: number): Promise<ChannelCalendarEntry[]>; // days relative to today
     savePost(id: number, text: string): Promise<ChannelPost>;
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;

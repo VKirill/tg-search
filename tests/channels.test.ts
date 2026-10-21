@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
-import { createChannels } from '../src/main/channels';
+import { articleText, createChannels, stripLinks } from '../src/main/channels';
 import { parseFeed } from '../src/main/channels/feeds';
 import { FakeEngine, makeMsg } from './fakes';
 
@@ -33,7 +33,7 @@ describe('feeds', () => {
   });
 });
 
-function setup(opts: { now?: () => number } = {}) {
+function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (item: { title: string }, c: { title: string }[]) => Promise<number[]> } = {}) {
   const db = new Db(':memory:');
   const acc = db.upsertAccountByPhone('+34600000000');
   db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 1, pauseSec: 0 });
@@ -41,26 +41,91 @@ function setup(opts: { now?: () => number } = {}) {
   engine.resolveMap.set('t.me/city_demo', { chatId: CHANNEL, title: 'Sevilla al día', username: 'city_demo', kind: 'channel', memberCount: 0, description: null, isMember: true, isAdmin: true });
   engine.resolveMap.set('@noticias_city', { chatId: SOURCE, title: 'Noticias City', username: 'noticias_city', kind: 'channel', memberCount: 900, description: null, isMember: false });
   const prompts: string[] = [];
+  const editor = () => prompts.filter((x) => x.startsWith('Ты — редактор')).at(-1)!;
+  const scored: string[] = [];
   const channels = createChannels({
     db, engine, dataDir: mkdtempSync(join(tmpdir(), 'channels-')), emit: () => {}, getSettings: () => db.getSettings(),
     llm: async (prompt, { title }) => {
       prompts.push(prompt);
       // a search page → concrete items; a JSON array with text around it, as models write it
+      if (title === 'channel-factcheck') return /<post>\n([\s\S]*?)\n<\/post>/.exec(prompt)?.[1] ?? '';
       if (title === 'channel-extract') return 'Aquí tienes:\n```json\n[{"title": "2x1 en horchata en Triana", "text": "Solo este fin de semana", "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"}]\n```';
       return '**🌆 Sevilla hoy**\n\n- La EMT amplía el servicio. [Fuente](https://news.example/emt)';
     },
-    // «oferta» is a deal; «fútbol» is off-topic for this channel
-    score: async (_about, items) => items.map((it) => (/fútbol/i.test(it.title) ? { p: 0.2, kind: 'news' } : /oferta|2x1/i.test(it.title) ? { p: 0.9, kind: 'deal' } : { p: 0.8, kind: 'news' })),
+    // «oferta» is a deal; «fútbol» is off-topic; «Madrid» is outside the channel's area
+    score: async (_desk, items) => (scored.push(...items.map((it) => it.title)), items.map((it) => (
+      /fútbol/i.test(it.title) ? { p: 0.2, local: 0.9, kind: 'news', category: 'events.sport', audiences: [] }
+        : /Madrid/.test(it.title) ? { p: 0.9, local: 0.1, kind: 'news', category: 'city.transport', audiences: [] }
+          : /oferta|2x1/i.test(it.title) ? { p: 0.9, local: 0.9, kind: 'deal', category: 'deals.food', audiences: ['evening', 'weekend'] }
+            : { p: 0.8, local: 0.9, kind: 'news', category: 'city.transport', audiences: [] }))),
+    // one direction per topic: the same story told in other words lands on the same vector
+    embed: async (text) => {
+      const topic = /EMT|autob[uú]s/i.test(text) ? 0 : /horchata/i.test(text) ? 1 : /Madrid/.test(text) ? 2 : 3 + (text.length % 5);
+      const v = new Float32Array(8);
+      v[topic] = 1;
+      return v;
+    },
     search: async () => [{ title: 'deals.example', url: 'https://deals.example/', content: 'Las mejores ofertas: 2x1 en horchata en Triana solo este fin de semana, y más planes en la ciudad.' }],
-    fetchFn: (async (url: string) => url.includes('grounding-api-redirect')
+    fetchFn: opts.fetchFn ?? (async (url: string) => url.includes('grounding-api-redirect')
       ? new Response(null, { status: 302, headers: { location: 'https://deals.example/horchata' } })
       : new Response(url.includes('feed') ? RSS : '<html></html>', { headers: { 'content-type': 'application/rss+xml' } })) as unknown as typeof fetch,
     now: opts.now,
+    sameStory: opts.sameStory,
   });
-  return { db, engine, channels, acc, prompts };
+  return { db, engine, channels, acc, prompts, scored, editor };
 }
 
+describe('own stories', () => {
+  it('a post leaves no way out: links become text, sources and other channels go, the own channel stays', () => {
+    const text = [
+      '🎃 **Fiesta de la calabaza** — viernes 30, 17:30. [Más info](https://t.me/other/2429)',
+      'Entrada 12 € en el [Centro de Arte](https://cah.example/kiefer). Fuente: https://news.example/x',
+      'Vía @other_channel',
+      '📲 Síguenos: @city_demo',
+    ].join('\n');
+    expect(stripLinks(text, 'city_demo')).toBe([
+      '🎃 **Fiesta de la calabaza** — viernes 30, 17:30.',
+      'Entrada 12 € en el Centro de Arte. Fuente:',
+      'Vía',
+      '📲 Síguenos: @city_demo',
+    ].join('\n'));
+  });
+});
+
 describe('channel assistant', () => {
+  it('Google News: the real article address and its paragraphs; a known headline is not fetched again', async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      calls.push(url);
+      if (url.startsWith('https://news.google.com/rss/search')) {
+        expect(decodeURIComponent(url)).toContain('q=ofertas Sevilla when:1d');
+        expect(url).toContain('hl=es&gl=ES');
+        return new Response(`<rss><channel><item><title>Abre un mercado de otoño en Triana - Diario Local</title>
+          <link>https://news.google.com/rss/articles/CBMiABC?oc=5</link><pubDate>${new Date().toUTCString()}</pubDate></item></channel></rss>`);
+      }
+      if (url.startsWith('https://news.google.com/rss/articles/CBMiABC')) return new Response('<c-wiz data-n-a-sg="SIG" data-n-a-ts="1792600000"></c-wiz>');
+      if (url.includes('batchexecute')) {
+        expect(String(init?.body)).toContain('CBMiABC');
+        return new Response(')]}\'\n[["wrb.fr","Fbv4je","[\\"garturlres\\",\\"https://diario.example/mercado-otono\\",1]",null]]');
+      }
+      if (url === 'https://diario.example/mercado-otono') {
+        return new Response('<nav><p>Menú</p></nav><p>El mercado de otoño abre el sábado en la plaza del Altozano, de 10:00 a 20:00, con 40 puestos de artesanía.</p><p>Aceptamos cookies para mejorar tu experiencia de navegación en nuestra web.</p>', { headers: { 'content-type': 'text/html' } });
+      }
+      return new Response('', { status: 404 });
+    }) as unknown as typeof fetch;
+    const { channels, acc } = setup({ fetchFn });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveSource({ deskId: d.id, kind: 'gnews', title: 'Google', target: 'ofertas Sevilla', enabled: true, intervalMin: 60 });
+    const [src] = channels.sources(d.id);
+    expect(await channels.runSource(src.id)).toBe(1);
+    const [it] = channels.items(d.id);
+    expect(it).toMatchObject({ title: 'Abre un mercado de otoño en Triana', url: 'https://diario.example/mercado-otono' });
+    expect(it.text).toBe('El mercado de otoño abre el sábado en la plaza del Altozano, de 10:00 a 20:00, con 40 puestos de artesanía.');
+    calls.length = 0;
+    expect(await channels.runSource(src.id)).toBe(0);
+    expect(calls).toHaveLength(1); // only the search: the headline is known
+  });
+
   it('connects only a channel the account administers', async () => {
     const { channels, engine, acc } = setup();
     const d = await channels.createDesk(acc.id, 't.me/city_demo');
@@ -105,6 +170,117 @@ describe('channel assistant', () => {
     expect(items.find((i) => i.kind === 'deal')?.url).toBe('https://deals.example/horchata'); // the search's redirect link resolved
   });
 
+  it('the same story from several sources is one story: Jev scores it once, the feed shows its sources, a post tells it once', async () => {
+    const { channels, engine, acc, scored, prompts } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, area: 'Sevilla y su área metropolitana', links: 'none' });
+    channels.saveSource({ deskId: d.id, kind: 'rss', title: 'News', target: 'https://news.example/feed', enabled: true, intervalMin: 30 });
+    channels.saveSource({ deskId: d.id, kind: 'telegram', title: 'Noticias City', target: '@noticias_city', enabled: true, intervalMin: 15 });
+    engine.setHistory(SOURCE, [
+      makeMsg(SOURCE, 1, 'Más autobuses por la noche: la EMT suma tres líneas nocturnas desde el lunes, cada 20 minutos'),
+      makeMsg(SOURCE, 2, 'Madrid cierra dos estaciones de metro por obras durante todo el mes de noviembre, avisan'),
+    ]);
+    const [rss, tg] = channels.sources(d.id);
+    await channels.runSource(rss.id);
+    await channels.runSource(tg.id);
+
+    expect(scored.filter((t) => /EMT|autobuses/i.test(t))).toHaveLength(1); // the Telegram retelling took the RSS story's verdict
+    const fits = channels.stories(d.id, 'new', 50);
+    expect(fits).toHaveLength(1);
+    expect(fits[0]).toMatchObject({ title: 'La EMT amplía el servicio nocturno', category: 'city.transport' });
+    expect(fits[0].items.map((i) => i.sourceTitle)).toEqual(['News', 'Noticias City']);
+    expect(channels.stories(d.id, 'skipped', 50).map((s) => s.title)).toContain('Madrid cierra dos estaciones de metro por obras durante todo el mes de noviembre, avisan'); // not our area
+
+    const stats = channels.feedStats(d.id, 1);
+    expect(stats).toMatchObject({ items: 3, stories: 2, duplicates: 1, kept: 1 });
+    expect(stats.sources.find((s) => s.title === 'Noticias City')).toMatchObject({ items: 2, first: 1, duplicates: 1 });
+
+    const p = await channels.compose(d.id, 'digest');
+    const prompt = prompts.at(-2)!; // the editor's; the last one is the proofreader's
+    expect(prompts.at(-1)).toContain('фактчекер');
+    expect(prompts.at(-1)).toContain('<materials>');
+    expect(prompt).toContain('собственные материалы редакции');
+    expect(prompt).toContain('География канала: Sevilla');
+    expect(prompt.match(/<story /g)).toHaveLength(1);
+    expect(prompt.match(/<source /g)).toHaveLength(2);
+    expect(prompt).not.toContain('url=');
+    expect(p.text).not.toMatch(/https?:|\]\(/); // the editor's link is stripped
+    expect(channels.stories(d.id, 'used', 50)[0].items).toHaveLength(2); // both tellings are used
+  });
+
+  it('a close neighbour is the same story only if Jev says so', async () => {
+    const asked: string[] = [];
+    const { channels, engine, acc } = setup({ sameStory: async (item, c) => (asked.push(`${item.title} ~ ${c[0].title}`), c.map(() => (/tres líneas/.test(item.title) ? 0.9 : 0.1))) });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveSource({ deskId: d.id, kind: 'rss', title: 'News', target: 'https://news.example/feed', enabled: true, intervalMin: 30 });
+    channels.saveSource({ deskId: d.id, kind: 'telegram', title: 'Noticias City', target: '@noticias_city', enabled: true, intervalMin: 15 });
+    engine.setHistory(SOURCE, [
+      makeMsg(SOURCE, 1, 'La EMT sube el precio del bonobús a partir de enero, el abono mensual costará dos euros más'), // same topic, other news
+      makeMsg(SOURCE, 2, 'La EMT suma tres líneas nocturnas desde el lunes con autobuses cada 20 minutos por la noche'),
+    ]);
+    for (const s of channels.sources(d.id)) await channels.runSource(s.id);
+    expect(asked).toHaveLength(2);
+    const stories = channels.stories(d.id, 'new', 50);
+    expect(stories).toHaveLength(2);
+    expect(stories.find((s) => s.title === 'La EMT amplía el servicio nocturno')?.items).toHaveLength(2);
+  });
+
+  it('a post for an audience takes only stories that suit it', async () => {
+    const { channels, acc, editor } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    channels.saveSource({ deskId: d.id, kind: 'rss', title: 'News', target: 'https://news.example/feed', enabled: true, intervalMin: 30 });
+    for (const s of channels.sources(d.id)) await channels.runSource(s.id);
+    expect(channels.stories(d.id, 'new', 50).find((st) => st.kind === 'deal')?.audiences).toEqual(['evening', 'weekend']);
+    expect(channels.feedStats(d.id, 1).byAudience).toEqual({ evening: 1, weekend: 1 });
+    await expect(channels.compose(d.id, 'digest', undefined, { audiences: ['kids'] })).rejects.toThrow(/Нет свежих/);
+    await channels.compose(d.id, 'digest', undefined, { audiences: ['evening'] });
+    expect(editor()).toContain('для аудитории: Куда сходить вечером');
+    expect(editor()).toContain('2x1 en horchata');
+    expect(editor()).not.toContain('La EMT');
+  });
+
+  it('the calendar: a slot prepared in advance is published at its time, once; past slots without a post are missed', async () => {
+    let t = new Date(2026, 9, 21, 12, 0).getTime();
+    const { channels, engine, acc } = setup({ now: () => t });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, autopublish: false, slots: [{ time: '09:00', kind: 'digest' }, { time: '19:00', kind: 'deals' }] });
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    await channels.runSource(channels.sources(d.id)[0].id);
+
+    let cal = channels.calendar(d.id, 0, 1);
+    expect(cal.map((e) => [new Date(e.at).getHours(), e.state, e.ready])).toEqual([[9, 'missed', null], [19, 'planned', 1], [9, 'planned', 1], [19, 'planned', 1]]);
+
+    // the owner prepares tonight's post now: it waits as a scheduled draft
+    const key = cal[1].slotKey!;
+    const p = await channels.compose(d.id, 'deals', undefined, { slotKey: key, scheduledAt: cal[1].at });
+    cal = channels.calendar(d.id, 0, 0);
+    expect(cal[1]).toMatchObject({ state: 'scheduled', post: { id: p.id } });
+
+    t = cal[1].at + 60_000;
+    await channels.tick();
+    await channels.tick();
+    expect(engine.posted).toHaveLength(1); // the prepared post, not a second one written by the slot
+    expect(channels.calendar(d.id, 0, 0)[1]).toMatchObject({ state: 'published', post: { id: p.id } });
+
+    // a draft scheduled by hand for later
+    const q = await channels.compose(d.id, 'top', undefined, {}).catch(() => null);
+    expect(q).toBeNull(); // nothing fresh left for it
+  });
+
+  it('a slot made of chosen rubrics takes only their stories', async () => {
+    const { channels, engine, acc, editor } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    channels.saveSource({ deskId: d.id, kind: 'rss', title: 'News', target: 'https://news.example/feed', enabled: true, intervalMin: 30 });
+    for (const s of channels.sources(d.id)) await channels.runSource(s.id);
+    await channels.compose(d.id, 'digest', undefined, { categories: ['deals'] });
+    expect(editor()).toContain('2x1 en horchata');
+    expect(editor()).not.toContain('La EMT');
+    expect(editor()).toContain('рубрики: Акции и скидки');
+    void engine;
+  });
+
   it('a source that fails keeps its error and does not stop the others', async () => {
     const { channels, acc } = setup();
     const d = await channels.createDesk(acc.id, 't.me/city_demo');
@@ -115,7 +291,7 @@ describe('channel assistant', () => {
   });
 
   it('writes a post from the best fresh items in the channel language and publishes it through the limiter', async () => {
-    const { channels, engine, acc, prompts, db } = setup();
+    const { channels, engine, acc, editor, db } = setup();
     const d = await channels.createDesk(acc.id, 't.me/city_demo');
     channels.saveDesk({ ...d, language: 'español', about: 'noticias y ofertas de Sevilla' });
     channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
@@ -123,9 +299,9 @@ describe('channel assistant', () => {
 
     const p = await channels.compose(d.id, 'deals');
     expect(p.status).toBe('draft');
-    expect(prompts.at(-1)).toContain('Язык поста — español');
-    expect(prompts.at(-1)).toContain('2x1 en horchata');
-    expect(prompts.at(-1)).toContain('Вид поста: deals — «Акции, скидки и события»');
+    expect(editor()).toContain('Язык поста — español');
+    expect(editor()).toContain('2x1 en horchata');
+    expect(editor()).toContain('Вид поста: deals — «Акции, скидки и события»');
     expect(channels.items(d.id)[0].status).toBe('used');
     await expect(channels.compose(d.id, 'deals')).rejects.toThrow(/Нет свежих/); // used items are not reused
 
