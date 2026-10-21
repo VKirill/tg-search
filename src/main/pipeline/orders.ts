@@ -12,6 +12,7 @@ import type {
 import type { DialogTurn } from '../ai/types';
 import type { Db } from '../db';
 import type { Executor, ExecutorRegistry } from '../executors/types';
+import type { Billing } from '../billing/types';
 import type { PaymentProvider } from '../payments/types';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { sendMessage, type OutreachDeps } from './outreach';
@@ -26,6 +27,9 @@ export interface OrdersDeps extends OutreachDeps {
   executors: ExecutorRegistry;
   manager?: unknown;
   dossier?: { onOrder?(order: Order): void | Promise<void> };
+  billingRef?: { current?: Billing };
+  /** When set, order payment status is polled by billing (ledger), not here — avoids double markPaid/run. */
+  skipOrderPaymentPoll?: boolean;
 }
 
 function workDir(dataDir: string, leadId: number, orderId: number): string {
@@ -152,6 +156,19 @@ export function createOrders(deps: OrdersDeps) {
     });
     const linkText = `Оплата ${order.price} ₽: ${url}`;
     await sendMessage(deps, order.leadId, linkText, 'dm', true);
+    const lead = deps.db.getLead(order.leadId);
+    const clientId = lead.clientId ?? lead.id;
+    deps.billingRef?.current?.recordPayment({
+      clientId,
+      purpose: 'order',
+      orderId: order.id,
+      subscriptionId: null,
+      amount: order.price,
+      status: 'pending',
+      providerId: id,
+      url,
+      paidAt: null,
+    });
     return updated;
   }
 
@@ -306,6 +323,8 @@ export function createOrders(deps: OrdersDeps) {
   }
 
   async function pollPayments() {
+    // Ledger order payments are polled in billing.check / billing.start (see skipOrderPaymentPoll).
+    if (deps.skipOrderPaymentPoll) return;
     const now = Date.now();
     for (const order of deps.db.listOrders()) {
       if (order.status !== 'awaiting_payment' || !order.paymentId) continue;
