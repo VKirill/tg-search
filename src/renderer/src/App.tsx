@@ -11,6 +11,7 @@ import { LeadsPanel, type LeadFilters } from './components/LeadsPanel';
 import { NavRail, type NavView } from './components/NavRail';
 import { ProjectsView } from './components/ProjectsView';
 import { ServicesView } from './components/ServicesView';
+import { SubscriptionsView } from './components/SubscriptionsView';
 import { SettingsView } from './components/SettingsView';
 import { ToastProvider, installGlobalErrors, useToast } from './components/Toast';
 import { getApi } from './hooks/useApi';
@@ -34,6 +35,7 @@ function hashNavView(): NavView {
   if (hash.includes('broadcasts')) return 'broadcasts';
   if (hash.includes('settings')) return 'settings';
   if (hash.includes('service-editor') || hash.includes('shot=services') || hash.includes('&services')) return 'services';
+  if (hash.includes('subscriptions')) return 'subscriptions';
   if (hash.includes('accounts')) return 'accounts';
   return 'inbox';
 }
@@ -135,7 +137,7 @@ function AppInner() {
     const leadMatch = hash.match(/(?:^|&)lead=(\d+)/);
     if (leadMatch) setLeadId(Number(leadMatch[1]));
     if (hash.includes('orders')) setCrmCollapsed(false);
-    const shot = hash.replace(/&?lead=\d+/, '').replace(/^&/, '').slice(5);
+    const shot = hash.match(/shot=([^&]+)/)?.[1] ?? '';
     const map: Record<string, NavView> = {
       main: 'inbox',
       inbox: 'inbox',
@@ -150,6 +152,11 @@ function AppInner() {
       orders: 'inbox',
       accounts: 'accounts',
       dialog: 'inbox',
+      subscriptions: 'subscriptions',
+      'client-memory': 'inbox',
+      'client-files': 'inbox',
+      'client-money': 'inbox',
+      'agent-trace': 'inbox',
     };
     if (map[shot]) setView(map[shot]);
   }, []);
@@ -290,6 +297,7 @@ function AppInner() {
         {view === 'stats' && <StatsView />}
         {view === 'broadcasts' && <BroadcastsView accounts={accounts} />}
         {view === 'services' && <ServicesView />}
+        {view === 'subscriptions' && <SubscriptionsView />}
         {view === 'settings' && <SettingsView />}
       </div>
       {accountsOpen && (

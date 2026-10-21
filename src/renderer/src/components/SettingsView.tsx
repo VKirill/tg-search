@@ -76,6 +76,54 @@ export function SettingsView() {
           <div className="field"><label>Модель</label><input value={s.llmModel} onChange={(e) => setS({ ...s, llmModel: e.target.value })} /></div>
         </section>
         <section>
+          <h2 className="section-title">Оператор (ведёт диалоги)</h2>
+          <p className="field-hint">Дешёвая модель с вызовом инструментов: ответы клиентам, память, заказы, подписки.</p>
+          <div className="field">
+            <label>Base URL</label>
+            <div className="settings-presets">
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setS({ ...s, operatorBaseUrl: 'https://api.deepseek.com/v1' })}
+              >
+                DeepSeek
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setS({ ...s, operatorBaseUrl: 'https://openrouter.ai/api/v1' })}
+              >
+                OpenRouter
+              </button>
+            </div>
+            <input
+              value={s.operatorBaseUrl}
+              onChange={(e) => setS({ ...s, operatorBaseUrl: e.target.value })}
+              placeholder="https://api.deepseek.com/v1"
+            />
+          </div>
+          <div className="field">
+            <label>API key</label>
+            <input type="password" autoComplete="off" value={s.operatorApiKey} onChange={(e) => setS({ ...s, operatorApiKey: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Модель</label>
+            <input
+              value={s.operatorModel}
+              onChange={(e) => setS({ ...s, operatorModel: e.target.value })}
+              placeholder="deepseek-flash"
+            />
+          </div>
+        </section>
+        <section>
+          <h2 className="section-title">Поиск в интернете (Tavily)</h2>
+          <p className="field-hint">Для исполнителя «ассистент»: поиск и исследования по поручениям подписчиков.</p>
+          <div className="field">
+            <label>API key</label>
+            <input type="password" autoComplete="off" value={s.tavilyApiKey} onChange={(e) => setS({ ...s, tavilyApiKey: e.target.value })} />
+          </div>
+        </section>
+        <section>
           <h2 className="section-title">Оплата (ЮKassa)</h2>
           <p className="field-hint">Сейчас тестовый магазин — после проверки подключите рабочий.</p>
           <div className="field"><label>Shop ID</label><input value={s.yookassaShopId} onChange={(e) => setS({ ...s, yookassaShopId: e.target.value })} /></div>

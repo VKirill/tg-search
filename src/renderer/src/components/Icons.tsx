@@ -219,6 +219,16 @@ export function IconBroadcast(p: IconProps) {
   );
 }
 
+export function IconSubscriptions(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <rect x="5" y="6" width="14" height="12" rx="2" />
+      <path d="M8 10h8M8 13.5h5" />
+      <path d="M9 6V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V6" />
+    </StrokeIcon>
+  );
+}
+
 export function IconAccounts(p: IconProps) {
   return (
     <StrokeIcon {...p}>
