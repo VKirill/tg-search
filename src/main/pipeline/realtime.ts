@@ -2,6 +2,7 @@ import type { Source } from '../../shared/types';
 import type { SpeechService } from '../ai/speech';
 import type { TgMessage } from '../telegram/types';
 import { transcribeIncomingVoice } from '../voice/incoming';
+import { spamChatReason } from '../dedupe/spamChats';
 import {
   filterIncomingMessages,
   qualifyAndAddLeads,
@@ -78,8 +79,9 @@ export function createRealtime(deps: RealtimeDeps) {
   const pendingChats = new Map<string, Promise<Source | null>>();
 
   async function sourceFor(projectId: number, accountId: number, chatId: number): Promise<Source | null> {
+    if (spamChatReason(deps.db, chatId)) return null;
     const existing = deps.db.findSource(projectId, chatId);
-    if (existing) return existing.status === 'rejected' ? null : existing;
+    if (existing) return existing.status === 'rejected' || existing.status === 'spam' ? null : existing;
     const key = `${projectId}:${chatId}`;
     let pending = pendingChats.get(key);
     if (!pending) {

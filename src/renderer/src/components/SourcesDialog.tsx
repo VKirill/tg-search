@@ -140,7 +140,13 @@ export function SourcesDialog({ project, onClose, onChange }: SourcesDialogProps
                 {s.matchedLeads} из {s.checkedLeads || '—'} подходят
               </td>
               <td style={{ position: 'relative' }}>
-                <button type="button" className="btn btn--sm" onClick={() => setMenuId(s.id)}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={s.status === 'spam'}
+                  title={s.status === 'spam' ? 'Разблокировать можно в разделе «Спам»' : undefined}
+                  onClick={() => setMenuId(s.id)}
+                >
                   {sourceStatusLabel(s.status)}
                 </button>
                 {menuId === s.id && (

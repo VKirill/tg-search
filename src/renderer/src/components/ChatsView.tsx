@@ -218,6 +218,20 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
     }
   };
 
+  const blockSpam = async () => {
+    if (accountId == null || !selected) return;
+    if (!confirm(`«${selected.title}» — спам-чат? Выйдем из него со всех аккаунтов и больше не вступим.`)) return;
+    try {
+      await api.spam.blockChat(accountId, selected.chatId);
+      toast(`«${selected.title}» в спам-чатах`);
+      setSelected(null);
+      setItems([]);
+      await loadChats();
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+
   const send = async () => {
     if (accountId == null || !selected || !text.trim()) return;
     try {
@@ -321,7 +335,9 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
                       {c.memberCount ? ` · ${c.memberCount.toLocaleString('ru-RU')}` : ''}
                     </div>
                   </div>
-                  {c.isMember ? (
+                  {c.spamReason ? (
+                    <span className="tag tag--warn" title={c.spamReason}>спам-чат</span>
+                  ) : c.isMember ? (
                     <span className="chats-badge">вы в чате</span>
                   ) : (
                     <button type="button" className="btn btn--sm btn--primary" onClick={(e) => { e.stopPropagation(); join(c.chatId); }}>
@@ -392,12 +408,20 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
                   Открыть в Telegram <IconExternal size={12} />
                 </button>
               )}
-              {selected.isMember ? (
+              {selected.spamReason ? (
+                <span className="tag tag--warn" title={selected.spamReason}>спам-чат: {selected.spamReason}</span>
+              ) : selected.isMember ? (
                 selected.kind !== 'private' && (
-                  <button type="button" className="btn btn--sm btn--danger" onClick={leave}>Покинуть</button>
+                  <>
+                    <button type="button" className="btn btn--sm" onClick={blockSpam}>Спам-чат</button>
+                    <button type="button" className="btn btn--sm btn--danger" onClick={leave}>Покинуть</button>
+                  </>
                 )
               ) : (
-                <button type="button" className="btn btn--sm btn--primary" onClick={() => join(selected.chatId)}>Вступить</button>
+                <>
+                  {selected.kind !== 'private' && <button type="button" className="btn btn--sm" onClick={blockSpam}>Спам-чат</button>}
+                  <button type="button" className="btn btn--sm btn--primary" onClick={() => join(selected.chatId)}>Вступить</button>
+                </>
               )}
             </header>
             <div className="chats-timeline" ref={timelineRef}>
@@ -484,13 +508,13 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
           <div className="crm-muted">Сообщения чата проверяет Jev по правилу тематики.</div>
           {projects.map((p) => {
             const source = (sources[p.id] ?? []).find((s) => s.tgChatId === selected.chatId);
-            const listening = source ? source.status !== 'rejected' : selected.isMember;
+            const listening = source ? source.status !== 'rejected' && source.status !== 'spam' : selected.isMember;
             return (
               <label key={p.id} className="chats-listen">
                 <input
                   type="checkbox"
                   checked={listening}
-                  disabled={!source}
+                  disabled={!source || source.status === 'spam'}
                   onChange={(e) => source && setListening(p.id, source, e.target.checked)}
                 />
                 <span>

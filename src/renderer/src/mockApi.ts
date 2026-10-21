@@ -29,6 +29,7 @@ import type {
   ProjectInput,
   Settings,
   SkillDef,
+  SpamChat,
   SpamTemplate,
   StatsReport,
   Source,
@@ -512,6 +513,10 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockSpamChats: SpamChat[] = [
+  { tgChatId: -1009001, title: 'WB партнёры | чат', username: 'wb_partners_chats', reason: '41 из 43 сообщений за неделю — спам и повторы', messages: 43, liveShare: 0.05, source: 'auto', createdAt: Date.now() - 3600_000 },
+];
 
 const mockCategories: Category[] = [
   { id: 1, name: 'Сайты и лендинги', description: 'Сайты, лендинги, интернет-магазины, вёрстка', enabled: true },
@@ -1870,6 +1875,18 @@ export function createMockApi(): Api {
         const t = mockSpamTemplates.find((x) => x.id === id)!;
         t.status = status;
         return { ...t };
+      },
+      async chats() {
+        return mockSpamChats.map((c) => ({ ...c }));
+      },
+      async blockChat(_accountId, chatId) {
+        const c = { tgChatId: chatId, title: `Чат ${chatId}`, username: null, reason: 'отмечен вручную', messages: 0, liveShare: 0, source: 'owner' as const, createdAt: Date.now() };
+        mockSpamChats.unshift(c);
+        return { ...c };
+      },
+      async unblockChat(tgChatId) {
+        const i = mockSpamChats.findIndex((c) => c.tgChatId === tgChatId);
+        if (i >= 0) mockSpamChats.splice(i, 1);
       },
     },
     approvals: {

@@ -105,7 +105,7 @@ export interface Account {
 
 export type ChatKind = 'group' | 'supergroup' | 'channel' | 'private';
 
-export type SourceStatus = 'candidate' | 'active' | 'rejected';
+export type SourceStatus = 'candidate' | 'active' | 'rejected' | 'spam'; // spam: the chat is in the spam-chat blocklist
 
 export interface Source {
   id: number;
@@ -372,6 +372,18 @@ export interface SpamTemplate {
   lastSeenAt: number;
 }
 
+// A chat with nothing but spam and repeats (or no live messages at all): left on every account, never joined again.
+export interface SpamChat {
+  tgChatId: number;
+  title: string;
+  username: string | null;
+  reason: string; // «38 из 41 сообщения за неделю — спам и повторы» / «нет живых сообщений за неделю» / «отмечен вручную»
+  messages: number; // messages seen in the window
+  liveShare: number; // 0..1 share of live (non-spam, non-repeat) messages
+  source: 'auto' | 'owner';
+  createdAt: number;
+}
+
 export interface Approval {
   id: number;
   leadId: number;
@@ -570,6 +582,7 @@ export interface ChatInfo {
   kind: ChatKind;
   memberCount: number | null;
   isMember: boolean;
+  spamReason?: string | null; // in the spam-chat blocklist: why; such a chat cannot be joined
 }
 
 export interface ChatSummary extends ChatInfo {
@@ -705,6 +718,9 @@ export interface Api {
     templates(): Promise<SpamTemplate[]>;
     markSpam(leadId: number): Promise<Lead>; // learn: this text (and look-alikes) is spam from now on
     setTemplateStatus(id: number, status: SpamTemplate['status']): Promise<SpamTemplate>; // «не спам» → allowed
+    chats(): Promise<SpamChat[]>; // the spam-chat blocklist
+    blockChat(accountId: number, chatId: number): Promise<SpamChat>; // owner: leave on every account and block
+    unblockChat(tgChatId: number): Promise<void>; // joinable again; its sources go back to candidates
   };
   approvals: {
     list(status?: Approval['status']): Promise<Approval[]>;

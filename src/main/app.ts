@@ -42,6 +42,7 @@ import { createMemoryStore } from './memory/store';
 import { ensureAgentSchema } from './agent/schema';
 import { listAgentSteps } from './agent/store';
 import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
+import { createSpamChats, guardSpamJoins, spamChatReason, SPAM_CHAT_CHECK_MS } from './dedupe/spamChats';
 import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
@@ -69,7 +70,8 @@ export interface AppDeps {
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void>; relieveMemory(): void };
 
 export function createApp(deps: AppDeps): AppHandlers {
-  const { db, engine, ai, openExternal, speech, dataDir } = deps;
+  const { db, ai, openExternal, speech, dataDir } = deps;
+  const engine = guardSpamJoins(deps.engine, db);
   ensureAgentSchema(db.raw, db);
   const getSettings = () => db.getSettings();
   const manager = deps.manager ?? stubManagerAi();
@@ -115,6 +117,9 @@ export function createApp(deps: AppDeps): AppHandlers {
   const billingRef: { current?: BillingApi } = {};
   const dedupe = createDedupe({ db, emit });
   let dedupePruneTimer: ReturnType<typeof setInterval> | null = null;
+  const spamChats = createSpamChats({ db, engine, emit });
+  let spamChatTimer: ReturnType<typeof setInterval> | null = null;
+  const checkSpamChats = () => void spamChats.check().catch((err) => console.error('spam chats', err));
   const pipeline = {
     db,
     engine,
@@ -299,6 +304,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       }
       pruneFingerprints(db);
       dedupe.learnExistingLeads();
+      spamChatTimer = setInterval(checkSpamChats, SPAM_CHAT_CHECK_MS);
+      setTimeout(checkSpamChats, 60_000).unref?.();
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       realtime.start();
       autopilot.start();
@@ -313,6 +320,8 @@ export function createApp(deps: AppDeps): AppHandlers {
     async stop() {
       if (dedupePruneTimer) clearInterval(dedupePruneTimer);
       dedupePruneTimer = null;
+      if (spamChatTimer) clearInterval(spamChatTimer);
+      spamChatTimer = null;
       billing?.stop();
       orders.stopPoller();
       broadcaster.stop();
@@ -365,6 +374,8 @@ export function createApp(deps: AppDeps): AppHandlers {
         const accountId = accounts[0]?.id ?? db.listAccounts().find((a) => a.status === 'authorized')?.id;
         if (!accountId) throw new Error('Подключите рабочий аккаунт Telegram');
         const chat = await engine.resolveChat(accountId, linkOrUsername);
+        const spam = spamChatReason(db, chat.chatId);
+        if (spam) throw new Error(`«${chat.title}» — спам-чат (${spam}). Разблокировать можно в разделе «Спам»`);
         const source = db.addSource({
           projectId,
           tgChatId: chat.chatId,
@@ -578,6 +589,9 @@ export function createApp(deps: AppDeps): AppHandlers {
       templates: async () => dedupe.listTemplates(),
       markSpam: async (leadId) => dedupe.markSpam(leadId),
       setTemplateStatus: async (id, status) => dedupe.setTemplateStatus(id, status),
+      chats: async () => spamChats.list(),
+      blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
+      unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
     },
     approvals: {
       list: async (status) => approvalsHolder.api!.list(status),
@@ -630,14 +644,15 @@ export function createApp(deps: AppDeps): AppHandlers {
     chats: {
       list: async (accountId) =>
         (await engine.listChats(accountId, 300)).map(({ chat, unreadCount, last }) => ({
-          ...chatInfo(chat), unreadCount, lastText: last?.text ?? null, lastDate: last?.date ?? null,
+          ...chatInfo(chat), spamReason: spamChatReason(db, chat.chatId), unreadCount, lastText: last?.text ?? null, lastDate: last?.date ?? null,
         })),
       history: async (accountId, chatId, before) =>
         (await engine.getMessagesBefore(accountId, chatId, before ?? null, 50)).map(chatItem),
       // Manual messages from the «Чаты» section are the owner typing, not outreach: no limiter (docs/decisions.md)
       send: async (accountId, chatId, text, replyTo) =>
         chatItem(replyTo ? await engine.replyInChat(accountId, chatId, replyTo, text) : await engine.sendToChat(accountId, chatId, text)),
-      search: async (accountId, query) => (await engine.searchChats(accountId, query)).map(chatInfo),
+      search: async (accountId, query) =>
+        (await engine.searchChats(accountId, query)).map((c) => ({ ...chatInfo(c), spamReason: spamChatReason(db, c.chatId) })),
       join: async (accountId, target) => {
         const chat = typeof target === 'number' ? await engine.getChat(accountId, target) : await engine.resolveChat(accountId, target);
         if (!chat.isMember) await engine.joinChat(accountId, chat.chatId);

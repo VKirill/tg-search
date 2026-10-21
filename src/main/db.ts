@@ -437,6 +437,12 @@ export class Db {
     if (!r) throw new Error(`source ${id} not found`);
     return toSource(r);
   }
+  listAllSources(): Source[] {
+    return this.all('SELECT * FROM sources ORDER BY id').map(toSource);
+  }
+  findSourcesByChat(tgChatId: number): Source[] {
+    return this.all('SELECT * FROM sources WHERE tg_chat_id = ?', tgChatId).map(toSource);
+  }
   findSource(projectId: number, tgChatId: number): Source | undefined {
     const r = this.one('SELECT * FROM sources WHERE project_id = ? AND tg_chat_id = ?', projectId, tgChatId);
     return r && toSource(r);

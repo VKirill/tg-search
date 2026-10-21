@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { SpamTemplate } from '../../../shared/types';
+import type { SpamChat, SpamTemplate } from '../../../shared/types';
 import { formatLeadDate } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { useToast } from './Toast';
@@ -7,10 +7,23 @@ import { useToast } from './Toast';
 export function SpamTemplatesView() {
   const toast = useToast();
   const [templates, setTemplates] = useState<SpamTemplate[]>([]);
+  const [chats, setChats] = useState<SpamChat[]>([]);
 
   const load = useCallback(async () => {
-    setTemplates(await getApi().spam.templates());
+    const [t, c] = await Promise.all([getApi().spam.templates(), getApi().spam.chats()]);
+    setTemplates(t);
+    setChats(c);
   }, []);
+
+  const unblock = async (c: SpamChat) => {
+    try {
+      await getApi().spam.unblockChat(c.tgChatId);
+      toast(`«${c.title}» снова можно добавлять`);
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   useEffect(() => {
     load().catch((e) => toast(e instanceof Error ? e.message : String(e)));
@@ -27,6 +40,39 @@ export function SpamTemplatesView() {
 
   return (
     <div className="page-view page-view--spam">
+      <div className="page-view__head">
+        <h1>Спам-чаты</h1>
+      </div>
+      <p className="crm-muted page-view__intro">
+        Чаты, где за неделю только спам и повторы или нет живых сообщений. Из них вышли со всех аккаунтов, вступить
+        или добавить их в источники нельзя.
+      </p>
+      {chats.length === 0 ? (
+        <div className="empty-state">Спам-чатов пока нет.</div>
+      ) : (
+        <ul className="spam-list">
+          {chats.map((c) => (
+            <li key={c.tgChatId} className="spam-card">
+              <div className="spam-card__head">
+                <span className="tag tag--warn">спам-чат</span>
+                <span className="crm-muted">{c.source === 'auto' ? 'авто' : 'владелец'}</span>
+              </div>
+              <p className="spam-card__sample">
+                {c.title}
+                {c.username && <span className="crm-muted"> · @{c.username}</span>}
+              </p>
+              <div className="spam-card__stats">
+                <span>{c.reason}</span>
+                <span>·</span>
+                <span>{formatLeadDate(c.createdAt)}</span>
+              </div>
+              <div className="spam-card__actions">
+                <button type="button" className="btn btn--sm" onClick={() => unblock(c)}>Разблокировать</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="page-view__head">
         <h1>Спам-шаблоны</h1>
       </div>

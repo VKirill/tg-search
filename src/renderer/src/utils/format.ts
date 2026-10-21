@@ -90,6 +90,7 @@ export function sourceStatusLabel(status: string): string {
     active: 'Подходит',
     candidate: 'Кандидат',
     rejected: 'Отклонён',
+    spam: 'Спам-чат',
   };
   return map[status] ?? status;
 }

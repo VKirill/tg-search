@@ -3,6 +3,7 @@ import type { Db } from '../db';
 import type { LeadAi } from '../ai/types';
 import type { TelegramEngine, TgChat, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
+import { spamChatReason } from '../dedupe/spamChats';
 import { filterIncomingMessages, qualifyAndAddLeads, type ScannerDeps } from './scanner';
 
 export interface DiscoveryDeps {
@@ -99,7 +100,7 @@ export async function discover(deps: DiscoveryDeps, projectId: number): Promise<
       }
 
       for (const chat of chatMap.values()) {
-        if (knownChatIds.has(chat.chatId)) continue;
+        if (knownChatIds.has(chat.chatId) || spamChatReason(deps.db, chat.chatId)) continue;
         knownChatIds.add(chat.chatId);
         const { activeCount: nextActive } = await rateAndUpsertChat(deps, project, chat, accountId, kw, activeCount);
         activeCount = nextActive;

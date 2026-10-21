@@ -26,7 +26,7 @@ export const API_METHODS: ApiMap = {
   agents: ['list', 'save', 'remove', 'rules', 'saveRules'],
   skills: ['list', 'save', 'remove', 'approve'],
   approvals: ['list', 'decide'],
-  spam: ['templates', 'markSpam', 'setTemplateStatus'],
+  spam: ['templates', 'markSpam', 'setTemplateStatus', 'chats', 'blockChat', 'unblockChat'],
   services: ['list', 'create', 'update', 'remove'],
   orders: ['list', 'create', 'update', 'requestPayment', 'markPaid', 'run', 'deliver', 'cancel'],
   dossier: ['path', 'open'],

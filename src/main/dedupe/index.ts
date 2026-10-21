@@ -34,6 +34,7 @@ export interface Dedupe {
 }
 
 type FpRow = {
+  id: number;
   cluster_id: string;
   exact_hash: string;
   simhash: string;
@@ -98,15 +99,43 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
     return variants.some((v) => isSameTemplate(fp, fingerprintText(v.sample)));
   }
 
+  // Fingerprints of stored rows, so a batch does not re-normalize thousands of samples per message
+  const storedFps = new Map<number, TextFingerprint>();
+  function storedFp(row: FpRow): TextFingerprint {
+    let fp = storedFps.get(row.id);
+    if (!fp) {
+      if (storedFps.size > 20_000) storedFps.clear();
+      fp = { ...fingerprintText(row.sample), exactHash: row.exact_hash, simhash: simhashFromDb(row.simhash) };
+      storedFps.set(row.id, fp);
+    }
+    return fp;
+  }
+
+  // Single linkage: a text that matches several clusters joins them, so a spun campaign ends up as one cluster
   function findClusterId(fp: TextFingerprint, sinceMs: number): string {
     const recent = db.raw.prepare(
-      `SELECT cluster_id, exact_hash, simhash, sample FROM message_fingerprints
+      `SELECT id, cluster_id, exact_hash, simhash, sample FROM message_fingerprints
        WHERE created_at >= ? ORDER BY id DESC LIMIT 5000`,
     ).all(sinceMs) as FpRow[];
+    const clusters: string[] = [];
     for (const row of recent) {
-      if (isSameTemplate(fp, fingerprintText(row.sample))) return row.cluster_id;
+      if (!clusters.includes(row.cluster_id) && isSameTemplate(fp, storedFp(row))) clusters.push(row.cluster_id);
     }
-    return fp.exactHash;
+    if (clusters.length === 0) return fp.exactHash;
+    const [keep, ...rest] = clusters;
+    for (const c of rest) mergeCluster(c, keep);
+    return keep;
+  }
+
+  function mergeCluster(from: string, into: string) {
+    db.raw.prepare('UPDATE message_fingerprints SET cluster_id = ? WHERE cluster_id = ?').run(into, from);
+    db.raw.prepare(
+      `INSERT INTO fingerprint_cluster_authors(cluster_id, sender_user_id, first_seen_at, last_seen_at)
+       SELECT ?, sender_user_id, first_seen_at, last_seen_at FROM fingerprint_cluster_authors WHERE cluster_id = ?
+       ON CONFLICT(cluster_id, sender_user_id) DO UPDATE SET last_seen_at = MAX(last_seen_at, excluded.last_seen_at)`,
+    ).run(into, from);
+    db.raw.prepare('DELETE FROM fingerprint_cluster_authors WHERE cluster_id = ?').run(from);
+    db.raw.prepare('UPDATE spam_templates SET cluster_id = ? WHERE cluster_id = ?').run(into, from);
   }
 
   function findRepeatLead(projectId: number, senderUserId: number, fp: TextFingerprint, beforeId = Number.MAX_SAFE_INTEGER): Lead | undefined {

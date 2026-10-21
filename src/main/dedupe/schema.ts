@@ -38,9 +38,25 @@ CREATE TABLE IF NOT EXISTS spam_templates (
   last_seen_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spam_tpl_hash ON spam_templates(exact_hash);
+
+CREATE TABLE IF NOT EXISTS spam_chats (
+  tg_chat_id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  username TEXT,
+  reason TEXT NOT NULL,
+  messages INTEGER NOT NULL DEFAULT 0,
+  live_share REAL NOT NULL DEFAULT 0,
+  source TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mfp_chat ON message_fingerprints(tg_chat_id, created_at);
 `;
 
+const ensured = new WeakSet<DatabaseSync>();
+
 export function ensureDedupeSchema(raw: DatabaseSync): void {
+  if (ensured.has(raw)) return;
+  ensured.add(raw);
   raw.exec(DEDUPE_DDL);
   const cols = (raw.prepare('PRAGMA table_info(spam_templates)').all() as { name: string }[]).map((c) => c.name);
   // the cluster of a template: a message matching any of its variants is spam, not only one matching the sample
