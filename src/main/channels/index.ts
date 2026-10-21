@@ -27,7 +27,7 @@ const LATE_SLOT_MS = 3600_000; // a slot missed while the app was off: still pos
 const MIN_TELEGRAM_TEXT = 60;
 const SCORE_BATCH = 8;
 const GNEWS_ITEMS = 25; // newest Google News results per read
-const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 6, deals: 6, top: 1 };
+const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 8, deals: 6, top: 1 };
 const STORY_WINDOW_MS = 3 * 86400_000; // a story is matched against what was found in the last three days
 // Embeddings find candidates, Jev decides: news on one topic (a flood's aid packages) is as close as one story's retellings
 export const STORY_CANDIDATE = 0.82; // cosine similarity worth asking about
@@ -71,6 +71,11 @@ export function articleText(html: string): string {
 }
 
 const titleKey = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().slice(0, 90);
+const partOfDay = (t: number) => {
+  const h = new Date(t).getHours();
+  return h < 5 ? 'ночь' : h < 12 ? 'утро' : h < 18 ? 'день' : 'вечер';
+};
+
 // «YYYY-MM-DD HH:MM» of a slot on a day, and back to a local time
 const slotTime = (key: string) => {
   const [y, mo, d, h, mi] = key.split(/[- :]/).map(Number);
@@ -255,6 +260,7 @@ export function createChannels(deps: ChannelsDeps) {
       `Это текст из ${pageUrl}. Вытащи из него отдельные свежие материалы — новости, акции и скидки, события, — которые могут`,
       `заинтересовать аудиторию канала: ${d.about || 'городские новости'}.`,
       'Только то, что прямо есть в тексте: не выдумывай и не дополняй. Пропусти меню сайта, рекламу, старое и общие слова.',
+      'Если это лента соцсети (посты X, Facebook, Instagram): каждый пост с новостью, акцией или событием — отдельный материал; мнения, споры, шутки, рекламу и репосты без новости пропусти.',
       'Заголовок и текст — на языке оригинала (испанский остаётся испанским), не переводи.',
       'Ответ — только JSON-массив: [{"title": "заголовок", "text": "суть в 1–4 предложениях: что, где, когда, условия", "url": "ссылка на сам материал, если есть в тексте", "date": "ГГГГ-ММ-ДД, если указана"}].',
       '',
@@ -425,17 +431,24 @@ export function createChannels(deps: ChannelsDeps) {
   // The best fresh stories that fit: by the slot's rubrics, or by kind; a story told by more sources ranks higher
   function pickStories(d: ChannelDesk, kind: ChannelSlotKind, categories: string[] = [], audiences: string[] = []): number[] {
     const kinds = categories.length || audiences.length ? ['news', 'deal', 'event'] : kind === 'deals' ? ['deal', 'event'] : kind === 'top' ? ['news'] : ['news', 'event', 'deal'];
-    const rows = raw.prepare(`SELECT story_id, MAX(score) AS score, COUNT(DISTINCT source_id) AS sources, MAX(category) AS category, MAX(audiences) AS audiences, MAX(published_at) AS at
+    const rows = raw.prepare(`SELECT story_id, MAX(score) AS score, COUNT(DISTINCT source_id) AS sources, MAX(kind) AS kind, MAX(category) AS category, MAX(audiences) AS audiences, MAX(published_at) AS at
       FROM channel_items WHERE desk_id = ? AND status = 'new' AND score >= ? AND published_at >= ? AND story_id IS NOT NULL
         AND kind IN (${kinds.map(() => '?').join(',')})
       GROUP BY story_id`).all(d.id, d.threshold, now() - FRESH_MS, ...kinds) as Row[];
-    return rows
+    const ranked = rows
       .filter((r) => inCategories(r.category, categories))
       .filter((r) => !audiences.length || (JSON.parse(r.audiences || '[]') as string[]).some((a) => audiences.includes(a)))
-      .map((r) => ({ id: r.story_id as number, rank: r.score + 0.05 * Math.min(r.sources - 1, 3), at: r.at as number }))
-      .sort((a, b) => b.rank - a.rank || b.at - a.at)
-      .slice(0, POST_ITEMS[kind])
-      .map((r) => r.id);
+      .map((r) => ({ id: r.story_id as number, kind: r.kind as string, rank: r.score + 0.05 * Math.min(r.sources - 1, 3), at: r.at as number }))
+      .sort((a, b) => b.rank - a.rank || b.at - a.at);
+    // a full digest: half city news, half the listings (events, plans, deals); one side short — the other fills in
+    if (kind === 'digest' && !categories.length && !audiences.length) {
+      const half = POST_ITEMS.digest / 2;
+      const news = ranked.filter((r) => r.kind === 'news');
+      const listings = ranked.filter((r) => r.kind !== 'news');
+      const take = [...news.slice(0, Math.max(half, POST_ITEMS.digest - listings.length)), ...listings.slice(0, Math.max(half, POST_ITEMS.digest - news.length))];
+      return take.slice(0, POST_ITEMS.digest).map((r) => r.id);
+    }
+    return ranked.slice(0, POST_ITEMS[kind]).map((r) => r.id);
   }
 
   async function compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[],
@@ -452,7 +465,7 @@ export function createChannels(deps: ChannelsDeps) {
       WHERE COALESCE(i.story_id, i.id) = ? ORDER BY i.score DESC, i.id LIMIT 4`).all(sid) as Row[]).map(toItem)).filter((x) => x.length);
     const items = stories.flat();
     const what = kind === 'digest'
-      ? 'дайджест главных новостей: короткое вступление и по пункту на сюжет'
+      ? 'полный выпуск: короткое вступление, затем блок новостей города и блок мероприятий — события, планы и акции; у каждого блока короткий заголовок на языке поста (например, «Agenda» по-испански, «What\'s on» по-английски); по пункту на сюжет'
       : kind === 'deals' ? 'подборку акций, скидок и событий: что, где, когда, условия' : 'один пост о главном сюжете, подробнее';
     const own = d.links === 'none';
     const rubrics = categories.map((c) => channelCategoryName(d.categories, c)).filter(Boolean);
@@ -462,7 +475,7 @@ export function createChannels(deps: ChannelsDeps) {
       d.area ? `География канала: ${d.area}. Пиши только о том, что происходит там; что за её пределами — пропусти.` : '',
       `Напиши ${what}${rubrics.length ? ` — рубрики: ${rubrics.join(', ')}` : ''}${forWhom.length ? ` — для аудитории: ${forWhom.join(', ')}; подавай под неё` : ''}. Язык поста — ${d.language}, даже если материалы на другом.`,
       // the editor's rules may differ by post kind and time of day («good morning» only in the morning)
-      `Вид поста: ${kind} — «${CHANNEL_SLOT_KINDS[kind]}». Сейчас ${new Date(now()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}. Из правил редактора применяй только те, что подходят этому виду поста.`,
+      `Вид поста: ${kind} — «${CHANNEL_SLOT_KINDS[kind]}». Сейчас ${partOfDay(now())} — ${new Date(now()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}. Из правил редактора применяй только те, что подходят этому виду поста и времени суток (утреннее приветствие — только утром).`,
       d.editorPrompt || DEFAULT_EDITOR,
       own ? OWN_STORIES : 'В конце каждого пункта — ссылка на источник: [текст](url).',
       'Один сюжет может прийти из нескольких источников: собери из них один пункт с самыми точными данными; если источники расходятся — бери то, в чём они сходятся, или не указывай деталь.',
@@ -774,6 +787,19 @@ export function createChannels(deps: ChannelsDeps) {
       return post(id);
     },
     publish,
+    // A published post taken down: deleted from the channel, its stories back in work (e.g. to be told again better)
+    async unpublish(id: number): Promise<ChannelPost> {
+      const p = post(id);
+      if (p.status !== 'published' || !p.messageId) throw new Error('Пост не опубликован');
+      const d = desk(p.deskId);
+      await deps.engine.deleteMessages(d.accountId, d.chatId, [p.messageId]);
+      raw.prepare("UPDATE channel_posts SET status = 'rejected', error = 'удалён из канала' WHERE id = ?").run(id);
+      if (p.itemIds.length) {
+        raw.prepare(`UPDATE channel_items SET status = 'new' WHERE status = 'used' AND COALESCE(story_id, id) IN
+          (SELECT COALESCE(story_id, id) FROM channel_items WHERE id IN (${p.itemIds.map(() => '?').join(',')}))`).run(...p.itemIds);
+      }
+      return post(id);
+    },
     // a rejected draft gives its items back
     rejectPost(id: number) {
       const p = post(id);

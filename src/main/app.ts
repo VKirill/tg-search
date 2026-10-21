@@ -999,6 +999,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       savePost: async (id, text) => channels.savePost(id, text),
       publish: async (id) => channels.publish(id),
       rejectPost: async (id) => channels.rejectPost(id),
+      unpublish: async (id) => channels.unpublish(id),
     },
     assistants: {
       status: async () => integrations.status(),

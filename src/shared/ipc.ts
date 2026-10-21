@@ -27,7 +27,7 @@ export const API_METHODS: ApiMap = {
   skills: ['list', 'save', 'remove', 'approve', 'removeLesson'],
   ai: ['status', 'models', 'setModels', 'providers', 'saveProvider', 'removeProvider', 'importOpencode', 'checkUpdate', 'route', 'stats'],
   helper: ['chats', 'addChat', 'saveChats', 'requests', 'scenarios', 'saveScenario', 'removeScenario', 'test', 'preview'],
-  channels: ['desks', 'createDesk', 'createChannel', 'saveDesk', 'removeDesk', 'sources', 'saveSource', 'removeSource', 'runSource', 'findTelegram', 'browserLogin', 'items', 'setItemStatus', 'stories', 'setStoryStatus', 'feedStats', 'rescore', 'posts', 'compose', 'schedule', 'calendar', 'savePost', 'publish', 'rejectPost'],
+  channels: ['desks', 'createDesk', 'createChannel', 'saveDesk', 'removeDesk', 'sources', 'saveSource', 'removeSource', 'runSource', 'findTelegram', 'browserLogin', 'items', 'setItemStatus', 'stories', 'setStoryStatus', 'feedStats', 'rescore', 'posts', 'compose', 'schedule', 'calendar', 'savePost', 'publish', 'rejectPost', 'unpublish'],
   assistants: ['status', 'install', 'installTools'],
   knowledge: ['bases', 'createBase', 'updateBase', 'removeBase', 'docs', 'addFiles', 'addUrl', 'addText', 'removeDoc', 'search'],
   trusted: ['list', 'save', 'remove', 'checkinNow'],

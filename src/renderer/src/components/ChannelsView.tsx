@@ -377,6 +377,7 @@ function Sources({ desk, sources, setSources, busy, busyRun, fail }: {
           <span className="crm-muted">Войдите один раз в отдельном окне — вход сохранится только для помощника:</span>
           <button type="button" className="btn btn--sm" onClick={() => api.channels.browserLogin('https://www.facebook.com/').catch(fail)}>Facebook</button>
           <button type="button" className="btn btn--sm" onClick={() => api.channels.browserLogin('https://www.instagram.com/').catch(fail)}>Instagram</button>
+          <button type="button" className="btn btn--sm" onClick={() => api.channels.browserLogin('https://x.com/login').catch(fail)}>X (Twitter)</button>
         </div>
       )}
       {found.length > 0 && (
@@ -673,6 +674,11 @@ function PostCard({ post, reload, fail }: { post: ChannelPost; reload: () => Pro
         {post.status === 'draft' && post.scheduledAt && <span className="tag tag--soft">выйдет {formatLeadDate(post.scheduledAt)}</span>}
       </div>
       {post.error && <p className="crm-muted">{post.error}</p>}
+      {post.status === 'published' && (
+        <div className="channel-row">
+          <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => confirm('Удалить пост из канала? Его сюжеты вернутся в работу.') && act(() => api.channels.unpublish(post.id))}>Удалить из канала</button>
+        </div>
+      )}
       {editable ? <textarea rows={Math.min(18, text.split('\n').length + 2)} value={text} onChange={(e) => setText(e.target.value)} /> : <pre className="channel-post__text">{post.text}</pre>}
       {editable && (
         <div className="channel-row">

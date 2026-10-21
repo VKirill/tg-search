@@ -311,6 +311,12 @@ describe('channel assistant', () => {
     expect(engine.posted.at(-1)).toMatchObject({ chatId: CHANNEL, text: p.text });
     expect(db.getAccount(acc.id).sentToday).toBe(before); // a channel post is not a cold message: no daily cap
 
+    // taken down: deleted from the channel, the stories back in work
+    const down = await channels.unpublish(p.id);
+    expect(down.status).toBe('rejected');
+    expect(engine.deleted.at(-1)).toBe(done.messageId);
+    expect(channels.items(d.id)[0].status).toBe('new');
+
     // a rejected draft gives its items back
     const { channels: c2, acc: a2 } = setup();
     const d2 = await c2.createDesk(a2.id, 't.me/city_demo');

@@ -179,6 +179,7 @@ export interface Api {
     savePost(id: number, text: string): Promise<ChannelPost>;
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;
+    unpublish(id: number): Promise<ChannelPost>; // a published post deleted from the channel; its stories return to work
   };
   assistants: {
     status(): Promise<AiAssistantsStatus>;

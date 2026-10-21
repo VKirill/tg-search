@@ -2082,6 +2082,11 @@ export function createMockApi(): Api {
         Object.assign(p, { status: 'published', publishedAt: Date.now(), messageId: 101 });
         return p;
       },
+      async unpublish(id) {
+        const p = mockChannelPosts.find((x) => x.id === id)!;
+        p.status = 'rejected';
+        return p;
+      },
       async rejectPost(id) {
         const p = mockChannelPosts.find((x) => x.id === id);
         if (p) p.status = 'rejected';

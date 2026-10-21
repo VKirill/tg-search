@@ -152,12 +152,26 @@ app.whenReady().then(async () => {
       const w = new BrowserWindow({ show: false, width: 1280, height: 2400, webPreferences: { partition: SOCIAL, offscreen: true } });
       try {
         await w.loadURL(url);
-        // feeds load lazily: wait and scroll a few screens down
-        for (let i = 0; i < 4; i++) {
-          await new Promise((r) => setTimeout(r, 2500));
-          await w.webContents.executeJavaScript('window.scrollBy(0, 2000)');
+        await new Promise((r) => setTimeout(r, 3000));
+        if (/\/(login|i\/flow\/login|accounts\/login)|checkpoint/i.test(w.webContents.getURL())) {
+          throw new Error('нужно войти: «Помощник каналов» → источник «Браузер со входом» → кнопка входа');
         }
-        return String(await w.webContents.executeJavaScript('document.body.innerText')).slice(0, 60_000);
+        // feeds load lazily and virtual timelines (X) drop what scrolled away: the text is taken after every scroll
+        const seen = new Set<string>();
+        const lines: string[] = [];
+        for (let i = 0; i < 6; i++) {
+          const text = String(await w.webContents.executeJavaScript('(document.querySelector("main") || document.body).innerText'));
+          for (const line of text.split('\n')) {
+            const l = line.trim();
+            if (l && (l.length < 25 || !seen.has(l))) {
+              if (l.length >= 25) seen.add(l);
+              lines.push(l);
+            }
+          }
+          await w.webContents.executeJavaScript('window.scrollBy(0, 1800)');
+          await new Promise((r) => setTimeout(r, 2500));
+        }
+        return lines.join('\n').slice(0, 60_000);
       } finally {
         w.destroy();
       }
