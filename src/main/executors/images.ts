@@ -174,13 +174,18 @@ export async function generateImages(
 
   const body: Record<string, unknown> = {
     prompt: opts.prompt,
-    num_images: opts.count ?? 1,
+    num_images: 1,
     output_format: 'png',
   };
   if (image_urls?.length) body.image_urls = image_urls;
   if (opts.aspectRatio) body.aspect_ratio = opts.aspectRatio;
 
-  const raw = await falRunImageJob(settings, model, body, workDir, opts.namePrefix);
+  // one fal job per image, all at once: they run side by side in fal's queue instead of one after another inside a job
+  const count = Math.max(1, opts.count ?? 1);
+  const jobs = await Promise.allSettled(Array.from({ length: count }, (_, i) =>
+    falRunImageJob(settings, model, body, workDir, count === 1 ? opts.namePrefix : `${opts.namePrefix}-${i + 1}`)));
+  const raw = jobs.flatMap((j) => (j.status === 'fulfilled' ? j.value : []));
+  if (!raw.length) throw (jobs.find((j) => j.status === 'rejected') as PromiseRejectedResult).reason;
   recordUsage({ kind: 'image', model, units: raw.length });
   return raw.map((f) => ({ ...f, role: opts.role }));
 }

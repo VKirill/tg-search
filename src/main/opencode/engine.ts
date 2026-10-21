@@ -2,7 +2,7 @@
 // the app goes through it — agent turns as OpenCode sessions (one persistent session per dialog), everything else
 // through the gateway's one-shot sessions.
 import { join } from 'node:path';
-import type { AppEvent, Settings } from '../../shared/types';
+import type { AiRoute, AppEvent, Settings } from '../../shared/types';
 import type { Db } from '../db';
 import type { AgentDefsApi } from '../agent/defs';
 import type { ApprovalsApi } from '../agent/approvals';
@@ -13,8 +13,9 @@ import { recordUsage } from '../usage';
 import { createBridge, type SessionBinding, type ToolCatalogEntry } from './bridge';
 import { TOOL_PREFIX, writeOpencodeConfig, type AgentConfig, type ProviderConfig } from './config';
 import { importFromUserOpencode, mergeProviders, providersFromSettings } from './importProviders';
-import { isFreeModel, pickModel, rankModels, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
-import { createProfiles, fetchOpenRouterMeta, SKILL_LABELS, SKILLS, type Skill } from './profiles';
+import { isFreeModel, isSubscriptionModel, pickModel, poolModels, rankModels, ROLE_NEEDS, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
+import { jevRankModels } from './jevRoute';
+import { createProfiles, fetchOpenRouterMeta, fromOpenRouter, matchOpenRouter, SKILL_LABELS, SKILLS, type ProfileInput, type Skill } from './profiles';
 import { createOpencodeRuntime } from './runtime';
 import { createOpencodeServer, type OpencodeStatus } from './server';
 import { createSessions, ONESHOT_AGENT, type ModelRef, type TurnResult } from './session';
@@ -165,8 +166,32 @@ export function createAiEngine(deps: {
   }
 
   // the models to try for a job, best first; at least the one pickModel would give (or its error)
-  function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[]): ModelRef[] {
-    const list = rankModels(catalog, choice(), role, need, routeOpts(needs)).slice(0, MAX_ATTEMPTS);
+  // What Jev reads about a model: its original description and the facts that matter for a job
+  function modelText(m: CatalogModel): string {
+    const about = profiles.get(refString(m))?.about?.trim();
+    return [
+      `${m.name}${about ? ` — ${about}` : ''}`,
+      `Facts: ${isFreeModel(m) ? 'free' : 'subscription'}; understands images: ${m.vision ? 'yes' : 'no'}; ` +
+        `reasoning levels: ${m.variants.join(', ') || 'none'}; context: ${m.context} tokens.`,
+    ].join('\n');
+  }
+
+  // The models to try for a job, best first. With the task text, Jev picks the order of the first line (subscriptions
+  // and free models) by their descriptions; without Jev — by their profiles.
+  async function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[], task?: string): Promise<ModelRef[]> {
+    const opts = routeOpts(needs);
+    let poolOrder: string[] | undefined;
+    const pool = task && deps.getSettings().jevApiKey.trim() ? poolModels(catalog, role, need, opts).slice(0, 10) : [];
+    if (pool.length > 1) {
+      try {
+        const ranked = await jevRankModels(deps.getSettings, task!, needs?.length ? needs : ROLE_NEEDS[role], pool.map((m) => ({ ref: refString(m), text: modelText(m) })));
+        poolOrder = ranked.map((r) => r.ref);
+        console.log(`route ${role} [${(needs ?? ROLE_NEEDS[role]).join(',')}]: ${ranked.slice(0, 3).map((r) => `${r.ref} ${r.p.toFixed(2)}`).join(' | ')}`);
+      } catch (err) {
+        console.warn('jev route', err); // the profiles' order still works
+      }
+    }
+    const list = rankModels(catalog, choice(), role, need, { ...opts, poolOrder }).slice(0, MAX_ATTEMPTS);
     return list.length ? list : [model(role, need)];
   }
 
@@ -175,7 +200,9 @@ export function createAiEngine(deps: {
       // no silent fallback to a provider's API: until OpenCode is up, model requests fail with the reason
       if (server.status().state !== 'ready') throw new Error(`ИИ-движок OpenCode не запущен: ${server.status().message ?? server.status().state}`);
       let lastError: unknown;
-      for (const m of candidates(req.role, { vision: !!req.images?.length })) {
+      const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
+      const task = [req.title, req.system?.slice(0, 500), lastUser.slice(0, 1500)].filter(Boolean).join('\n');
+      for (const m of await candidates(req.role, { vision: !!req.images?.length }, undefined, task)) {
         try {
           const text = await sessions.oneShot({ model: m, text: gatewayPrompt(req), files: req.images, title: req.title });
           recordUsage({ kind: 'llm', model: refOf(m) });
@@ -203,10 +230,11 @@ export function createAiEngine(deps: {
     requireText?: boolean; // the turn's text is the result (subagents): an empty one counts as a failure
     canRetry?: () => boolean;
   }): Promise<TurnResult & { model: string }> {
-    const models = candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName));
     const row = opts.key
       ? deps.db.raw.prepare('SELECT session_id, synced_message_id FROM opencode_sessions WHERE key = ?').get(opts.key) as { session_id: string; synced_message_id: number } | undefined
       : undefined;
+    const { text, lastMessageId } = opts.prompt(row?.synced_message_id ?? 0);
+    const models = await candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName), text);
     let sessionID = row?.session_id;
     if (!sessionID) {
       const parent = opts.parentKey
@@ -215,7 +243,6 @@ export function createAiEngine(deps: {
       sessionID = await sessions.create({ agent: ocAgentId(opts.agentName), model: models[0], title: opts.key ?? 'sandbox', parentID: parent });
       if (opts.key) deps.db.raw.prepare('INSERT OR REPLACE INTO opencode_sessions(key, session_id, created_at) VALUES(?, ?, ?)').run(opts.key, sessionID, Date.now());
     }
-    const { text, lastMessageId } = opts.prompt(row?.synced_message_id ?? 0);
     try {
       let result: TurnResult = { outcome: 'failed', text: '', error: 'нет модели', costUsd: 0 };
       for (const [i, m] of models.entries()) {
@@ -245,13 +272,29 @@ export function createAiEngine(deps: {
     }
   }
 
-  // What the free (and ticked OpenRouter) models are good at, from OpenRouter's descriptions; only new or changed ones
-  // are scored, by the main model
+  // What the free, subscription and ticked models are good at, from OpenRouter's descriptions (a subscription model
+  // borrows the description of the same model there); only new or changed ones are scored, by the main model
   async function refreshProfiles(): Promise<number> {
-    if (!providers().some((p) => p.id === 'openrouter')) return 0;
-    const wanted = new Set(catalog.filter((m) => m.providerID === 'openrouter' && (isFreeModel(m) || choice().helpers.includes(refString(m)))).map((m) => m.id));
-    const metas = (await fetchOpenRouterMeta()).filter((m) => wanted.has(m.id));
-    const n = await profiles.refresh(metas, (prompt) => gateway.complete({ role: 'chat', messages: [{ role: 'user', text: prompt }], json: true, title: 'model-profiles' }));
+    const metas = await fetchOpenRouterMeta();
+    const byId = new Map(metas.map((m) => [m.id, m]));
+    const helpers = new Set(choice().helpers);
+    const items: ProfileInput[] = [];
+    for (const m of catalog) {
+      if (!(isFreeModel(m) || isSubscriptionModel(m) || helpers.has(refString(m)))) continue;
+      if (m.providerID === 'openrouter') {
+        const meta = byId.get(m.id);
+        if (meta) items.push(fromOpenRouter(meta));
+        continue;
+      }
+      const twin = matchOpenRouter(m, metas);
+      items.push({
+        ref: refString(m), name: twin ? `${m.name} (как ${twin.name} на OpenRouter)` : m.name, description: twin?.description ?? '',
+        input: twin?.input ?? (m.vision ? ['text', 'image'] : ['text']),
+        params: [...(m.tools ? ['tools'] : []), ...(m.variants.length ? ['reasoning'] : [])],
+        context: m.context, expiresAt: null,
+      });
+    }
+    const n = await profiles.refresh(items, (prompt) => gateway.complete({ role: 'chat', messages: [{ role: 'user', text: prompt }], json: true, title: 'model-profiles' }));
     if (n) console.log(`model profiles: ${n} updated`);
     return n;
   }
@@ -275,6 +318,25 @@ export function createAiEngine(deps: {
     bridge,
     profileView,
     refreshProfiles,
+
+    // Settings → «Кому достанется задача»: the same routing a real task of this agent gets
+    async route(agentName: string, task: string): Promise<AiRoute> {
+      const role = agentRole(deps.agents().get(agentName).model);
+      const needs = agentNeeds(agentName) ?? [];
+      const need = { tools: true };
+      const opts = routeOpts(needs);
+      const pool = poolModels(catalog, role, need, opts).slice(0, 10);
+      const byRef = new Map(catalog.map((m) => [refString(m), m]));
+      let ranked: { ref: string; p: number | null }[] = pool.map((m) => ({ ref: refString(m), p: null }));
+      if (pool.length > 1 && deps.getSettings().jevApiKey.trim()) {
+        ranked = await jevRankModels(deps.getSettings, task, needs.length ? needs : ROLE_NEEDS[role], pool.map((m) => ({ ref: refString(m), text: modelText(m) })));
+      }
+      const order = rankModels(catalog, choice(), role, need, { ...opts, poolOrder: ranked.map((r) => r.ref) }).slice(0, MAX_ATTEMPTS).map(refOf);
+      return {
+        role, needs: needs.length ? needs : ROLE_NEEDS[role], order,
+        ranked: ranked.map((r) => ({ ...r, name: byRef.get(r.ref)?.name ?? r.ref })),
+      };
+    },
 
     async start() {
       setLlmGateway(gateway);

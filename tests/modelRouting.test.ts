@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isFreeModel, rankModels, sizeB, type CatalogModel } from '../src/main/opencode/models';
-import { createProfiles, fitScore, type ModelProfile } from '../src/main/opencode/profiles';
+import { createProfiles, fitScore, matchOpenRouter, type ModelProfile } from '../src/main/opencode/profiles';
 import { Db } from '../src/main/db';
 
 const m = (providerID: string, id: string, o: Partial<CatalogModel> = {}): CatalogModel => ({
@@ -32,11 +32,12 @@ describe('model routing', () => {
     expect(sizeB('minimax/minimax-m3.1-flash:free')).toBe(0);
   });
 
-  it('hard jobs: big free thinkers first, then the strongest ticked model', () => {
+  it('hard jobs: big free thinkers first (three at most), then the strongest ticked model', () => {
     const list = rankModels(catalog, choice, 'smart', { tools: true }, { useFree: true });
     expect(refs(list)).toEqual([
       'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
       'openrouter/google/gemma-4-31b-it:free',
+      'openrouter/nvidia/nemotron-3.5-lightning:free',
       'openlux-claude/claude-sonnet-5-5',
       'router9/gemini-3.8-flash',
       'zai-coding-plan/glm-5.3-flash',
@@ -64,8 +65,8 @@ describe('model routing', () => {
     expect(list).toEqual([
       'openrouter/google/gemma-4-31b-it:free',
       'openrouter/nvidia/nemotron-3.5-lightning:free',
+      'zai-coding-plan/glm-5.3-flash', // a subscription: first line, ahead of the priced ones
       'router9/gemini-3.8-flash',
-      'zai-coding-plan/glm-5.3-flash',
       'openlux-claude/claude-sonnet-5-5',
     ]);
   });
@@ -91,18 +92,32 @@ describe('model routing', () => {
   it('profiles: only new or changed descriptions are scored, scores are clamped, no image input means no vision', async () => {
     const db = new Db(':memory:');
     const profiles = createProfiles(db);
-    const meta = { id: 'x/model:free', name: 'X', description: 'Great at math', input: ['text'], params: ['tools'], context: 1000, expiresAt: null };
+    const meta = { ref: 'openrouter/x/model:free', name: 'X', description: 'Great at math', input: ['text'], params: ['tools'], context: 1000, expiresAt: null };
     const prompts: string[] = [];
     const ask = async (p: string) => {
       prompts.push(p);
-      return '```json\n{"x/model:free": {"skills": {"reasoning": 7, "vision": 3, "writing": 1}, "summary": "Математика и логика"}}\n```';
+      return '```json\n{"openrouter/x/model:free": {"skills": {"reasoning": 7, "vision": 3, "writing": 1}, "summary": "Математика и логика"}}\n```';
     };
     expect(await profiles.refresh([meta], ask)).toBe(1);
-    expect(profiles.get('openrouter/x/model:free')).toEqual({ skills: { reasoning: 3, vision: 0, writing: 1 }, summary: 'Математика и логика', expiresAt: null });
+    expect(profiles.get('openrouter/x/model:free')).toEqual({ skills: { reasoning: 3, vision: 0, writing: 1 }, summary: 'Математика и логика', about: 'Great at math', expiresAt: null });
     expect(await profiles.refresh([meta], ask)).toBe(0);
     expect(prompts).toHaveLength(1);
     expect(await profiles.refresh([{ ...meta, description: 'Now also writes' }], ask)).toBe(1);
     expect(createProfiles(db).get('openrouter/x/model:free')?.summary).toBe('Математика и логика'); // survives a restart
     expect(fitScore(profiles.get('openrouter/x/model:free'), ['reasoning', 'russian'])).toBe(4); // unknown skill counts as 1
+  });
+
+  it('a subscription model borrows the description of the same model on OpenRouter', () => {
+    const meta = (id: string) => ({ id, name: id, description: id, input: [], params: [], context: 0, expiresAt: null });
+    const metas = ['google/gemini-3.8-flash', 'google/gemini-3.8-flash-lite', 'google/gemini-4-argon', 'anthropic/claude-opus-5.5',
+      'anthropic/claude-opus-5', 'z-ai/glm-5.3', 'z-ai/glm-5.3-flash', 'openai/gpt-6-sol', 'x-ai/grok-4.7:free', 'x-ai/grok-4.7'].map(meta);
+    const twin = (id: string, name: string) => matchOpenRouter({ id, name }, metas)?.id ?? null;
+    expect(twin('ag/gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)')).toBe('google/gemini-3.8-flash');
+    expect(twin('claude-opus-5-5', 'Claude Opus 5.5 (OpenLux)')).toBe('anthropic/claude-opus-5.5');
+    expect(twin('glm-5.3-flash', 'GLM-5.3-Flash')).toBe('z-ai/glm-5.3-flash');
+    expect(twin('glm-5.3', 'GLM-5.3')).toBe('z-ai/glm-5.3');
+    expect(twin('gpt-6-sol', 'GPT-6 Sol (OpenLux)')).toBe('openai/gpt-6-sol');
+    expect(twin('grok-4.7', 'Grok 4.7 (OpenLux)')).toBe('x-ai/grok-4.7');
+    expect(twin('qwen3.8-flash', 'Qwen 3.8 Flash')).toBeNull();
   });
 });

@@ -1985,6 +1985,12 @@ export function createMockApi(): Api {
       async checkUpdate() {
         return 'OpenCode 2.1.2 — последняя версия';
       },
+      async route() {
+        return {
+          role: 'smart', needs: ['reasoning'], order: ['openrouter/google/gemma-4-31b-it:free', 'openlux-claude/claude-sonnet-5-5'],
+          ranked: [{ ref: 'openrouter/google/gemma-4-31b-it:free', name: 'Google: Gemma 4 31B (free)', p: 0.62 }],
+        };
+      },
     },
     trusted: {
       async list() {

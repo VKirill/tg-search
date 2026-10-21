@@ -1,6 +1,7 @@
 // What each model is good at. OpenRouter publishes a description, modalities and parameters for every model; once a
-// day the main model reads the descriptions of the free (and ticked OpenRouter) models and scores them on the skills
-// agents ask for (`needs` in an agent file). The router then gives a job to the free model that fits it best.
+// day the main model reads the descriptions of the free and subscription models (a subscription model borrows the
+// description of the same model on OpenRouter) and scores them on the skills agents ask for (`needs` in an agent file).
+// The router then gives a job to the model that fits it best.
 import { createHash } from 'node:crypto';
 import type { Db } from '../db';
 import { parseJsonFromLlm } from '../ai/llm';
@@ -13,6 +14,7 @@ export const SKILL_LABELS: Record<Skill, string> = MODEL_SKILLS;
 export interface ModelProfile {
   skills: Partial<Record<Skill, number>>; // 0–3
   summary: string; // one line in Russian for Settings
+  about?: string; // the original (English) description: what Jev reads when it picks a model for a task
   expiresAt: number | null; // OpenRouter retires the free variant at this time
 }
 
@@ -24,6 +26,39 @@ export interface OpenRouterMeta {
   params: string[];
   context: number;
   expiresAt: number | null;
+}
+
+// One model to score: ours (any provider) with the description found for it
+export interface ProfileInput {
+  ref: string; // provider/model in our catalog
+  name: string;
+  description: string; // '' when OpenRouter has no such model: scored by name and parameters
+  input: string[];
+  params: string[];
+  context: number;
+  expiresAt: number | null;
+}
+
+export const fromOpenRouter = (m: OpenRouterMeta): ProfileInput => ({ ...m, ref: `openrouter/${m.id}` });
+
+// «Gemini 3.8 Flash (High)» at 9router, «claude-opus-5-5» at OpenLux → the same model on OpenRouter
+const tokens = (s: string) => new Set(
+  s.toLowerCase().replace(/(\d)-(\d)/g, '$1.$2').replace(/:free$/, '').split(/[^a-z0-9.]+/)
+    .filter((t) => t && !['free', 'low', 'medium', 'high', 'openlux', 'ag', 'preview', 'latest'].includes(t)),
+);
+export function matchOpenRouter(model: { id: string; name: string }, metas: OpenRouterMeta[]): OpenRouterMeta | null {
+  const ours = new Set([...tokens(model.id), ...tokens(model.name)]);
+  const versions = [...ours].filter((t) => /\d/.test(t));
+  let best: { m: OpenRouterMeta; score: number } | null = null;
+  for (const m of metas) {
+    const theirs = tokens(m.id.split('/').pop() ?? m.id);
+    if (versions.some((v) => !theirs.has(v))) continue; // «5.5» must match «5.5», not «5»
+    const common = [...ours].filter((t) => theirs.has(t)).length;
+    if (common < 2) continue;
+    const score = common / new Set([...ours, ...theirs]).size - (m.id.endsWith(':free') ? 0.01 : 0); // the full version's text
+    if (!best || score > best.score) best = { m, score };
+  }
+  return best && best.score >= 0.5 ? best.m : null;
 }
 
 const MODELS_URL = 'https://openrouter.ai/api/v1/models';
@@ -44,7 +79,7 @@ export async function fetchOpenRouterMeta(fetchFn: typeof fetch = fetch): Promis
   }));
 }
 
-const hashOf = (m: OpenRouterMeta) => createHash('sha1').update(`${m.description}|${m.input}|${m.params}`).digest('hex').slice(0, 16);
+const hashOf = (m: ProfileInput) => createHash('sha1').update(`v2|${m.name}|${m.description}|${m.input}|${m.params}`).digest('hex').slice(0, 16);
 
 export function createProfiles(db: Db) {
   db.raw.exec(`CREATE TABLE IF NOT EXISTS model_profiles (
@@ -63,16 +98,16 @@ export function createProfiles(db: Db) {
   }
 
   // Score the models whose metadata is new or changed; `ask` is a one-shot model request returning text
-  async function refresh(metas: OpenRouterMeta[], ask: (prompt: string) => Promise<string>, batch = 12): Promise<number> {
+  async function refresh(items: ProfileInput[], ask: (prompt: string) => Promise<string>, batch = 12): Promise<number> {
     const known = new Map((db.raw.prepare('SELECT ref, hash FROM model_profiles').all() as { ref: string; hash: string }[]).map((r) => [r.ref, r.hash]));
-    const stale = metas.filter((m) => known.get(`openrouter/${m.id}`) !== hashOf(m));
+    const stale = items.filter((m) => known.get(m.ref) !== hashOf(m));
     let done = 0;
     for (let i = 0; i < stale.length; i += batch) {
       const part = stale.slice(i, i + batch);
       const raw = await ask(scorePrompt(part));
       const scored = parseJsonFromLlm(raw) as Record<string, { skills?: Record<string, number>; summary?: string }>;
       for (const m of part) {
-        const s = scored[m.id];
+        const s = scored[m.ref];
         if (!s) continue;
         const skills: Partial<Record<Skill, number>> = {};
         for (const k of SKILLS) {
@@ -80,8 +115,8 @@ export function createProfiles(db: Db) {
           if (Number.isFinite(v)) skills[k] = Math.max(0, Math.min(3, Math.round(v)));
         }
         if (!m.input.includes('image')) skills.vision = 0; // facts beat the guess
-        const profile: ModelProfile = { skills, summary: String(s.summary ?? '').trim().slice(0, 200), expiresAt: m.expiresAt };
-        const ref = `openrouter/${m.id}`;
+        const profile: ModelProfile = { skills, summary: String(s.summary ?? '').trim().slice(0, 200), about: m.description.slice(0, 800), expiresAt: m.expiresAt };
+        const ref = m.ref;
         db.raw.prepare('INSERT OR REPLACE INTO model_profiles(ref, hash, profile, updated_at) VALUES(?, ?, ?, ?)')
           .run(ref, hashOf(m), JSON.stringify(profile), Date.now());
         cache.set(ref, profile);
@@ -96,12 +131,12 @@ export function createProfiles(db: Db) {
 
 export type Profiles = ReturnType<typeof createProfiles>;
 
-export function scorePrompt(models: OpenRouterMeta[]): string {
+export function scorePrompt(models: ProfileInput[]): string {
   const list = models.map((m) => [
-    `id: ${m.id}`,
+    `id: ${m.ref}`,
     `name: ${m.name}`,
     `input: ${m.input.join(', ') || 'text'}; tools: ${m.params.includes('tools') ? 'yes' : 'no'}; reasoning: ${m.params.includes('reasoning') ? 'yes' : 'no'}; context: ${m.context}`,
-    `description: ${m.description.slice(0, 1500)}`,
+    `description: ${m.description.slice(0, 1500) || '(описания нет — оцени по названию, версии и параметрам, что знаешь об этой модели)'}`,
   ].join('\n')).join('\n\n');
   return [
     'Оцени модели по описаниям их авторов. Для каждой поставь навыки от 0 до 3 (0 — не умеет или не для этого, 3 — сильная сторона):',

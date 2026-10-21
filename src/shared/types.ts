@@ -429,6 +429,14 @@ export interface AiProvider {
   models: number;
 }
 
+// How the router would place a task: Jev's probabilities for the first line, then the order of attempts
+export interface AiRoute {
+  role: string;
+  needs: string[];
+  ranked: { ref: string; name: string; p: number | null }[]; // null — Jev not asked (no key or a single candidate)
+  order: string[]; // models in the order they would be tried
+}
+
 export interface AiModelsView {
   models: AiModel[]; // of the configured providers
   main: string;
@@ -842,6 +850,7 @@ export interface Api {
     removeProvider(id: string): Promise<AiProvider[]>;
     importOpencode(): Promise<number>; // from the user's own OpenCode config; returns providers found
     checkUpdate(): Promise<string>;
+    route(agent: string, task: string): Promise<AiRoute>; // which model an agent's task would go to, and why
   };
   trusted: {
     list(): Promise<TrustedContact[]>;

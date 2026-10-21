@@ -3384,3 +3384,56 @@ button.chip:hover {
   background: var(--accent-dim);
   color: var(--text);
 }
+
+.route-check {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.route-check select {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.route-check .btn {
+  justify-self: start;
+}
+
+.route-result {
+  margin-top: var(--space-3);
+}
+
+.route-ranked {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.route-ranked li {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.route-ranked__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-dim);
+}
+
+.route-ranked__name,
+.route-ranked li .crm-muted {
+  position: relative;
+}
