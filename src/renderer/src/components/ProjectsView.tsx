@@ -8,9 +8,10 @@ type ProjectsViewProps = {
   accounts: Account[];
   projectList: Project[];
   onRefresh: () => void;
+  onOpenServices?: () => void;
 };
 
-export function ProjectsView({ projectList, accounts, onRefresh }: ProjectsViewProps) {
+export function ProjectsView({ projectList, accounts, onRefresh, onOpenServices }: ProjectsViewProps) {
   const [editing, setEditing] = useState<Project | 'new' | null>(null);
 
   useEffect(() => {
@@ -48,6 +49,7 @@ export function ProjectsView({ projectList, accounts, onRefresh }: ProjectsViewP
           accounts={accounts}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); onRefresh(); }}
+          onOpenServices={onOpenServices}
         />
       )}
     </div>
