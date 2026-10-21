@@ -40,6 +40,7 @@ import type { BillingApi } from './billing/billing';
 import { createMemoryStore } from './memory/store';
 import { ensureAgentSchema } from './agent/schema';
 import { listAgentSteps } from './agent/store';
+import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
 
 export interface AppDeps {
   db: Db;
@@ -97,6 +98,8 @@ export function createApp(deps: AppDeps): AppHandlers {
   const spinner = deps.spinner ?? passthroughSpinner;
   let billing: BillingApi | undefined;
   const billingRef: { current?: BillingApi } = {};
+  const dedupe = createDedupe({ db, emit });
+  let dedupePruneTimer: ReturnType<typeof setInterval> | null = null;
   const pipeline = {
     db,
     engine,
@@ -105,6 +108,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     emit,
     manager,
     categorizer: deps.categorizer,
+    dedupe,
     dossier,
     memory,
     get billing() {
@@ -234,6 +238,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       if (deps.categorizer) {
         categorizeLeads({ db, emit }, deps.categorizer).catch((err) => console.error('categorize leads', err));
       }
+      pruneFingerprints(db);
+      dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       realtime.start();
       autopilot.start();
       broadcaster.start();
@@ -245,6 +251,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       memory.releaseModel();
     },
     async stop() {
+      if (dedupePruneTimer) clearInterval(dedupePruneTimer);
+      dedupePruneTimer = null;
       billing?.stop();
       orders.stopPoller();
       broadcaster.stop();
@@ -503,9 +511,9 @@ export function createApp(deps: AppDeps): AppHandlers {
       approve: notYet('skills worker'),
     },
     spam: {
-      templates: notYet('dedupe worker'),
-      markSpam: notYet('dedupe worker'),
-      setTemplateStatus: notYet('dedupe worker'),
+      templates: async () => dedupe.listTemplates(),
+      markSpam: async (leadId) => dedupe.markSpam(leadId),
+      setTemplateStatus: async (id, status) => dedupe.setTemplateStatus(id, status),
     },
     approvals: {
       list: notYet('agents worker'),
