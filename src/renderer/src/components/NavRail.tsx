@@ -11,6 +11,7 @@ import {
   IconServices,
   IconSettings,
   IconSkills,
+  IconNews,
   IconSpam,
   IconStats,
   IconSubscriptions,
@@ -30,6 +31,7 @@ export type NavView =
   | 'agents'
   | 'skills'
   | 'approvals'
+  | 'news'
   | 'stats'
   | 'spam'
   | 'accounts'
@@ -56,6 +58,7 @@ const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React
   { id: 'agents', label: 'Агенты', Icon: IconAgents },
   { id: 'skills', label: 'Умения', Icon: IconSkills },
   { id: 'approvals', label: 'Согласования', Icon: IconApprovals, badge: true },
+  { id: 'news', label: 'Новости', Icon: IconNews },
   { id: 'stats', label: 'Статистика', Icon: IconStats },
   { id: 'spam', label: 'Спам', Icon: IconSpam },
   { id: 'accounts', label: 'Аккаунты', Icon: IconAccounts },

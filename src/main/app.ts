@@ -43,6 +43,7 @@ import { ensureAgentSchema } from './agent/schema';
 import { listAgentSteps } from './agent/store';
 import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
 import { createSpamChats, guardSpamJoins, spamChatReason, SPAM_CHAT_CHECK_MS } from './dedupe/spamChats';
+import { createNews, NEWS_INTERVAL_MS } from './news';
 import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
@@ -119,6 +120,9 @@ export function createApp(deps: AppDeps): AppHandlers {
   let dedupePruneTimer: ReturnType<typeof setInterval> | null = null;
   const spamChats = createSpamChats({ db, engine, emit });
   let spamChatTimer: ReturnType<typeof setInterval> | null = null;
+  const news = createNews({ db, engine, emit, getSettings });
+  let newsTimer: ReturnType<typeof setInterval> | null = null;
+  const readNews = () => void news.runNow().catch((err) => console.error('news', err instanceof Error ? err.message : err));
   const checkSpamChats = () => void spamChats.check().catch((err) => console.error('spam chats', err));
   const pipeline = {
     db,
@@ -306,6 +310,10 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupe.learnExistingLeads();
       spamChatTimer = setInterval(checkSpamChats, SPAM_CHAT_CHECK_MS);
       setTimeout(checkSpamChats, 60_000).unref?.();
+      if (news.channels().length) {
+        newsTimer = setInterval(readNews, NEWS_INTERVAL_MS);
+        setTimeout(readNews, 120_000).unref?.();
+      }
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       realtime.start();
       autopilot.start();
@@ -322,6 +330,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupePruneTimer = null;
       if (spamChatTimer) clearInterval(spamChatTimer);
       spamChatTimer = null;
+      if (newsTimer) clearInterval(newsTimer);
+      newsTimer = null;
       billing?.stop();
       orders.stopPoller();
       broadcaster.stop();
@@ -373,7 +383,12 @@ export function createApp(deps: AppDeps): AppHandlers {
         );
         const accountId = accounts[0]?.id ?? db.listAccounts().find((a) => a.status === 'authorized')?.id;
         if (!accountId) throw new Error('Подключите рабочий аккаунт Telegram');
-        const chat = await engine.resolveChat(accountId, linkOrUsername);
+        let chat = await engine.resolveChat(accountId, linkOrUsername);
+        // a channel is read through its discussion group: leads write in comments, not in the channel's posts
+        if (chat.kind === 'channel') {
+          const full = await engine.getChat(accountId, chat.chatId);
+          if (full.linkedChatId) chat = await engine.getChat(accountId, full.linkedChatId);
+        }
         const spam = spamChatReason(db, chat.chatId);
         if (spam) throw new Error(`«${chat.title}» — спам-чат (${spam}). Разблокировать можно в разделе «Спам»`);
         const source = db.addSource({
@@ -593,6 +608,20 @@ export function createApp(deps: AppDeps): AppHandlers {
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
     },
+    news: {
+      channels: async () => news.channels(),
+      addChannel: async (link) => {
+        const ch = await news.addChannel(link);
+        newsTimer ??= setInterval(readNews, NEWS_INTERVAL_MS); // the first channel starts the hourly read
+        return ch;
+      },
+      updateChannel: async (id, patch) => news.updateChannel(id, patch),
+      removeChannel: async (id) => news.removeChannel(id),
+      items: async (status) => news.items(status),
+      setStatus: async (id, status) => news.setStatus(id, status),
+      draft: (id, kind) => news.draft(id, kind),
+      runNow: () => news.runNow(),
+    },
     approvals: {
       list: async (status) => approvalsHolder.api!.list(status),
       decide: async (id, approve) => approvalsHolder.api!.decide(id, approve),
@@ -659,6 +688,13 @@ export function createApp(deps: AppDeps): AppHandlers {
         return chatInfo(await engine.getChat(accountId, chat.chatId));
       },
       leave: (accountId, chatId) => engine.leaveChat(accountId, chatId),
+      discussion: async (accountId, target) => {
+        const channel = typeof target === 'number' ? await engine.getChat(accountId, target) : await engine.resolveChat(accountId, target);
+        const full = channel.linkedChatId === undefined ? await engine.getChat(accountId, channel.chatId) : channel;
+        if (channel.kind !== 'channel' || !full.linkedChatId) return null;
+        const chat = await engine.getChat(accountId, full.linkedChatId);
+        return { ...chatInfo(chat), spamReason: spamChatReason(db, chat.chatId) };
+      },
       around: async (accountId, chatId, messageId) =>
         (await engine.getMessagesAround(accountId, chatId, messageId, 40)).map(chatItem),
       media: async (accountId, fileId) =>

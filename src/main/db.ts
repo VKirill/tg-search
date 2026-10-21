@@ -232,6 +232,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
   imageModel: 'fal-ai/nano-banana-2/edit',
+  newsInterests:
+    'ИИ в маркетинге и рекламе, новые нейросети и ИИ-инструменты, обновления Telegram, Яндекс Директа и маркетплейсов, ' +
+    'кейсы с цифрами',
   operatorProvider: 'glm',
   glmApiKey: '',
   deepseekApiKey: '',

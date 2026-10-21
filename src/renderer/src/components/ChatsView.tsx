@@ -68,6 +68,7 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
   const [sources, setSources] = useState<Record<number, Source[]>>({});
   const [highlightMessageId, setHighlightMessageId] = useState<number | null>(null);
   const [publicationLink, setPublicationLink] = useState<string | null>(null);
+  const [discussion, setDiscussion] = useState<ChatInfo | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -149,6 +150,10 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
     setReplyTo(null);
     setHighlightMessageId(null);
     setPublicationLink(null);
+    setDiscussion(null);
+    if (chat.kind === 'channel') {
+      api.chats.discussion(accountId, chat.chatId).then(setDiscussion, () => setDiscussion(null));
+    }
     setLoadingHistory(true);
     try {
       const page = await api.chats.history(accountId, chat.chatId, null);
@@ -407,6 +412,22 @@ export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }
                 <button type="button" className="btn btn--sm" onClick={() => api.shell.openExternal(`https://t.me/${selected.username}`)}>
                   Открыть в Telegram <IconExternal size={12} />
                 </button>
+              )}
+              {discussion && !discussion.spamReason && (
+                discussion.isMember ? (
+                  <button type="button" className="btn btn--sm" onClick={() => open(discussion)} title="Чат обсуждений канала">
+                    Открыть чат канала
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    onClick={() => join(discussion.chatId)}
+                    title={`«${discussion.title}» — вступить без подписки на новости канала`}
+                  >
+                    Вступить в чат канала
+                  </button>
+                )
               )}
               {selected.spamReason ? (
                 <span className="tag tag--warn" title={selected.spamReason}>спам-чат: {selected.spamReason}</span>

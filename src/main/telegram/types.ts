@@ -12,6 +12,7 @@ export interface TgChat {
   description: string | null;
   isMember: boolean;
   isAdmin?: boolean; // the account is the creator or an administrator: our own chat or channel
+  linkedChatId?: number | null; // channel: its discussion group (comments); group: the channel it discusses
 }
 
 export interface TgMessage {

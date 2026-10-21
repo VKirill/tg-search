@@ -824,16 +824,18 @@ export class TdlEngine implements TelegramEngine {
     if (tdChat.type._ === 'chatTypeSupergroup') {
       const sg = await this.getSupergroupCached(slot, tdChat.type.supergroup_id);
       let description: string | null = null;
+      let linkedChatId: number | null = null;
       try {
         const full = await this.invoke(slot, {
           _: 'getSupergroupFullInfo',
           supergroup_id: tdChat.type.supergroup_id,
         });
         description = full.description || null;
+        linkedChatId = full.linked_chat_id || null;
       } catch {
         description = null;
       }
-      return mapChat(tdChat, { supergroup: sg, description });
+      return { ...mapChat(tdChat, { supergroup: sg, description }), linkedChatId };
     }
     return mapChat(tdChat);
   }

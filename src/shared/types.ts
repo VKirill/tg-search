@@ -209,6 +209,8 @@ export interface Settings {
   // Image generation for executors and previews (fal.ai)
   falKey: string;
   imageModel: string; // fal model id for generation/editing
+  // «Новости»: what the owner wants to keep a hand on the pulse of; Jev scores channel posts against it
+  newsInterests: string;
   // Operator: the tool-calling agent that talks to clients. Provider switch keeps a key per provider so the owner can
   // compare GLM and DeepSeek without retyping; 'custom' uses operatorBaseUrl/operatorApiKey/operatorModel.
   operatorProvider: 'glm' | 'deepseek' | 'custom';
@@ -370,6 +372,36 @@ export interface SpamTemplate {
   source: 'auto' | 'owner';
   createdAt: number;
   lastSeenAt: number;
+}
+
+// «Новости»: channels read without subscribing; their posts are scored by Jev against Settings.newsInterests
+export interface NewsChannel {
+  id: number;
+  tgChatId: number;
+  title: string;
+  username: string | null;
+  enabled: boolean;
+  lastMessageId: number; // newest post already read
+  lastCheckedAt: number | null;
+  createdAt: number;
+}
+
+export type NewsStatus = 'new' | 'saved' | 'used' | 'dismissed';
+
+export interface NewsItem {
+  id: number;
+  channelId: number;
+  channelTitle: string;
+  tgChatId: number;
+  tgMessageId: number;
+  text: string;
+  link: string | null; // t.me link to the post
+  date: number; // unix ms of the post
+  score: number; // 0..100: worth a repost or a review for the owner's interests
+  summary: string; // 1–2 sentences, Russian
+  why: string; // why it is worth attention
+  status: NewsStatus;
+  createdAt: number;
 }
 
 // A chat with nothing but spam and repeats (or no live messages at all): left on every account, never joined again.
@@ -558,6 +590,7 @@ export interface LoginState {
 }
 
 export type AppEvent =
+  | { type: 'news:new'; item: NewsItem }
   | { type: 'lead:new'; lead: Lead }
   | { type: 'lead:update'; lead: Lead }
   | { type: 'message:new'; message: ChatMessage }
@@ -583,6 +616,7 @@ export interface ChatInfo {
   memberCount: number | null;
   isMember: boolean;
   spamReason?: string | null; // in the spam-chat blocklist: why; such a chat cannot be joined
+  linkedChatId?: number | null; // channel: its discussion group, joinable without subscribing to the channel
 }
 
 export interface ChatSummary extends ChatInfo {
@@ -722,6 +756,16 @@ export interface Api {
     blockChat(accountId: number, chatId: number): Promise<SpamChat>; // owner: leave on every account and block
     unblockChat(tgChatId: number): Promise<void>; // joinable again; its sources go back to candidates
   };
+  news: {
+    channels(): Promise<NewsChannel[]>;
+    addChannel(linkOrUsername: string): Promise<NewsChannel>; // @username or t.me link; no subscription
+    updateChannel(id: number, patch: Partial<Pick<NewsChannel, 'enabled'>>): Promise<NewsChannel>;
+    removeChannel(id: number): Promise<void>;
+    items(status?: NewsStatus | 'all'): Promise<NewsItem[]>; // newest first; default: not dismissed
+    setStatus(id: number, status: NewsStatus): Promise<NewsItem>;
+    draft(id: number, kind: 'repost' | 'review'): Promise<string>; // a post for the owner's channel, Russian
+    runNow(): Promise<number>; // read all channels now; returns how many posts were added
+  };
   approvals: {
     list(status?: Approval['status']): Promise<Approval[]>;
     decide(id: number, approve: boolean): Promise<Approval>; // approved → the tool runs and the agent continues the dialog
@@ -764,6 +808,8 @@ export interface Api {
     search(accountId: number, query: string): Promise<ChatInfo[]>; // the account's chats + public chats/channels
     join(accountId: number, chatIdOrLink: number | string): Promise<ChatInfo>; // id, @username, t.me link or invite link
     leave(accountId: number, chatId: number): Promise<void>;
+    // A channel's discussion group (comments), null when the channel has none; join it with join(linked.chatId)
+    discussion(accountId: number, channelIdOrLink: number | string): Promise<ChatInfo | null>;
     // Messages around a message (e.g. «Открыть публикацию» of a lead): ~20 before and ~20 after, oldest first
     around(accountId: number, chatId: number, messageId: number): Promise<ChatItem[]>;
     media(accountId: number, fileId: number): Promise<string>; // download a voice note; returns a tgmedia:// URL

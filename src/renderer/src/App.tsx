@@ -17,6 +17,7 @@ import { AgentsView } from './components/AgentsView';
 import { SkillsView } from './components/SkillsView';
 import { ApprovalsView } from './components/ApprovalsView';
 import { SpamTemplatesView } from './components/SpamTemplatesView';
+import { NewsView } from './components/NewsView';
 import { ToastProvider, installGlobalErrors, useToast } from './components/Toast';
 import { getApi } from './hooks/useApi';
 import { getShotBootstrap } from './mockApi';
@@ -197,6 +198,7 @@ function AppInner() {
       'skills-draft': 'skills',
       approvals: 'approvals',
       spam: 'spam',
+      news: 'news',
       publication: 'chats',
       'lead-repeat': 'leads',
     };
@@ -405,6 +407,7 @@ function AppInner() {
           <ApprovalsView leads={leads} onPendingCount={setPendingApprovals} />
         )}
         {view === 'spam' && <SpamTemplatesView />}
+        {view === 'news' && <NewsView />}
         {view === 'funnel' && <FunnelView projectId={projectFilterId} onOpenLead={openLeadFromFunnel} />}
         {view === 'projects' && (
           <ProjectsView

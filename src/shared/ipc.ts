@@ -25,6 +25,7 @@ export const API_METHODS: ApiMap = {
   agent: ['trace'],
   agents: ['list', 'save', 'remove', 'rules', 'saveRules'],
   skills: ['list', 'save', 'remove', 'approve'],
+  news: ['channels', 'addChannel', 'updateChannel', 'removeChannel', 'items', 'setStatus', 'draft', 'runNow'],
   approvals: ['list', 'decide'],
   spam: ['templates', 'markSpam', 'setTemplateStatus', 'chats', 'blockChat', 'unblockChat'],
   services: ['list', 'create', 'update', 'remove'],
@@ -32,7 +33,7 @@ export const API_METHODS: ApiMap = {
   dossier: ['path', 'open'],
   stats: ['report'],
   categories: ['list', 'create', 'update', 'remove'],
-  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media', 'around'],
+  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media', 'around', 'discussion'],
   shell: ['openExternal'],
 };
 

@@ -175,6 +175,40 @@ tgs call settings.set '{"handoffNotifyTo":"@username"}'
 
 Никогда не печатайте `llmApiKey`, `jevApiKey`, `tgApiHash`, `manager.apiKey` в чат.
 
+### 9. Чат канала (без подписки на канал)
+
+Комментарии к постам канала — его чат обсуждений; лиды пишут там. Вступить только в чат:
+
+```bash
+tgs call chats.discussion 1 '"@channel"'          # null — у канала нет чата
+tgs call chats.join 1 <chatId из ответа>
+tgs call sources.add <projectId> '"@channel"'     # канал как источник = его чат обсуждений
+```
+
+### 10. Новости каналов
+
+Каналы читаются без подписки раз в час; Jev оценивает посты по `settings.newsInterests`, в список попадают от 50%.
+
+```bash
+tgs call settings.set '{"newsInterests":"ИИ в маркетинге, новые нейросети, Яндекс Директ"}'
+tgs call news.addChannel '"@channel"'
+tgs call news.runNow                       # прочитать сейчас; вернёт число новых постов
+tgs call news.items                        # новые; 'saved' | 'used' | 'all'
+tgs call news.draft <itemId> '"review"'    # или "repost" — черновик поста
+tgs call news.setStatus <itemId> '"saved"' # saved | used | dismissed
+```
+
+### 11. Категории лидов и спам-чаты
+
+```bash
+tgs call categories.list                   # у лида categoryId — фильтр «Тематики» во «Входящих»
+tgs call spam.chats                        # чаты, из которых вышли: спам и повторы или неделю без сообщений
+tgs call spam.blockChat 1 <chatId>         # выйти и заблокировать — только по просьбе пользователя
+tgs call spam.unblockChat <chatId>
+```
+
+Каналы и чаты, где аккаунт админ, автоматически не блокируются.
+
 ## Правила безопасности для Claude
 
 1. **Отправка сообщений**: не включать `autopilot.aiReply`, `manager.enabled`, `broadcasts.enabled` без явного подтверждения пользователя в этом разговоре.

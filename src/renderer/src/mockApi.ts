@@ -29,6 +29,8 @@ import type {
   ProjectInput,
   Settings,
   SkillDef,
+  NewsChannel,
+  NewsItem,
   SpamChat,
   SpamTemplate,
   StatsReport,
@@ -75,6 +77,7 @@ let settings: Settings = {
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
   imageModel: 'fal-ai/nano-banana-2/edit',
+  newsInterests: 'ИИ в маркетинге и рекламе, новые нейросети и ИИ-инструменты, обновления Telegram, Яндекс Директа и маркетплейсов',
   operatorProvider: 'glm',
   glmApiKey: '',
   deepseekApiKey: '',
@@ -513,6 +516,15 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockNewsChannels: NewsChannel[] = [
+  { id: 1, tgChatId: -1009101, title: 'ИИ для маркетолога', username: 'ai_marketing_news', enabled: true, lastMessageId: 812, lastCheckedAt: Date.now() - 600_000, createdAt: Date.now() - 86400_000 },
+  { id: 2, tgChatId: -1009102, title: 'Директ без воды', username: 'direct_news', enabled: true, lastMessageId: 233, lastCheckedAt: Date.now() - 600_000, createdAt: Date.now() - 86400_000 },
+];
+const mockNewsItems: NewsItem[] = [
+  { id: 1, channelId: 1, channelTitle: 'ИИ для маркетолога', tgChatId: -1009101, tgMessageId: 812, text: 'Вышла новая модель генерации видео: ролики до 60 секунд по тексту, есть API, цена — от 0,05 $ за секунду. Первые тесты на рекламных креативах показывают CTR выше на 18%.', link: 'https://t.me/ai_marketing_news/812', date: Date.now() - 3600_000, score: 91, summary: 'Новая модель делает рекламные видео до минуты по тексту; в тестах CTR креативов вырос на 18%.', why: 'Готовая тема для обзора: инструмент для креативов с цифрами.', status: 'new', createdAt: Date.now() - 3000_000 },
+  { id: 2, channelId: 2, channelTitle: 'Директ без воды', tgChatId: -1009102, tgMessageId: 233, text: 'Яндекс Директ запустил автотаргетинг по образу клиента: можно загрузить сегмент покупателей, и система найдёт похожие запросы. Пока в бете для части аккаунтов.', link: 'https://t.me/direct_news/233', date: Date.now() - 7200_000, score: 78, summary: 'В Директе бета автотаргетинга по сегменту покупателей.', why: 'Новость для клиентов на Директ — повод для поста.', status: 'new', createdAt: Date.now() - 7000_000 },
+];
 
 const mockSpamChats: SpamChat[] = [
   { tgChatId: -1009001, title: 'WB партнёры | чат', username: 'wb_partners_chats', reason: '41 из 43 сообщений за неделю — спам и повторы', messages: 43, liveShare: 0.05, source: 'auto', createdAt: Date.now() - 3600_000 },
@@ -1889,6 +1901,41 @@ export function createMockApi(): Api {
         if (i >= 0) mockSpamChats.splice(i, 1);
       },
     },
+    news: {
+      async channels() {
+        return mockNewsChannels.map((c) => ({ ...c }));
+      },
+      async addChannel(link) {
+        const c = { id: nid(), tgChatId: -1009100 - mockNewsChannels.length, title: link.replace(/^.*[/@]/, ''), username: link.replace(/^.*[/@]/, ''), enabled: true, lastMessageId: 0, lastCheckedAt: null, createdAt: Date.now() };
+        mockNewsChannels.push(c);
+        return { ...c };
+      },
+      async updateChannel(id, patch) {
+        const c = mockNewsChannels.find((x) => x.id === id)!;
+        Object.assign(c, patch);
+        return { ...c };
+      },
+      async removeChannel(id) {
+        const i = mockNewsChannels.findIndex((x) => x.id === id);
+        if (i >= 0) mockNewsChannels.splice(i, 1);
+      },
+      async items(status = 'new') {
+        return mockNewsItems.filter((x) => (status === 'all' ? x.status !== 'dismissed' : x.status === status)).map((x) => ({ ...x }));
+      },
+      async setStatus(id, status) {
+        const x = mockNewsItems.find((n) => n.id === id)!;
+        x.status = status;
+        return { ...x };
+      },
+      async draft(id, kind) {
+        const x = mockNewsItems.find((n) => n.id === id)!;
+        x.status = 'used';
+        return kind === 'repost' ? `${x.summary}\n\nИсточник: ${x.link}` : `Обзор: ${x.summary} ${x.why}\n\nИсточник: ${x.link}`;
+      },
+      async runNow() {
+        return 0;
+      },
+    },
     approvals: {
       async list(status) {
         return mockApprovals.filter((a) => !status || a.status === status).map((a) => ({ ...a }));
@@ -1997,6 +2044,9 @@ export function createMockApi(): Api {
       },
     },
     chats: {
+      async discussion() {
+        return { chatId: -1009002, title: 'Обсуждение канала', username: null, kind: 'supergroup' as const, memberCount: 320, isMember: false };
+      },
       async list() {
         await delay(120);
         return mockChats.map((c) => ({ ...c }));
