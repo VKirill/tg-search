@@ -3697,3 +3697,8 @@ button.chip:hover {
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
+
+.groups-new {
+  margin-top: 6px;
+  align-self: flex-start;
+}

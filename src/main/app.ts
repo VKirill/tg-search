@@ -52,7 +52,7 @@ import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
-import { createGroupHelper, helperAgent, scenarioOf } from './groupHelper';
+import { createGroupHelper, helperAgent } from './groupHelper';
 import { createKnowledge, knowledgeContext } from './knowledge';
 import { createWorkerEmbedder } from './memory/embedder';
 import { RICH_FORMAT } from './agent/style';
@@ -342,12 +342,12 @@ export function createApp(deps: AppDeps): AppHandlers {
   const groupHelper = createGroupHelper({
     db, engine, dataDir, emit, getSettings, setSettings: (p) => db.setSettings(p),
     async isRequest(chat, message, picture) {
-      const tasks = scenarioOf(chat) === 'tasks';
+      const tasks = chat.kind === 'tasks';
       if (!getSettings().jevApiKey.trim()) return tasks && picture ? 0.6 : 0; // no Jev: only a photo in a tasks group counts
       const data = await postSystemOne(getSettings, {
         state: { message: message.slice(0, 1500), picture: picture.slice(0, 800), group: [chat.about, chat.instructions].filter(Boolean).join('\n').slice(0, 1200) },
         // the group's own question, or the scenario's
-        questions: { request: { type: 'noul', instructions: chat.jevPrompt?.trim() || HELPER_DEFAULT_JEV[scenarioOf(chat)] } },
+        questions: { request: { type: 'noul', instructions: chat.jevPrompt?.trim() || HELPER_DEFAULT_JEV[chat.kind] } },
       });
       return (data.answers?.request as { noul?: number } | undefined)?.noul ?? 0;
     },
@@ -389,8 +389,8 @@ export function createApp(deps: AppDeps): AppHandlers {
           /* no such agent: the base checks only */
         }
         ({ text } = await aiEngine.direct({
-          agent: `group:${chat.chatId}`, role: scenarioOf(chat) === 'tasks' ? 'smart' : 'fast', model: chat.model || undefined,
-          system: [RICH_FORMAT, scenarioOf(chat) === 'tasks' ? FIGURES_GUIDE : ''].filter(Boolean).join('\n\n'), context,
+          agent: `group:${chat.chatId}`, role: chat.kind === 'tasks' ? 'smart' : 'fast', model: chat.model || undefined,
+          system: [RICH_FORMAT, chat.kind === 'tasks' ? FIGURES_GUIDE : ''].filter(Boolean).join('\n\n'), context,
           text: task, images, verifyMode: verifyMode ?? 'off', verifier: chat.verifier || undefined, check,
         }));
       } else {
@@ -915,8 +915,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
       saveChats: async (list) => groupHelper.saveChats(list),
       requests: async (limit, chatId) => groupHelper.requests(limit, chatId),
-      test: async (chat, text) => groupHelper.test(chat, text),
-      preview: async (chat, text) => groupHelper.preview(chat, text),
+      scenarios: async () => groupHelper.scenarios(),
+      saveScenario: async (def) => groupHelper.saveScenario(def),
+      removeScenario: async (id) => groupHelper.removeScenario(id),
+      test: async (chat, text, scenario) => groupHelper.test(chat, text, scenario),
+      preview: async (chat, text, scenario) => groupHelper.preview(chat, text, scenario),
     },
 
     ai: {

@@ -230,7 +230,8 @@ export interface Settings {
   aiVerifierModel: string;
   helperChats: string; // JSON HelperChat[] — groups where the agent solves tasks for everyone
   helperPauseSec: string; // seconds between the helper's answers in a group (cold outreach keeps the account's own pause)
-  helperDailyPerUser: string; // free solutions per member a day in those groups; '0' — no cap // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
+  helperDailyPerUser: string;
+  helperScenarios: string; // JSON HelperScenarioDef[] — own scenarios and changes to the built-in ones // free solutions per member a day in those groups; '0' — no cap // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
@@ -435,33 +436,78 @@ export interface AiProvider {
   models: number;
 }
 
-// The group assistant: in groups (or channel discussions) the owner connects, the agent answers members by a scenario
-export type HelperScenario = 'tasks' | 'questions' | 'custom';
+// The group assistant: in groups (or channel discussions) the owner connects, the agent answers members. A scenario
+// says HOW to answer (filters, Jev's question, agents, model, checking, knowledge, phrases); a group says WHERE and
+// about what (the chat, the account, its topic and rules) and which scenario it follows. Scenarios are edited in the
+// «Помощник групп» tab: the built-in ones can be changed and reset, own ones created, copied and deleted.
 
-export const HELPER_SCENARIOS: Record<HelperScenario, { label: string; description: string; agent: string }> = {
+// What kind of messages a scenario is made for: «tasks» — tasks as text or photos of pages (task lists on a photo, a poll
+// for the author, step-by-step solutions with figures); «questions» — ordinary messages
+export type HelperKind = 'tasks' | 'questions';
+
+export interface HelperBehavior {
+  // which messages get an answer
+  jevCheck?: boolean; // ask Jev whether to answer (default true); off — every message that passes the filters
+  jevPrompt?: string; // the question for Jev; '' — the kind's default
+  threshold?: number; // Jev probability to answer, 0–1 (default 0.5)
+  repliesOnly?: boolean; // only replies to the helper's messages and mentions of the account
+  keywords?: string[]; // only messages with one of these words; empty — any
+  askWhich?: boolean; // «tasks»: a page with several tasks gets a poll for its author (default true)
+  // how the answer is made
+  mode?: 'agent' | 'model'; // an agent in OpenCode (tools, skills, helpers) or one request straight to a model, its text goes out as is
+  agent?: string; // «agent»: the main agent that writes the answer; default — solver for tasks, consultant for questions
+  helpers?: string[]; // «agent»: agents that work on the request first (in parallel); their results go to the main agent
+  model?: string; // provider/model: «model» — the model that answers; «agent» — the main agent's model; '' — chosen by the router
+  verify?: 'agent' | 'always' | 'free' | 'off'; // check the answer with a second model: as the agent's file says (default), always, free models' only, never
+  verifier?: string; // provider/model of the checker; '' — the default one
+  knowledge?: number[]; // knowledge bases the answer draws on
+  knowledgeOnly?: boolean; // answer only from the materials; say so when they have nothing
+  skills?: string[]; // skills whose instructions go with every job
+  texts?: { ack?: string; fail?: string; limit?: string }; // the helper's own phrases; empty — the kind's
+}
+
+export interface HelperScenarioDef extends HelperBehavior {
+  id: string;
+  name: string;
+  description: string; // what it does — shown when a group picks it
+  kind: HelperKind;
+  builtIn?: boolean; // shipped with the app: can be changed and reset, not deleted
+}
+
+export interface HelperChat {
+  chatId: number; // the group the helper reads and answers in (for a channel — its discussion group)
+  title: string;
+  username: string | null;
+  accountId: number; // the account that listens and answers
+  enabled: boolean;
+  channel?: { chatId: number; title: string; username: string | null } | null; // connected through this channel
+  scenario?: string; // id of the scenario; default «tasks»
+  about?: string; // what the group is about — context for Jev and the agent (kept in local settings only)
+  instructions?: string; // how to answer in this group: tone, length, what not to do, where to send people
+  dailyCap?: number | null; // answers per member a day; null — the common setting
+  asGroup?: boolean; // answers on behalf of the group (default) rather than from the account
+}
+
+// A group with its scenario resolved: what the helper actually works by
+export type HelperSetup = HelperChat & HelperBehavior & { kind: HelperKind; scenarioName: string };
+
+export const HELPER_KINDS: Record<HelperKind, { label: string; description: string; agent: string }> = {
   tasks: {
-    label: 'Решение задач',
+    label: 'Задачи',
     agent: 'solver',
-    description: 'Участники присылают задания текстом или фото. Jev отделяет просьбы решить от болтовни; если на фото несколько заданий — ' +
-      'опрос автору, какие решить (засчитывается только его голос); решатель отвечает пошагово, с проверкой второй моделью, рисунками и графиками.',
+    description: 'Задания текстом или фото страниц: на фото ищутся номера заданий, если их несколько — опрос автору, какие решить; ' +
+      'ответ — пошаговое решение с рисунками и графиками.',
   },
   questions: {
-    label: 'Ответы на вопросы',
+    label: 'Сообщения',
     agent: 'consultant',
-    description: 'Jev отбирает вопросы по теме группы, агент-консультант отвечает коротко и по делу, при необходимости ищет в сети; ' +
-      'приветствия, благодарности, болтовня и реклама остаются без ответа.',
-  },
-  custom: {
-    label: 'Свой сценарий',
-    agent: 'consultant',
-    description: 'Вы сами решаете, на какие сообщения отвечать (проверка Jev со своим вопросом, только ответы помощнику и упоминания, ' +
-      'ключевые слова), какой агент отвечает, какие умения ему подгружаются и что он пишет.',
+    description: 'Обычные сообщения участников: вопросы, просьбы, обсуждения — ответ по теме группы.',
   },
 };
 
-// What Jev is asked about every message, by scenario (the owner can write their own per group). `message` — the text,
-// `picture` — what is on an attached photo, `group` — the group's description.
-export const HELPER_DEFAULT_JEV: Record<HelperScenario, string> = {
+// What Jev is asked about every message, by kind (a scenario can have its own). `message` — the text, `picture` — what
+// is on an attached photo, `group` — the group's description and rules.
+export const HELPER_DEFAULT_JEV: Record<HelperKind, string> = {
   tasks: 'This is a message in a Telegram group where an assistant solves tasks for members; `group` describes the group, ' +
     '`picture` an attached photo, if any. Is the author asking to solve, check or explain a task (homework, exercise, ' +
     'test question, problem) — including just sending a photo of a task? Chatting, thanks, ads and off-topic messages are not.',
@@ -469,11 +515,9 @@ export const HELPER_DEFAULT_JEV: Record<HelperScenario, string> = {
     'the group is about, `picture` an attached photo, if any. Is the author asking a question or for help or advice that ' +
     'the assistant should answer, on the group\'s topic? Greetings, thanks, chatter, ads and messages addressed to a ' +
     'particular other member are not.',
-  custom: 'This is a message in a Telegram group with an assistant; `group` describes the group and what the assistant does, ' +
-    '`picture` an attached photo, if any. Should the assistant answer this message? Greetings, thanks, chatter and ads — no.',
 };
 
-export const HELPER_DEFAULT_TEXTS: Record<HelperScenario, { ack: string; fail: string; limit: string }> = {
+export const HELPER_DEFAULT_TEXTS: Record<HelperKind, { ack: string; fail: string; limit: string }> = {
   tasks: {
     ack: '🔥 взял задачу, решаю — минутку',
     fail: 'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом',
@@ -484,43 +528,30 @@ export const HELPER_DEFAULT_TEXTS: Record<HelperScenario, { ack: string; fail: s
     fail: 'не получилось ответить 😕 попробуй переформулировать вопрос',
     limit: 'на сегодня бесплатные ответы закончились ({cap} в день) — завтра продолжим 🙂',
   },
-  custom: {
-    ack: '🔥 смотрю, сейчас отвечу',
-    fail: 'не получилось ответить 😕 попробуй ещё раз чуть позже',
-    limit: 'на сегодня ответы закончились ({cap} в день) — завтра продолжим 🙂',
-  },
 };
 
-export interface HelperChat {
-  chatId: number; // the group the helper reads and answers in (for a channel — its discussion group)
-  title: string;
-  username: string | null;
-  accountId: number; // the account that listens and answers
-  enabled: boolean;
-  channel?: { chatId: number; title: string; username: string | null } | null; // connected through this channel
-  scenario?: HelperScenario; // default «tasks»
-  about?: string; // what the group is about — context for Jev and the agent (kept in local settings only)
-  instructions?: string; // how to answer: tone, length, what not to do, where to send people
-  // How the answer is made
-  mode?: 'agent' | 'model'; // an agent in OpenCode (tools, skills, helpers) or one request straight to a model, its text goes out as is
-  agent?: string; // «agent»: the main agent that writes the answer; default — the scenario's
-  helpers?: string[]; // «agent»: agents that work on the request first (in parallel); their results go to the main agent
-  model?: string; // provider/model: «model» — the model that answers; «agent» — the main agent's model; '' — chosen by the router
-  verify?: 'agent' | 'always' | 'free' | 'off'; // check the answer with a second model: as the agent's file says (default), always, free models' only, never
-  verifier?: string; // provider/model of the checker; '' — the default one
-  knowledge?: number[]; // knowledge bases the answer draws on
-  knowledgeOnly?: boolean; // answer only from the materials; say so when they have nothing
-  skills?: string[]; // skills whose instructions go with every job
-  jevCheck?: boolean; // ask Jev whether to answer (default true); off — every message that passes the filters
-  jevPrompt?: string; // the question for Jev; '' — the scenario's default
-  threshold?: number; // Jev probability to answer, 0–1 (default 0.5)
-  repliesOnly?: boolean; // only replies to the helper's messages and mentions of the account
-  keywords?: string[]; // only messages with one of these words; empty — any
-  askWhich?: boolean; // «tasks»: a page with several tasks gets a poll for its author (default true)
-  dailyCap?: number | null; // answers per member a day; null — the common setting
-  asGroup?: boolean; // answers on behalf of the group (default) rather than from the account
-  texts?: { ack?: string; fail?: string; limit?: string }; // the helper's own phrases; empty — the scenario's
-}
+// Scenarios shipped with the app — starting points the owner edits or copies
+export const BUILTIN_HELPER_SCENARIOS: HelperScenarioDef[] = [
+  {
+    id: 'tasks', name: 'Решение задач', kind: 'tasks', builtIn: true, mode: 'agent', verify: 'agent',
+    description: 'Участники присылают задания текстом или фото. Jev отделяет просьбы решить от болтовни; если на фото несколько заданий — ' +
+      'опрос автору, какие решить (засчитывается только его голос); решатель отвечает пошагово, с проверкой второй моделью, рисунками и графиками.',
+  },
+  {
+    id: 'questions', name: 'Ответы на вопросы', kind: 'questions', builtIn: true, mode: 'agent', verify: 'agent',
+    description: 'Jev отбирает вопросы по теме группы, агент-консультант отвечает коротко и по делу, при необходимости ищет в сети; ' +
+      'приветствия, благодарности, болтовня и реклама остаются без ответа.',
+  },
+  {
+    id: 'knowledge', name: 'Ответы по базе знаний', kind: 'questions', builtIn: true, mode: 'agent', verify: 'always', knowledgeOnly: true,
+    description: 'Консультант отвечает только по подключённым материалам — книгам, методичкам, документации — со ссылками на источник; ' +
+      'чего в материалах нет, честно говорит. Подключите базы знаний в этом сценарии.',
+  },
+  {
+    id: 'mentions', name: 'Только по обращению', kind: 'questions', builtIn: true, mode: 'agent', verify: 'agent', repliesOnly: true, jevCheck: false,
+    description: 'Помощник молчит, пока к нему не обратятся: отвечает на упоминание аккаунта и на ответы на свои сообщения — без проверки Jev.',
+  },
+];
 
 export interface HelperRequest {
   id: number;
@@ -1015,8 +1046,12 @@ export interface Api {
     addChat(accountId: number, link: string): Promise<HelperChat[]>;
     saveChats(list: HelperChat[]): Promise<HelperChat[]>;
     requests(limit: number, chatId?: number): Promise<HelperRequest[]>;
-    test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }>; // what Jev says about a message
-    preview(chat: HelperChat, text: string): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
+    scenarios(): Promise<HelperScenarioDef[]>; // built-in (with the owner's changes) and own
+    saveScenario(def: HelperScenarioDef): Promise<HelperScenarioDef[]>;
+    removeScenario(id: string): Promise<HelperScenarioDef[]>; // own — deleted; built-in — reset to the shipped one
+    // the sandbox; `scenario` — unsaved edits of the group's scenario
+    test(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ score: number; answer: boolean; reason: string }>;
+    preview(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
   };
   knowledge: {
     bases(): Promise<KnowledgeBase[]>;

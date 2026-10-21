@@ -4,24 +4,50 @@
 // chatter; the answer goes as a reply to the author. Requests live in the database, so a restart picks them up.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { HELPER_DEFAULT_TEXTS, HELPER_SCENARIOS, type AppEvent, type HelperChat, type HelperRequest, type HelperScenario, type Settings } from '../../shared/types';
+import {
+  BUILTIN_HELPER_SCENARIOS, HELPER_DEFAULT_TEXTS, HELPER_KINDS,
+  type AppEvent, type HelperBehavior, type HelperChat, type HelperKind, type HelperRequest, type HelperScenarioDef, type HelperSetup, type Settings,
+} from '../../shared/types';
 import type { Db } from '../db';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { afterSend, canSend } from '../pipeline/limiter';
 import { trustedFor } from '../trusted';
 
 export const TASK_THRESHOLD = 0.5;
-export const scenarioOf = (chat: HelperChat): HelperScenario => chat.scenario ?? 'tasks';
-export const helperAgent = (chat: HelperChat): string => chat.agent?.trim() || HELPER_SCENARIOS[scenarioOf(chat)].agent;
+export const kindOf = (s: HelperSetup): HelperKind => s.kind;
+export const helperAgent = (s: HelperSetup): string => s.agent?.trim() || HELPER_KINDS[s.kind].agent;
+
+const BEHAVIOR_KEYS: (keyof HelperBehavior)[] = [
+  'jevCheck', 'jevPrompt', 'threshold', 'repliesOnly', 'keywords', 'askWhich', 'mode', 'agent', 'helpers', 'model', 'verify',
+  'verifier', 'knowledge', 'knowledgeOnly', 'skills', 'texts',
+];
+
+// The built-in scenarios with the owner's changes, then the owner's own
+export function listScenarios(stored: HelperScenarioDef[]): HelperScenarioDef[] {
+  const byId = new Map(stored.map((s) => [s.id, s]));
+  const builtIn = BUILTIN_HELPER_SCENARIOS.map((b) => ({ ...b, ...byId.get(b.id), id: b.id, builtIn: true }));
+  return [...builtIn, ...stored.filter((s) => !BUILTIN_HELPER_SCENARIOS.some((b) => b.id === s.id)).map((s) => ({ ...s, builtIn: false }))];
+}
+
+// A group with its scenario: the scenario's behavior, the group's place and topic
+export function setupOf(chat: HelperChat, scenarios: HelperScenarioDef[], override?: HelperScenarioDef): HelperSetup {
+  const sc = override ?? scenarios.find((s) => s.id === (chat.scenario ?? 'tasks')) ?? scenarios[0] ?? BUILTIN_HELPER_SCENARIOS[0];
+  const behavior = Object.fromEntries(BEHAVIOR_KEYS.filter((k) => sc[k] !== undefined).map((k) => [k, sc[k]])) as HelperBehavior;
+  return {
+    chatId: chat.chatId, title: chat.title, username: chat.username, accountId: chat.accountId, enabled: chat.enabled, channel: chat.channel,
+    scenario: sc.id, about: chat.about, instructions: chat.instructions, dailyCap: chat.dailyCap, asGroup: chat.asGroup,
+    ...behavior, kind: sc.kind, scenarioName: sc.name,
+  };
+}
 
 // What the helper says: the group's own phrase or the scenario's
-export function helperText(chat: HelperChat, key: 'ack' | 'fail' | 'limit', cap = 0): string {
+export function helperText(chat: HelperSetup, key: 'ack' | 'fail' | 'limit', cap = 0): string {
   const own = chat.texts?.[key]?.trim();
-  return (own || HELPER_DEFAULT_TEXTS[scenarioOf(chat)][key]).replaceAll('{cap}', String(cap));
+  return (own || HELPER_DEFAULT_TEXTS[chat.kind][key]).replaceAll('{cap}', String(cap));
 }
 
 // Filters before Jev: keywords and «only replies to the helper / mentions of the account»; null — passes
-export function filterReason(chat: HelperChat, text: string, opts: { replyToOurs: boolean; mention: boolean }): string | null {
+export function filterReason(chat: HelperSetup, text: string, opts: { replyToOurs: boolean; mention: boolean }): string | null {
   const words = (chat.keywords ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (words.length && !words.some((w) => text.toLowerCase().includes(w))) return 'нет ключевых слов';
   if (chat.repliesOnly && !opts.replyToOurs && !opts.mention) return 'не ответ помощнику и не упоминание';
@@ -42,9 +68,9 @@ export interface GroupHelperDeps {
   emit: (e: AppEvent) => void;
   getSettings: () => Settings;
   setSettings: (patch: Partial<Settings>) => void;
-  isRequest: (chat: HelperChat, message: string, picture: string) => Promise<number>; // Jev: probability it is a request for this group
+  isRequest: (chat: HelperSetup, message: string, picture: string) => Promise<number>; // Jev: probability it is a request for this group
   describePhoto: (path: string) => Promise<{ caption: string; tasks: string[] }>; // vision: what is on it, task labels
-  answer: (chat: HelperChat, job: { key: string; task: string; query: string; photos: string[]; dir: string }) => Promise<string>; // the agent → Markdown; `query` — the member's own words, for knowledge search
+  answer: (chat: HelperSetup, job: { key: string; task: string; query: string; photos: string[]; dir: string }) => Promise<string>; // the agent → Markdown; `query` — the member's own words, for knowledge search
 }
 
 // «все», «реши всё», «3», «№ 2 и 5», «задачи 1, 4», «упр. 12б»
@@ -109,6 +135,42 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return [];
     }
   };
+  const storedScenarios = (): HelperScenarioDef[] => {
+    try {
+      return JSON.parse(deps.getSettings().helperScenarios || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const scenarios = () => listScenarios(storedScenarios());
+  const setups = (): HelperSetup[] => {
+    const list = scenarios();
+    return chats().map((c) => setupOf(c, list));
+  };
+
+  // Groups set up before scenarios kept their behavior on the group: it becomes the group's own scenario
+  (function migrate() {
+    const list = chats();
+    const own = storedScenarios();
+    let changed = false;
+    const next = list.map((c) => {
+      const legacy = c as HelperChat & HelperBehavior & { scenario?: string };
+      const behavior = Object.fromEntries(BEHAVIOR_KEYS.filter((k) => legacy[k] !== undefined).map((k) => [k, legacy[k]])) as HelperBehavior;
+      const base: HelperChat = {
+        chatId: c.chatId, title: c.title, username: c.username, accountId: c.accountId, enabled: c.enabled, channel: c.channel,
+        about: c.about, instructions: c.instructions, dailyCap: c.dailyCap, asGroup: c.asGroup,
+        scenario: c.scenario === 'custom' ? 'questions' : c.scenario,
+      };
+      if (!Object.keys(behavior).length && c.scenario !== 'custom') return c;
+      changed = true;
+      if (!Object.keys(behavior).length) return base;
+      const id = `group-${c.chatId}`;
+      const kind: HelperKind = c.scenario === 'tasks' || !c.scenario ? 'tasks' : 'questions';
+      own.push({ id, name: `Сценарий группы «${c.title}»`, description: 'Перенесён из настроек группы.', kind, ...behavior });
+      return { ...base, scenario: id };
+    });
+    if (changed) deps.setSettings({ helperChats: JSON.stringify(next), helperScenarios: JSON.stringify(own) });
+  })();
   const set = (id: number, patch: Record<string, unknown>) => {
     for (const [k, v] of Object.entries({ ...patch, updated_at: Date.now() })) db.raw.prepare(`UPDATE helper_requests SET ${k} = ? WHERE id = ?`).run(v as never, id);
   };
@@ -138,7 +200,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
 
   let running = 0;
   const waiting: number[] = [];
-  const chatOf = (chatId: number) => chats().find((c) => c.chatId === chatId);
+  const chatOf = (chatId: number) => setups().find((c) => c.chatId === chatId);
   const asGroup = (chatId: number) => chatOf(chatId)?.asGroup !== false;
 
   function enqueue(id: number) {
@@ -147,7 +209,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     // instead, deleted when the solution comes
     const r = get(id);
     if (asGroup(r.chat_id) && !r.ack_id) {
-      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, helperText(chatOf(r.chat_id) ?? ({} as HelperChat), 'ack')))
+      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, helperText(chatOf(r.chat_id) ?? setupOf({} as HelperChat, scenarios()), 'ack')))
         .then((m) => set(id, { ack_id: m.messageId }))
         .catch((err) => console.warn('group helper ack', err instanceof Error ? err.message : err));
     }
@@ -188,10 +250,10 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   }
 
   // The job for the agent: the member's message, the photo, the group's topic and rules
-  function taskText(chat: HelperChat, r: Row): string {
+  function taskText(chat: HelperSetup, r: Row): string {
     const photo = JSON.parse(r.photos).length ? r.picture : '';
     const group = [chat.about?.trim() ? `О группе: ${chat.about.trim()}` : '', chat.instructions?.trim() ? `Как отвечать: ${chat.instructions.trim()}` : ''];
-    if (scenarioOf(chat) === 'questions') {
+    if (chat.kind === 'questions') {
       return [
         `Вопрос участника группы: ${r.text.trim() || '(без текста)'}`, photo ? `К сообщению приложено фото: ${photo}.` : '', ...group,
         'Ответ увидят все участники группы: коротко и по делу.',
@@ -220,7 +282,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   }
 
   async function onMessage(accountId: number, msg: TgMessage) {
-    const chat = chats().find((c) => c.enabled && c.chatId === msg.chatId && c.accountId === accountId);
+    const chat = setups().find((c) => c.enabled && c.chatId === msg.chatId && c.accountId === accountId);
     if (!chat) return;
     // the last message read: after a restart the helper reads on from here
     db.raw.prepare(`INSERT INTO helper_seen(chat_id, message_id) VALUES(?, ?)
@@ -284,8 +346,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       }
       return;
     }
-    const sel = scenarioOf(chat) === 'tasks' ? parseSelection(msg.text) : null;
-    if (scenarioOf(chat) === 'tasks' && chat.askWhich !== false && photos.length && tasks.length > 1 && !sel) {
+    const sel = chat.kind === 'tasks' ? parseSelection(msg.text) : null;
+    if (chat.kind === 'tasks' && chat.askWhich !== false && photos.length && tasks.length > 1 && !sel) {
       // a poll for the author: only their vote counts; a text answer from them works too
       const id = insert('asked');
       const options = tasks.length <= POLL_TASKS_MAX ? [...tasks.map((t) => (/^№/.test(t) ? t : `№ ${t}`)), ALL] : null;
@@ -362,6 +424,22 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       }
     },
     chats,
+    scenarios,
+    saveScenario(def: HelperScenarioDef): HelperScenarioDef[] {
+      if (!def.name.trim()) throw new Error('Нужно название сценария');
+      const id = def.id || `sc-${Date.now()}`;
+      const rest = storedScenarios().filter((s) => s.id !== id);
+      deps.setSettings({ helperScenarios: JSON.stringify([...rest, { ...def, id, builtIn: undefined }]) });
+      return scenarios();
+    },
+    // own — deleted (its groups fall back to «Решение задач»); built-in — back to the shipped settings
+    removeScenario(id: string): HelperScenarioDef[] {
+      deps.setSettings({ helperScenarios: JSON.stringify(storedScenarios().filter((s) => s.id !== id)) });
+      if (!BUILTIN_HELPER_SCENARIOS.some((b) => b.id === id)) {
+        deps.setSettings({ helperChats: JSON.stringify(chats().map((c) => (c.scenario === id ? { ...c, scenario: 'tasks' } : c))) });
+      }
+      return scenarios();
+    },
     saveChats(list: HelperChat[]) {
       deps.setSettings({ helperChats: JSON.stringify(list) });
       for (const c of list.filter((x) => x.enabled)) void deps.engine.sendAsGroup(c.accountId, c.chatId, c.asGroup !== false).catch(() => {});
@@ -374,7 +452,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return (rows as Row[]).map(toRequest);
     },
     // The sandbox: what the group's pipeline (knowledge, agents or a model, checking) would answer — sent nowhere
-    async preview(chat: HelperChat, text: string): Promise<{ answer: string; ms: number }> {
+    async preview(group: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ answer: string; ms: number }> {
+      const chat = setupOf(group, scenarios(), scenario);
       const started = Date.now();
       const dir = join(deps.dataDir, 'group', 'preview', String(started));
       const answer = await deps.answer(chat, {
@@ -384,7 +463,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return { answer, ms: Date.now() - started };
     },
     // The sandbox: what the group's filters and Jev say about a message, without answering it
-    async test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }> {
+    async test(group: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ score: number; answer: boolean; reason: string }> {
+      const chat = setupOf(group, scenarios(), scenario);
       const filtered = filterReason(chat, text, { replyToOurs: false, mention: false });
       if (filtered && !chat.repliesOnly) return { score: 0, answer: false, reason: filtered };
       const score = chat.jevCheck === false ? 1 : await deps.isRequest(chat, text, '');

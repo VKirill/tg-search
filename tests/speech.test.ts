@@ -28,7 +28,7 @@ const baseSettings = (): Settings => ({
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: 'tts-key',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '', newsInterests: '', operatorProvider: 'glm', glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '', geminiApiKey: '', aiProviders: '[]', aiMainModel: '', aiHelperModels: '[]', aiUseFree: '1', aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5', helperPauseSec: '5',
+  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '', newsInterests: '', operatorProvider: 'glm', glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '', geminiApiKey: '', aiProviders: '[]', aiMainModel: '', aiHelperModels: '[]', aiUseFree: '1', aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5', helperPauseSec: '5', helperScenarios: '[]',
 });
 
 describe('OpenAiSpeech HTTP', () => {

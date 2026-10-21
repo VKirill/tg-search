@@ -17,7 +17,10 @@ function setup(opts: { cap?: string; asGroup?: boolean; scenario?: 'tasks' | 'qu
   const dataDir = mkdtempSync(join(tmpdir(), 'group-helper-'));
   const acc = db.upsertAccountByPhone('+79990001122');
   db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 1, pauseSec: 0 });
-  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'Учебный чат', username: 'study_help_chat', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false, scenario: opts.scenario, about: 'помощь с уроками и вопросы по учёбе', ...opts.extra }]), helperDailyPerUser: opts.cap ?? '5' });
+  // the group follows a test scenario: its kind and behavior come from the options
+  const kind = !opts.scenario || opts.scenario === 'tasks' ? 'tasks' : 'questions';
+  db.setSettings({ helperScenarios: JSON.stringify([{ id: 'test', name: 'Тест', description: '', kind, ...opts.extra }]) });
+  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'Учебный чат', username: 'study_help_chat', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false, scenario: 'test', about: 'помощь с уроками и вопросы по учёбе' }]), helperDailyPerUser: opts.cap ?? '5' });
   const engine = new FakeEngine();
   const page = join(dataDir, 'page.jpg');
   writeFileSync(page, 'x');
@@ -27,7 +30,7 @@ function setup(opts: { cap?: string; asGroup?: boolean; scenario?: 'tasks' | 'qu
     db, engine, dataDir, emit: () => {}, getSettings: () => db.getSettings(), setSettings: (p) => db.setSettings(p),
     isRequest: async (chat, message, picture) => (picture || /реши|задач|найди|\?/i.test(message) ? 0.9 : 0.1),
     describePhoto: async () => ({ caption: 'контрольная по физике, 9 класс', tasks: ['1', '2', '3', '4', '5'] }),
-    answer: async (chat, { task }) => (solved.push(`[${chat.scenario ?? 'tasks'}] ${task}`), `## Решение\n**Ответ: 42**`),
+    answer: async (chat, { task }) => (solved.push(`[${chat.kind}] ${task}`), `## Решение\n**Ответ: 42**`),
   });
   return { db, engine, helper, acc, solved };
 }
@@ -157,8 +160,8 @@ describe('homework helper in a group', () => {
     expect(helper.requests(10).map((r) => [r.status, r.score])).toEqual([['ignored', 0.9]]);
 
     // Jev off: every message with the keyword is answered, with the group's own «taken» phrase
-    const list = JSON.parse(db.getSettings().helperChats);
-    db.setSettings({ helperChats: JSON.stringify([{ ...list[0], jevCheck: false }]) });
+    const [sc] = JSON.parse(db.getSettings().helperScenarios);
+    db.setSettings({ helperScenarios: JSON.stringify([{ ...sc, jevCheck: false }]) });
     await helper.onMessage(acc.id, makeMsg(CHAT, 3, 'помогите, не понимаю тему', { senderUserId: 6 }));
     await tick(10);
     expect(engine.sent.map((m) => m.text)).toEqual(['принято!', '## Решение\n**Ответ: 42**']);
@@ -181,9 +184,39 @@ describe('homework helper in a group', () => {
   it('the sandbox says what filters and Jev think, without answering', async () => {
     const { engine, helper } = setup({ scenario: 'custom', extra: { keywords: ['реши'] } });
     const chat = helper.chats()[0];
+    const sc = helper.scenarios().find((x) => x.id === 'test')!;
     expect(await helper.test(chat, 'привет всем')).toMatchObject({ answer: false, reason: 'нет ключевых слов' });
     expect(await helper.test(chat, 'реши задачу')).toMatchObject({ answer: true, score: 0.9 });
-    expect(await helper.test({ ...chat, threshold: 0.95 }, 'реши задачу')).toMatchObject({ answer: false });
+    expect(await helper.test(chat, 'реши задачу', { ...sc, threshold: 0.95 })).toMatchObject({ answer: false }); // unsaved edits of the scenario
     expect(engine.sent).toEqual([]);
+  });
+
+  it('scenarios: built-in ones change and reset, own ones are created and deleted; old per-group settings move into a scenario', async () => {
+    const db = new Db(':memory:');
+    const acc = db.upsertAccountByPhone('+79990001122');
+    // a group set up before scenarios: behavior on the group itself
+    db.setSettings({ helperChats: JSON.stringify([{ chatId: 1, title: 'Старая', username: null, accountId: acc.id, enabled: true, scenario: 'questions', keywords: ['помогите'] }]) });
+    const helper = createGroupHelper({
+      db, engine: new FakeEngine(), dataDir: mkdtempSync(join(tmpdir(), 'group-helper-')), emit: () => {},
+      getSettings: () => db.getSettings(), setSettings: (p) => db.setSettings(p),
+      isRequest: async () => 1, describePhoto: async () => ({ caption: '', tasks: [] }), answer: async () => 'ok',
+    });
+    expect(helper.chats()[0]).toMatchObject({ scenario: 'group-1' });
+    expect(helper.chats()[0]).not.toHaveProperty('keywords');
+    expect(helper.scenarios().find((s) => s.id === 'group-1')).toMatchObject({ kind: 'questions', keywords: ['помогите'], builtIn: false });
+
+    const names = (list: { id: string; name: string }[]) => list.map((s) => s.id);
+    expect(names(helper.scenarios()).slice(0, 4)).toEqual(['tasks', 'questions', 'knowledge', 'mentions']);
+    helper.saveScenario({ ...helper.scenarios()[0], name: 'Мои задачи', threshold: 0.8 });
+    expect(helper.scenarios()[0]).toMatchObject({ id: 'tasks', name: 'Мои задачи', threshold: 0.8, builtIn: true });
+    helper.removeScenario('tasks');
+    expect(helper.scenarios()[0]).toMatchObject({ name: 'Решение задач' });
+    expect(helper.scenarios()[0].threshold).toBeUndefined();
+
+    const created = helper.saveScenario({ id: '', name: 'Модерация', description: '', kind: 'questions' }).find((s) => s.name === 'Модерация')!;
+    helper.saveChats([{ ...helper.chats()[0], scenario: created.id }]);
+    helper.removeScenario(created.id);
+    expect(helper.scenarios().some((s) => s.id === created.id)).toBe(false);
+    expect(helper.chats()[0].scenario).toBe('tasks'); // its groups fall back to the default
   });
 });

@@ -1,6 +1,7 @@
 import type {
   HelperChat,
   HelperRequest,
+  HelperScenarioDef,
   KnowledgeBase,
   KnowledgeDoc,
   Account,
@@ -45,7 +46,7 @@ import type {
   Source,
   Subscription,
 } from '../../shared/types';
-import { DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../../shared/types';
+import { BUILTIN_HELPER_SCENARIOS, DEFAULT_AUTOPILOT, DEFAULT_MANAGER } from '../../shared/types';
 import { mockWavDataUrl } from './utils/audio';
 
 const isShot = typeof location !== 'undefined' && location.hash.includes('shot=');
@@ -98,7 +99,7 @@ let settings: Settings = {
   aiMainModel: 'zai-coding-plan/glm-5.3-flash',
   aiHelperModels: '["router9/ag/gemini-3.8-flash"]',
   aiUseFree: '1',
-  aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5', helperPauseSec: '5',
+  aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5', helperPauseSec: '5', helperScenarios: '[]',
 };
 
 const accounts: Account[] = [
@@ -542,6 +543,7 @@ const mockKnowledgeDocs: KnowledgeDoc[] = [
   { id: 1, baseId: 1, title: 'Справка Яндекс Директа — ставки и стратегии', source: 'https://yandex.ru/support/direct/', chars: 182000, chunks: 160, embedded: 160, status: 'ready', error: null, createdAt: Date.now() - 86400_000 },
   { id: 2, baseId: 1, title: 'Методичка по семантике', source: '/Users/me/Документы/semantika.md', chars: 210000, chunks: 180, embedded: 120, status: 'indexing', error: null, createdAt: Date.now() - 3600_000 },
 ];
+const mockScenarios: HelperScenarioDef[] = BUILTIN_HELPER_SCENARIOS.map((x) => ({ ...x }));
 const mockHelperChats: HelperChat[] = [{ chatId: -1001234567890, title: 'Помощь с уроками', username: 'study_help_chat', accountId: 1, enabled: true, scenario: 'tasks', about: 'помощь с домашкой для школьников' }];
 const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'], useFree: true };
 function mockAiModels(): AiModelsView {
@@ -2020,9 +2022,25 @@ export function createMockApi(): Api {
       async preview(_chat, text) {
         return { answer: `## Ответ\nНа «${text}» помощник ответил бы так.\n\n**Итог:** пример ответа из демо-данных`, ms: 8400 };
       },
-      async test(chat, text) {
+      async test(_chat, text, scenario) {
+        const threshold = scenario?.threshold ?? 0.5;
         const score = /реши|задач|\?/i.test(text) ? 0.86 : 0.08;
-        return { score, answer: score >= (chat.threshold ?? 0.5), reason: `Jev: ${Math.round(score * 100)}% при пороге ${Math.round((chat.threshold ?? 0.5) * 100)}%` };
+        return { score, answer: score >= threshold, reason: `Jev: ${Math.round(score * 100)}% при пороге ${Math.round(threshold * 100)}%` };
+      },
+      async scenarios() {
+        return mockScenarios;
+      },
+      async saveScenario(def) {
+        const id = def.id || `sc-${Date.now()}`;
+        const i = mockScenarios.findIndex((x) => x.id === id);
+        if (i >= 0) mockScenarios[i] = { ...def, id };
+        else mockScenarios.push({ ...def, id, builtIn: false });
+        return mockScenarios;
+      },
+      async removeScenario(id) {
+        const i = mockScenarios.findIndex((x) => x.id === id);
+        if (i >= 0 && !mockScenarios[i].builtIn) mockScenarios.splice(i, 1);
+        return mockScenarios;
       },
       async requests() {
         return [
