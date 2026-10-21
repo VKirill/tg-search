@@ -25,6 +25,7 @@ import { YooKassaProvider } from './payments/yookassa';
 registerMediaSchemes();
 
 let win: BrowserWindow | null = null;
+const SOCIAL = 'persist:social'; // the session of the channel assistant's browser (Facebook, Instagram logins)
 const isTelegramLink = (url: string) => /^(tg:|https?:\/\/(www\.)?(t|telegram)\.me\/)/i.test(url);
 // Telegram links open inside the app («Чаты»); other sites (payments, my.telegram.org) in the browser
 const openLink = (url: string) => {
@@ -142,6 +143,25 @@ app.whenReady().then(async () => {
     emit,
     openExternal: async (url) => openLink(url),
     payments: new YooKassaProvider(getSettings),
+    // the channel assistant's browser: a separate persistent session where the owner logs in to Facebook / Instagram once
+    openBrowser: async (url) => {
+      const w = new BrowserWindow({ width: 1100, height: 860, title: 'Вход для помощника каналов', webPreferences: { partition: SOCIAL } });
+      await w.loadURL(url);
+    },
+    browse: async (url) => {
+      const w = new BrowserWindow({ show: false, width: 1280, height: 2400, webPreferences: { partition: SOCIAL, offscreen: true } });
+      try {
+        await w.loadURL(url);
+        // feeds load lazily: wait and scroll a few screens down
+        for (let i = 0; i < 4; i++) {
+          await new Promise((r) => setTimeout(r, 2500));
+          await w.webContents.executeJavaScript('window.scrollBy(0, 2000)');
+        }
+        return String(await w.webContents.executeJavaScript('document.body.innerText')).slice(0, 60_000);
+      } finally {
+        w.destroy();
+      }
+    },
     pickFiles: async ({ title, extensions }) => {
       const r = await dialog.showOpenDialog({ title, properties: ['openFile', 'multiSelections'], filters: [{ name: 'Материалы', extensions }] });
       return r.canceled ? [] : r.filePaths;

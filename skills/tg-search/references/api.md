@@ -152,6 +152,27 @@ export interface Api {
     test(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ score: number; answer: boolean; reason: string }>;
     preview(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
   };
+  channels: {
+    desks(): Promise<ChannelDesk[]>;
+    createDesk(accountId: number, link: string): Promise<ChannelDesk>; // the account must be an admin of the channel
+    // a brand-new channel owned by the account, connected at once; `username` — its public link (needed for Telegram Ads)
+    createChannel(accountId: number, opts: { title: string; description: string; username?: string; photo?: string }): Promise<ChannelDesk>;
+    saveDesk(desk: ChannelDesk): Promise<ChannelDesk[]>;
+    removeDesk(id: number): Promise<ChannelDesk[]>;
+    sources(deskId: number): Promise<ChannelSource[]>;
+    saveSource(source: Omit<ChannelSource, 'id' | 'lastRunAt' | 'lastError' | 'found' | 'createdAt'> & { id?: number }): Promise<ChannelSource[]>;
+    removeSource(id: number): Promise<void>;
+    runSource(id: number): Promise<number>; // collect now; new items
+    findTelegram(accountId: number, query: string): Promise<{ title: string; username: string | null; members: number | null }[]>;
+    browserLogin(url: string): Promise<void>; // the app's browser window: log in to Facebook / Instagram once
+    items(deskId: number, limit: number): Promise<ChannelItem[]>;
+    setItemStatus(id: number, status: ChannelItem['status']): Promise<void>;
+    posts(deskId: number, limit: number): Promise<ChannelPost[]>;
+    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[]): Promise<ChannelPost>; // a draft now
+    savePost(id: number, text: string): Promise<ChannelPost>;
+    publish(id: number): Promise<ChannelPost>;
+    rejectPost(id: number): Promise<void>;
+  };
   assistants: {
     status(): Promise<AiAssistantsStatus>;
     install(target: AiAssistant): Promise<string[]>; // the skill, the commands and the MCP server; what was done

@@ -13,6 +13,7 @@ import {
   IconSkills,
   IconNews,
   IconGroups,
+  IconChannel,
   IconSpam,
   IconStats,
   IconSubscriptions,
@@ -24,6 +25,7 @@ export type NavView =
   | 'inbox'
   | 'chats'
   | 'groups'
+  | 'channels'
   | 'leads'
   | 'funnel'
   | 'projects'
@@ -52,6 +54,7 @@ const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React
   { id: 'inbox', label: 'Входящие', Icon: IconInbox },
   { id: 'chats', label: 'Чаты', Icon: IconChats },
   { id: 'groups', label: 'Помощник групп', Icon: IconGroups },
+  { id: 'channels', label: 'Помощник каналов', Icon: IconChannel },
   { id: 'leads', label: 'Лиды', Icon: IconLeads },
   { id: 'funnel', label: 'Воронка', Icon: IconFunnel },
   { id: 'projects', label: 'Тематики', Icon: IconTopics },

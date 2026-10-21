@@ -170,6 +170,16 @@ export function IconGroups(p: IconProps) {
   );
 }
 
+export function IconChannel(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M4 10v4a1 1 0 0 0 1 1h2l5 4V5L7 9H5a1 1 0 0 0-1 1z" />
+      <path d="M16 9a4 4 0 0 1 0 6" />
+      <path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" />
+    </StrokeIcon>
+  );
+}
+
 export function IconNews(p: IconProps) {
   return (
     <StrokeIcon {...p}>

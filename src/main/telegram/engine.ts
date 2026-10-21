@@ -553,6 +553,34 @@ export class TdlEngine implements TelegramEngine {
     await this.invoke(slot, { _: 'leaveChat', chat_id: chatId });
   }
 
+  async createChannel(accountId: number, opts: { title: string; description: string; username?: string; photo?: string }): Promise<TgChat> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const username = opts.username?.trim().replace(/^@/, '');
+    if (username) {
+      // before the channel exists: a taken name must not leave an orphan channel behind
+      const check = await this.invoke(slot, { _: 'checkChatUsername', chat_id: 0, username });
+      const why: Record<string, string> = {
+        checkChatUsernameResultUsernameInvalid: 'ссылка недопустима: 5–32 символа, латиница, цифры и «_»',
+        checkChatUsernameResultUsernameOccupied: 'ссылка уже занята',
+        checkChatUsernameResultUsernamePurchasable: 'ссылка продаётся на Fragment',
+        checkChatUsernameResultPublicChatsTooMany: 'у аккаунта слишком много публичных каналов и групп',
+        checkChatUsernameResultPublicGroupsUnavailable: 'аккаунту недоступны публичные каналы',
+      };
+      if (check._ !== 'checkChatUsernameResultOk') throw new Error(`@${username}: ${why[check._] ?? check._}`);
+    }
+    const chat = await this.invoke(slot, {
+      _: 'createNewSupergroupChat', title: opts.title, is_forum: false, is_channel: true, description: opts.description,
+      message_auto_delete_time: 0, for_import: false,
+    });
+    if (username && chat.type._ === 'chatTypeSupergroup') await this.invoke(slot, { _: 'setSupergroupUsername', supergroup_id: chat.type.supergroup_id, username });
+    if (opts.photo) {
+      await this.invoke(slot, { _: 'setChatPhoto', chat_id: chat.id, photo: { _: 'inputChatPhotoStatic', photo: { _: 'inputFileLocal', path: opts.photo } } });
+    }
+    const mapped = await this.loadTgChat(slot, chat.id);
+    if (!mapped) throw new Error('Канал создан, но не открылся');
+    return mapped;
+  }
+
   async joinChat(accountId: number, chatId: number): Promise<void> {
     const slot = await this.requireAuthorizedSlot(accountId);
     await this.invoke(slot, { _: 'joinChat', chat_id: chatId });

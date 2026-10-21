@@ -42,8 +42,12 @@ export function parseJsonFromLlm(raw: string): unknown {
   let s = raw.trim();
   const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(s);
   if (fence) s = fence[1].trim();
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
+  // an object or an array, whichever opens first: «[{…},{…}]» must not be cut down to «{…},{…}»
+  const obj = s.indexOf('{');
+  const arr = s.indexOf('[');
+  const [open, close] = arr >= 0 && (obj < 0 || arr < obj) ? ['[', ']'] : ['{', '}'];
+  const start = s.indexOf(open);
+  const end = s.lastIndexOf(close);
   if (start >= 0 && end > start) s = s.slice(start, end + 1);
   return JSON.parse(s);
 }

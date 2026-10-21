@@ -83,6 +83,11 @@ describe('parseJsonFromLlm', () => {
     const raw = 'note {"score": 90, "reason": "ok"} trailing';
     expect(parseJsonFromLlm(raw)).toEqual({ score: 90, reason: 'ok' });
   });
+
+  it('keeps an array of objects whole', () => {
+    expect(parseJsonFromLlm('Вот:\n[{"a":1},{"a":2}]\nготово')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(parseJsonFromLlm('{"list":[1,2]}')).toEqual({ list: [1, 2] });
+  });
 });
 
 describe('chatCompletion', () => {

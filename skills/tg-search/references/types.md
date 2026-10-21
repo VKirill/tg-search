@@ -578,6 +578,93 @@ export interface HelperRequest {
   updatedAt: number;
 }
 
+// The channel assistant: a news desk for the owner's Telegram channel. Sources (Telegram channels and groups, RSS, web
+// pages, web search, pages read in the app's browser with the owner's login — Facebook groups, Instagram profiles) are
+// collected non-stop; Jev keeps what fits the channel and tells news from deals and events; at the slots' times an editor
+// writes a post in the channel's language from the best fresh items, with links — published or left for approval.
+export type ChannelSourceKind = 'telegram' | 'rss' | 'web' | 'search' | 'browser';
+export type ChannelItemKind = 'news' | 'deal' | 'event';
+export type ChannelSlotKind = 'digest' | 'deals' | 'top';
+
+export const CHANNEL_SOURCE_KINDS: Record<ChannelSourceKind, { label: string; hint: string; interval: number }> = {
+  telegram: { label: 'Telegram', hint: 'публичный канал или группа: @username или t.me/…', interval: 15 },
+  rss: { label: 'RSS', hint: 'лента новостей сайта: https://…/rss', interval: 30 },
+  web: { label: 'Страница сайта', hint: 'страница с новостями или акциями — модель вытащит из неё материалы', interval: 120 },
+  search: { label: 'Поиск в интернете', hint: 'запрос, например «скидки рестораны <город> сегодня»', interval: 180 },
+  browser: { label: 'Браузер со входом', hint: 'Facebook-группа или профиль Instagram — читается во встроенном браузере с вашим входом', interval: 240 },
+};
+
+export const CHANNEL_SLOT_KINDS: Record<ChannelSlotKind, string> = {
+  digest: 'Дайджест — главные новости',
+  deals: 'Акции, скидки и события',
+  top: 'Одна главная новость подробно',
+};
+
+export interface ChannelSlot {
+  time: string; // «HH:MM», local time
+  kind: ChannelSlotKind;
+}
+
+export interface ChannelDesk {
+  id: number;
+  chatId: number; // the channel posts go to
+  title: string;
+  username: string | null;
+  accountId: number; // the account that posts (an admin of the channel)
+  enabled: boolean;
+  language: string; // the posts' language, e.g. «español»
+  about: string; // what the channel is about and for whom — Jev and the editor read it
+  editorPrompt: string; // the editor's style and rules
+  slots: ChannelSlot[];
+  autopublish: boolean; // off — posts wait for approval as drafts
+  threshold: number; // Jev probability that an item fits, 0–1
+  createdAt: number;
+}
+
+export interface ChannelSource {
+  id: number;
+  deskId: number;
+  kind: ChannelSourceKind;
+  title: string;
+  target: string; // @username / URL / search query
+  enabled: boolean;
+  intervalMin: number;
+  lastRunAt: number | null;
+  lastError: string | null;
+  found: number; // items collected so far
+  createdAt: number;
+}
+
+export interface ChannelItem {
+  id: number;
+  deskId: number;
+  sourceId: number;
+  sourceTitle: string;
+  kind: ChannelItemKind | null; // null — not scored yet
+  title: string;
+  text: string;
+  url: string | null;
+  image: string | null; // a local file or URL
+  publishedAt: number;
+  score: number | null; // Jev: how well it fits the channel
+  status: 'new' | 'used' | 'skipped';
+  createdAt: number;
+}
+
+export interface ChannelPost {
+  id: number;
+  deskId: number;
+  kind: ChannelSlotKind;
+  text: string; // Markdown, becomes a Rich Message
+  image: string | null;
+  itemIds: number[];
+  status: 'draft' | 'published' | 'rejected' | 'failed';
+  error: string | null;
+  messageId: number | null;
+  publishedAt: number | null;
+  createdAt: number;
+}
+
 // AI assistants that set up and run the app: the tg-search skill, the tgs CLI and the tgs-mcp MCP server
 export type AiAssistant = 'claude' | 'codex';
 
@@ -1068,6 +1155,27 @@ export interface Api {
     // the sandbox; `scenario` — unsaved edits of the group's scenario
     test(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ score: number; answer: boolean; reason: string }>;
     preview(chat: HelperChat, text: string, scenario?: HelperScenarioDef): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
+  };
+  channels: {
+    desks(): Promise<ChannelDesk[]>;
+    createDesk(accountId: number, link: string): Promise<ChannelDesk>; // the account must be an admin of the channel
+    // a brand-new channel owned by the account, connected at once; `username` — its public link (needed for Telegram Ads)
+    createChannel(accountId: number, opts: { title: string; description: string; username?: string; photo?: string }): Promise<ChannelDesk>;
+    saveDesk(desk: ChannelDesk): Promise<ChannelDesk[]>;
+    removeDesk(id: number): Promise<ChannelDesk[]>;
+    sources(deskId: number): Promise<ChannelSource[]>;
+    saveSource(source: Omit<ChannelSource, 'id' | 'lastRunAt' | 'lastError' | 'found' | 'createdAt'> & { id?: number }): Promise<ChannelSource[]>;
+    removeSource(id: number): Promise<void>;
+    runSource(id: number): Promise<number>; // collect now; new items
+    findTelegram(accountId: number, query: string): Promise<{ title: string; username: string | null; members: number | null }[]>;
+    browserLogin(url: string): Promise<void>; // the app's browser window: log in to Facebook / Instagram once
+    items(deskId: number, limit: number): Promise<ChannelItem[]>;
+    setItemStatus(id: number, status: ChannelItem['status']): Promise<void>;
+    posts(deskId: number, limit: number): Promise<ChannelPost[]>;
+    compose(deskId: number, kind: ChannelSlotKind, itemIds?: number[]): Promise<ChannelPost>; // a draft now
+    savePost(id: number, text: string): Promise<ChannelPost>;
+    publish(id: number): Promise<ChannelPost>;
+    rejectPost(id: number): Promise<void>;
   };
   assistants: {
     status(): Promise<AiAssistantsStatus>;

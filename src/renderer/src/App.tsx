@@ -19,6 +19,7 @@ import { ApprovalsView } from './components/ApprovalsView';
 import { SpamTemplatesView } from './components/SpamTemplatesView';
 import { NewsView } from './components/NewsView';
 import { GroupsView } from './components/GroupsView';
+import { ChannelsView } from './components/ChannelsView';
 import { ToastProvider, installGlobalErrors, useToast } from './components/Toast';
 import { getApi } from './hooks/useApi';
 import { getShotBootstrap } from './mockApi';
@@ -433,6 +434,7 @@ function AppInner() {
         {view === 'spam' && <SpamTemplatesView />}
         {view === 'news' && <NewsView />}
         {view === 'groups' && <GroupsView />}
+        {view === 'channels' && <ChannelsView />}
         {view === 'funnel' && <FunnelView projectId={projectFilterId} onOpenLead={openLeadFromFunnel} />}
         {view === 'projects' && (
           <ProjectsView

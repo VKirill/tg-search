@@ -55,6 +55,8 @@ import { runSubagentTurn } from './agent/subagent';
 import { createGroupHelper, helperAgent } from './groupHelper';
 import { createKnowledge, knowledgeContext } from './knowledge';
 import { createIntegrations } from './integrations';
+import { createChannels } from './channels';
+import { geminiSearch, tavilySearch } from './agent/web';
 import { createWorkerEmbedder } from './memory/embedder';
 import { RICH_FORMAT } from './agent/style';
 import { FIGURES_GUIDE } from './figures';
@@ -93,6 +95,8 @@ export interface AppDeps {
   payments?: PaymentProvider;
   revealInFolder?: (path: string) => Promise<void>;
   pickFiles?: (opts: { title: string; extensions: string[] }) => Promise<string[]>; // the system file dialog; absent in tests
+  browse?: (url: string) => Promise<string>; // a page's text in the app's browser with the owner's logins (Facebook, Instagram)
+  openBrowser?: (url: string) => Promise<void>; // that browser, visible: to log in once
 }
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void>; relieveMemory(): void };
@@ -427,6 +431,43 @@ export function createApp(deps: AppDeps): AppHandlers {
       return renderFigures(text, { images: photos, dir: join(dir, 'figures') });
     },
   });
+  // the channel assistant: sources collected non-stop, Jev keeps what fits, the editor posts at the slots' times
+  const channels = createChannels({
+    db, engine, dataDir, emit, getSettings,
+    async llm(prompt, { json, role, title }) {
+      const gw = llmGateway();
+      if (!gw) throw new Error('ИИ-движок не запущен');
+      return gw.complete({ role, json, title, messages: [{ role: 'user', text: prompt }] });
+    },
+    async score(about, items) {
+      if (!getSettings().jevApiKey.trim()) return items.map(() => ({ p: 0.7, kind: 'news' as const })); // no Jev: the editor decides
+      const questions: Record<string, object> = {};
+      items.forEach((_, i) => {
+        questions[`fit${i}`] = { type: 'noul', instructions: `Is \`item${i}\` worth posting today in the channel described in \`channel\` — local, timely, useful or interesting for its audience? Old news, ads and opinion pieces are not.` };
+        questions[`kind${i}`] = {
+          type: 'choice', instructions: `What is \`item${i}\`?`,
+          criteria: { news: 'local news', deal: 'a discount, promotion, offer or sale', event: 'an event with a date: concert, fair, exhibition, festival, opening', other: 'none of these, or not relevant' },
+        };
+      });
+      const state: Record<string, string> = { channel: about.slice(0, 800) };
+      items.forEach((it, i) => (state[`item${i}`] = `${it.title}\n${it.text}`.slice(0, 1200)));
+      const data = await postSystemOne(getSettings, { state, questions });
+      return items.map((_, i) => ({
+        p: (data.answers?.[`fit${i}`] as { noul?: number } | undefined)?.noul ?? 0,
+        kind: ((data.answers?.[`kind${i}`] as { choice?: string } | undefined)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
+      }));
+    },
+    async search(query) {
+      const s = getSettings();
+      try {
+        return await tavilySearch(s.tavilyApiKey, query, 8);
+      } catch (err) {
+        if (!s.geminiApiKey.trim()) throw err;
+        return geminiSearch(s.geminiApiKey, query);
+      }
+    },
+    browse: deps.browse,
+  });
   // every app tool an OpenCode agent may call through the bridge (definitions only; calls run with the turn's host)
   const toolCatalog = (): ToolCatalogEntry[] => {
     const host = { ...makeHostForLead(0), turnState: freshTurnState() };
@@ -594,6 +635,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       if (unanswered.length) console.log(`resume: ${unanswered.length} dialog(s) waiting for an answer`);
       void groupHelper.start();
       knowledge.resume();
+      channels.start();
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
@@ -618,6 +660,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       broadcaster.stop();
       realtime.stop();
       groupHelper.stop();
+      channels.stop();
       importer.stop();
       managerAgent.stop();
       autopilot.stop();
@@ -892,6 +935,31 @@ export function createApp(deps: AppDeps): AppHandlers {
       chats: async () => spamChats.list(),
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
+    },
+    channels: {
+      desks: async () => channels.desks(),
+      createDesk: async (accountId, link) => channels.createDesk(accountId, link),
+      createChannel: async (accountId, opts) => channels.createChannel(accountId, opts),
+      saveDesk: async (d) => channels.saveDesk(d),
+      removeDesk: async (id) => channels.removeDesk(id),
+      sources: async (deskId) => channels.sources(deskId),
+      saveSource: async (s) => channels.saveSource(s),
+      removeSource: async (id) => channels.removeSource(id),
+      runSource: async (id) => channels.runSource(id),
+      findTelegram: async (accountId, query) => (await engine.searchPublicChats(accountId, query))
+        .filter((c) => c.kind === 'channel' || c.kind === 'supergroup' || c.kind === 'group')
+        .map((c) => ({ title: c.title, username: c.username ?? null, members: c.memberCount ?? null })),
+      browserLogin: async (url) => {
+        if (!deps.openBrowser) throw new Error('Браузер доступен только в приложении');
+        await deps.openBrowser(url);
+      },
+      items: async (deskId, limit) => channels.items(deskId, limit),
+      setItemStatus: async (id, status) => channels.setItemStatus(id, status),
+      posts: async (deskId, limit) => channels.posts(deskId, limit),
+      compose: async (deskId, kind, itemIds) => channels.compose(deskId, kind, itemIds),
+      savePost: async (id, text) => channels.savePost(id, text),
+      publish: async (id) => channels.publish(id),
+      rejectPost: async (id) => channels.rejectPost(id),
     },
     assistants: {
       status: async () => integrations.status(),
