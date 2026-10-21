@@ -6,6 +6,7 @@ import type { MemoryStore } from '../../memory/types';
 import type { Billing } from '../../billing/types';
 import type { ExecutorRegistry } from '../../executors/types';
 import type { TurnToolState } from './state';
+import type { SkillsStore } from '../../skills';
 
 export interface OrderActions {
   applyManagerIntent(leadId: number, intent: import('../../../shared/types').ManagerOrderIntent): Promise<void>;
@@ -24,6 +25,7 @@ export interface ToolHostDeps extends OutreachDeps {
   orders?: OrderActions;
   handoff?: HandoffActions;
   dataDir?: string;
+  skills?: SkillsStore;
   turnState: TurnToolState;
 }
 

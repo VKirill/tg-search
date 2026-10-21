@@ -40,6 +40,7 @@ import type { BillingApi } from './billing/billing';
 import { createMemoryStore } from './memory/store';
 import { ensureAgentSchema } from './agent/schema';
 import { listAgentSteps } from './agent/store';
+import { createSkillsStore } from './skills';
 
 export interface AppDeps {
   db: Db;
@@ -74,6 +75,12 @@ export function createApp(deps: AppDeps): AppHandlers {
     settings: () => db.getSettings(),
     emit: deps.emit,
   });
+  const skills = createSkillsStore({
+    dataDir,
+    db,
+    getSettings,
+    emit: deps.emit,
+  });
   const crm = createCrm({ db, crmAi, emit: deps.emit });
   const emit = (e: AppEvent) => {
     deps.emit(e);
@@ -92,6 +99,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     if (e.type === 'order:update') {
       dossier.onOrder(e.order);
       memory.onOrder(e.order);
+      void skills.onOrderUpdated(e.order);
     }
   };
   const spinner = deps.spinner ?? passthroughSpinner;
@@ -164,6 +172,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     dataDir,
     getSettings,
     executors: deps.executors ?? stubExecutorRegistry(),
+    skills,
   });
   const operator = managerAgent.getOperator();
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
@@ -493,10 +502,12 @@ export function createApp(deps: AppDeps): AppHandlers {
       saveRules: notYet('agents worker'),
     },
     skills: {
-      list: notYet('skills worker'),
-      save: notYet('skills worker'),
-      remove: notYet('skills worker'),
-      approve: notYet('skills worker'),
+      list: async () => skills.list(),
+      save: async (skill) => skills.save(skill),
+      remove: async (name) => {
+        skills.remove(name);
+      },
+      approve: async (name) => skills.approve(name),
     },
     spam: {
       templates: notYet('dedupe worker'),

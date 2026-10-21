@@ -12,6 +12,7 @@ import type { ManagerTestResult } from '../../shared/types';
 import { createOperator } from '../agent/operator';
 import type { Operator, OperatorResult } from '../agent/types';
 import type { ExecutorRegistry } from '../executors/types';
+import type { SkillsStore } from '../skills';
 
 export interface OrdersHooks {
   handlePostManagerReply(leadId: number, result: ManagerTestResult, lastClientText: string): Promise<void>;
@@ -29,6 +30,7 @@ export interface ManagerAgentDeps extends OutreachDeps {
   dataDir?: string;
   getSettings?: () => import('../../shared/types').Settings;
   executors?: ExecutorRegistry;
+  skills?: SkillsStore;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -156,6 +158,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
               requestPayment: deps.orders.requestPayment!,
             }
           : undefined,
+        skills: deps.skills,
         handoff: {
           doHandoff: async (leadId, reason, summary, bridgeReply) => {
             const l = deps.db.getLead(leadId);

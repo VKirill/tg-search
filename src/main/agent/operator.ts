@@ -11,6 +11,7 @@ import { insertAgentStep } from './store';
 import { ensureAgentSchema } from './schema';
 import { buildAgentTools, freshTurnState, toolsToLlmDefs, type HandoffActions, type OrderActions } from './tools';
 import type { Operator, OperatorResult, OperatorTurnOptions } from './types';
+import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
 const TURN_COST_CAP_USD = 0.15;
@@ -33,6 +34,7 @@ export interface OperatorDeps extends OutreachDeps {
   orders?: OrderActions;
   handoff?: HandoffActions;
   dataDir?: string;
+  skills?: SkillsStore;
   /** Test hook: replace the operator LLM */
   complete?: (
     messages: AgentChatMessage[],
@@ -123,7 +125,11 @@ export function createOperator(deps: OperatorDeps): Operator {
     const catalog = catalogContext(deps.db, lead.id, billingPlansText(deps.billing, clientId));
     const clientCtx = buildClientContext(deps.db, lead, lastIn, deps.memory, card);
 
-    const system = `${persona}\n\n${rules}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+    const skillsBlock = deps.skills?.formatAvailableBlock() ?? '';
+    const skillHint = deps.skills ? await deps.skills.hintForClientMessage(lastIn) : '';
+    const skillsCtx = [skillsBlock, skillHint].filter(Boolean).join('\n\n');
+
+    const system = `${persona}\n\n${rules}\n\n${catalog}\n\n${skillsCtx ? `${skillsCtx}\n\n` : ''}Контекст клиента:\n${clientCtx}`;
 
     const turnState = freshTurnState();
     const toolHost = { ...deps, turnState };
