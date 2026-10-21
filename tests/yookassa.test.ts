@@ -21,7 +21,7 @@ const settings = () => ({
   ttsVoice: '',
   jevPricePerMTok: '0.042',
   sttPricePerMin: '0.006',
-  ttsPricePerMin: '0.015',
+  ttsPricePerMin: '0.015', imagePricePerImage: '0.04',
   requestThreshold: '0.2',
   yookassaShopId: 'shop',
   yookassaSecretKey: 'secret',

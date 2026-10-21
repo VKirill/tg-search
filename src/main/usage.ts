@@ -9,7 +9,7 @@ export interface UsageEvent {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
-  units?: number; // questions for jev, audio seconds for stt/tts
+  units?: number; // questions for jev, audio seconds for stt/tts, images for image
   costUsd?: number; // exact cost when the provider reports it
 }
 
@@ -31,6 +31,7 @@ export function recordUsage(e: UsageEvent) {
     if (e.kind === 'jev') cost = ((e.inputTokens ?? 0) / 1e6) * Number(s.jevPricePerMTok || 0);
     if (e.kind === 'stt') cost = ((e.units ?? 0) / 60) * Number(s.sttPricePerMin || 0);
     if (e.kind === 'tts') cost = ((e.units ?? 0) / 60) * Number(s.ttsPricePerMin || 0);
+    if (e.kind === 'image') cost = (e.units ?? 0) * Number(s.imagePricePerImage || 0);
   }
   try {
     sink({

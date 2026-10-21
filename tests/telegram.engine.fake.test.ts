@@ -56,7 +56,7 @@ vi.mock('tdl', () => ({
 
 const { TdlEngine } = await import('../src/main/telegram/engine');
 
-const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '' });
+const settings = () => ({ tgApiId: '1', tgApiHash: 'x', llmBaseUrl: '', llmApiKey: '', llmModel: '', jevBaseUrl: '', jevApiKey: '', jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '' });
 const dataDir = join(import.meta.dirname, '../tmp/tdlib-fake');
 mkdirSync(dataDir, { recursive: true });
 

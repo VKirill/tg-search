@@ -7,7 +7,7 @@ import { useToast } from './Toast';
 
 const REQ = '#3d8bfd';
 const CHAT = '#d0752e';
-const KIND_LABEL = { jev: 'Jev', llm: 'LLM', stt: 'Распознавание речи', tts: 'Озвучка' } as const;
+const KIND_LABEL = { jev: 'Jev', llm: 'LLM', stt: 'Распознавание речи', tts: 'Озвучка', image: 'Изображения' } as const;
 
 const usd = (v: number) => (v >= 1 ? `$${v.toFixed(2)}` : v >= 0.01 ? `$${v.toFixed(3)}` : `$${v.toFixed(4)}`);
 const num = (v: number) => v.toLocaleString('ru-RU');
@@ -204,7 +204,7 @@ export function StatsView() {
             series={[{ key: 'cost', color: REQ, value: (d) => d.costUsd }]}
             tip={(d) => [
               dayLabel(d.day), `Итого: ${usd(d.costUsd)}`,
-              ...(['jev', 'llm', 'stt', 'tts'] as const).filter((k) => d.costByKind[k] > 0).map((k) => `${KIND_LABEL[k]}: ${usd(d.costByKind[k])}`),
+              ...(['jev', 'llm', 'stt', 'tts', 'image'] as const).filter((k) => d.costByKind[k] > 0).map((k) => `${KIND_LABEL[k]}: ${usd(d.costByKind[k])}`),
             ]}
           />
         </section>
@@ -258,7 +258,7 @@ export function StatsView() {
                 <td>{u.model}</td>
                 <td>{num(u.calls)}</td>
                 <td>{u.inputTokens || u.outputTokens ? `${num(u.inputTokens)} / ${num(u.outputTokens)}` : '—'}</td>
-                <td>{u.kind === 'jev' ? `${num(u.units)} вопросов` : u.kind === 'llm' ? '—' : `${Math.round(u.units / 60)} мин`}</td>
+                <td>{u.kind === 'jev' ? `${num(u.units)} вопросов` : u.kind === 'image' ? `${num(u.units)} изобр.` : u.kind === 'llm' ? '—' : `${Math.round(u.units / 60)} мин`}</td>
                 <td>{usd(u.costUsd)}</td>
               </tr>
             ))}

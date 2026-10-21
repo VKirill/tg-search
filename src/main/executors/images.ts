@@ -1,3 +1,4 @@
+import { recordUsage } from '../usage';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 
@@ -176,5 +177,6 @@ export async function generateImages(
   if (image_urls?.length) body.image_urls = image_urls;
 
   const raw = await falRunImageJob(settings, model, body, workDir, opts.namePrefix);
+  recordUsage({ kind: 'image', model, units: raw.length });
   return raw.map((f) => ({ ...f, role: opts.role }));
 }

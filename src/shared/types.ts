@@ -191,6 +191,7 @@ export interface Settings {
   jevPricePerMTok: string; // USD per 1M input tokens (OpenLux jev-1.14: ~0.042); output is free
   sttPricePerMin: string; // USD per audio minute, estimate for statistics
   ttsPricePerMin: string; // USD per audio minute, estimate for statistics
+  imagePricePerImage: string; // USD per generated image (fal.ai does not return the cost), estimate
   requestThreshold: string; // 0..1: messages below this «is a request» probability skip project qualification
   // Payments (ЮKassa; test shop until the owner connects the working one)
   yookassaShopId: string;
@@ -267,7 +268,7 @@ export interface Category {
   enabled: boolean;
 }
 
-export type UsageKind = 'jev' | 'llm' | 'stt' | 'tts';
+export type UsageKind = 'jev' | 'llm' | 'stt' | 'tts' | 'image';
 
 export interface StatsDay {
   day: string; // YYYY-MM-DD, local
@@ -294,7 +295,7 @@ export interface UsageStat {
   calls: number;
   inputTokens: number;
   outputTokens: number;
-  units: number; // messages for jev, seconds for stt/tts
+  units: number; // questions for jev, seconds for stt/tts, images for image
   costUsd: number;
 }
 

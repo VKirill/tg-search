@@ -48,7 +48,7 @@ let settings: Settings = {
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
+  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
 };
 
 const accounts: Account[] = [
@@ -473,16 +473,16 @@ function mockStats(period: StatsReport['period']): StatsReport {
     const llm = 0.04 + (i % 5) * 0.03;
     return {
       day: d.toISOString().slice(0, 10), analyzed, requests, chatter: analyzed - requests, leads: Math.round(requests * 0.18),
-      sent: 3 + (i % 4), costUsd: jev + llm + 0.02, costByKind: { jev, llm, stt: 0.012, tts: 0.008 },
+      sent: 3 + (i % 4), costUsd: jev + llm + 0.02, costByKind: { jev, llm, stt: 0.012, tts: 0.008, image: 0.08 },
     };
   });
   const totals = days.reduce(
     (t, d) => ({
       analyzed: t.analyzed + d.analyzed, requests: t.requests + d.requests, chatter: t.chatter + d.chatter,
       leads: t.leads + d.leads, sent: t.sent + d.sent, costUsd: t.costUsd + d.costUsd,
-      costByKind: { jev: t.costByKind.jev + d.costByKind.jev, llm: t.costByKind.llm + d.costByKind.llm, stt: t.costByKind.stt + d.costByKind.stt, tts: t.costByKind.tts + d.costByKind.tts },
+      costByKind: { jev: t.costByKind.jev + d.costByKind.jev, llm: t.costByKind.llm + d.costByKind.llm, stt: t.costByKind.stt + d.costByKind.stt, tts: t.costByKind.tts + d.costByKind.tts, image: t.costByKind.image + d.costByKind.image },
     }),
-    { analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0 } },
+    { analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0, image: 0 } },
   );
   const share = [0.34, 0.22, 0.14, 0.12, 0.1, 0.08];
   const examples: Record<number, string[]> = {

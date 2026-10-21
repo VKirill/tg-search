@@ -5,7 +5,7 @@ import type { Db } from '../db';
 import { todayLocal } from './limiter';
 
 const PERIOD_DAYS = { day: 1, week: 7, month: 30 } as const;
-const KINDS: UsageKind[] = ['jev', 'llm', 'stt', 'tts'];
+const KINDS: UsageKind[] = ['jev', 'llm', 'stt', 'tts', 'image'];
 
 export function buildReport(db: Db, period: StatsReport['period'], now = Date.now()): StatsReport {
   const n = PERIOD_DAYS[period];
@@ -21,7 +21,7 @@ export function buildReport(db: Db, period: StatsReport['period'], now = Date.no
   const rows = db.statsRows(days[0], days[n - 1], threshold, start.getTime(), now);
 
   const byDay = new Map<string, StatsDay>(
-    days.map((day) => [day, { day, analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0 } }]),
+    days.map((day) => [day, { day, analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0, image: 0 } }]),
   );
   for (const r of rows.analyzed) {
     const d = byDay.get(r.day);
@@ -48,7 +48,7 @@ export function buildReport(db: Db, period: StatsReport['period'], now = Date.no
       for (const k of KINDS) t.costByKind[k] += d.costByKind[k];
       return t;
     },
-    { analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0 } as Record<UsageKind, number> },
+    { analyzed: 0, requests: 0, chatter: 0, leads: 0, sent: 0, costUsd: 0, costByKind: { jev: 0, llm: 0, stt: 0, tts: 0, image: 0 } as Record<UsageKind, number> },
   );
 
   const names = new Map(db.listCategories().map((c) => [c.id, c.name]));

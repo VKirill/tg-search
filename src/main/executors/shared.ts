@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { chatJsonCompletion } from '../ai/llm';
+import { recordUsage } from '../usage';
 import type { LlmOverride } from '../ai/llm';
 import type { DialogTurn } from '../ai/types';
 import type { OrderFile, Service, Settings } from '../../shared/types';
@@ -121,7 +122,14 @@ export async function visionChat(
         err.status = res.status;
         throw err;
       }
-      const data = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+      const data = (await res.json()) as {
+        choices?: { message?: { content?: string | null } }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+      };
+      recordUsage({
+        kind: 'llm', model: settings.llmModel, inputTokens: data.usage?.prompt_tokens,
+        outputTokens: data.usage?.completion_tokens, costUsd: data.usage?.cost ?? 0,
+      });
       const content = data.choices?.[0]?.message?.content;
       if (content == null || content === '') throw new Error('Ошибка LLM: пустой ответ');
       return content;

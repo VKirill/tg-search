@@ -15,6 +15,7 @@ import type { AppEvent } from '../shared/types';
 import { startControlServer, pushControlEvent } from './control';
 import { OpenAiSpeech } from './ai/speech';
 import { JevCategorizer } from './ai/categorizer';
+import { createExecutors } from './executors/registry';
 import { setUsageSink } from './usage';
 import { registerMediaProtocol, registerMediaSchemes } from './media';
 import { YooKassaProvider } from './payments/yookassa';
@@ -95,6 +96,7 @@ app.whenReady().then(async () => {
     spinner,
     speech,
     categorizer: new JevCategorizer(getSettings),
+    executors: createExecutors(getSettings),
     dataDir,
     emit,
     openExternal: (url) => shell.openExternal(url),
