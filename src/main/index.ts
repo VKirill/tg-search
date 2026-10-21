@@ -102,6 +102,7 @@ app.whenReady().then(async () => {
     categorizer: new JevCategorizer(getSettings),
     executors: createExecutors(getSettings),
     dataDir,
+    appDir: app.getAppPath(),
     emit,
     openExternal: (url) => shell.openExternal(url),
     payments: new YooKassaProvider(getSettings),

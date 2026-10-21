@@ -1,4 +1,5 @@
 // Application service: implements the IPC Api over db, Telegram engine and AI.
+import { join } from 'node:path';
 
 import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
@@ -57,6 +58,7 @@ export interface AppDeps {
   categorizer?: Categorizer; // demand map (Jev); absent in tests
   speech: SpeechService;
   dataDir: string;
+  appDir?: string; // project root with shipped agents/ and skills/; the bundle in out/ cannot locate them itself
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
   executors?: ExecutorRegistry;
@@ -82,6 +84,7 @@ export function createApp(deps: AppDeps): AppHandlers {
   });
   const skills = createSkillsStore({
     dataDir,
+    builtinDir: deps.appDir && join(deps.appDir, 'skills/agent'),
     db,
     getSettings,
     emit: deps.emit,
@@ -136,7 +139,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     },
   };
   // The dossier gets order changes from the 'order:update' route above; passing it here too would log them twice
-  const agentDefs = createAgentDefs(dataDir);
+  const agentDefs = deps.appDir ? createAgentDefs(dataDir, join(deps.appDir, 'agents')) : createAgentDefs(dataDir);
   const approvalsHolder: { api?: ReturnType<typeof createApprovals> } = {};
 
   const ordersDeps = {
@@ -295,6 +298,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         categorizeLeads({ db, emit }, deps.categorizer).catch((err) => console.error('categorize leads', err));
       }
       pruneFingerprints(db);
+      dedupe.learnExistingLeads();
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       realtime.start();
       autopilot.start();

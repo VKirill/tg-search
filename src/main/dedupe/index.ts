@@ -4,6 +4,7 @@ import type { TgMessage } from '../telegram/types';
 import {
   fingerprintText,
   isNearDuplicate,
+  isSameTemplate,
   simhashFromDb,
   simhashToDb,
   type TextFingerprint,
@@ -25,6 +26,7 @@ export type DedupeVerdict =
 export interface Dedupe {
   check(projectId: number, messages: TgMessage[]): DedupeVerdict[];
   learn(projectId: number, messages: TgMessage[]): void;
+  learnExistingLeads(): void; // leads found before dedupe existed join the clusters once
   messagesForQualify(projectId: number, messages: TgMessage[]): TgMessage[];
   markSpam(leadId: number): Lead;
   setTemplateStatus(id: number, status: SpamTemplate['status']): SpamTemplate;
@@ -49,6 +51,7 @@ type TemplateRow = {
   source: string;
   created_at: number;
   last_seen_at: number;
+  cluster_id: string | null;
 };
 
 function toTemplate(r: TemplateRow): SpamTemplate {
@@ -88,13 +91,11 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
   }
 
   function matchesTemplate(fp: TextFingerprint, row: TemplateRow): boolean {
-    const tpl: TextFingerprint = {
-      normalized: fingerprintText(row.sample).normalized,
-      exactHash: row.exact_hash,
-      simhash: simhashFromDb(row.simhash),
-      len: fingerprintText(row.sample).len,
-    };
-    return isNearDuplicate(fp, tpl);
+    if (isSameTemplate(fp, templateFp(row))) return true;
+    if (!row.cluster_id) return false;
+    const variants = db.raw.prepare('SELECT sample FROM message_fingerprints WHERE cluster_id = ? ORDER BY id DESC LIMIT 50')
+      .all(row.cluster_id) as { sample: string }[];
+    return variants.some((v) => isSameTemplate(fp, fingerprintText(v.sample)));
   }
 
   function findClusterId(fp: TextFingerprint, sinceMs: number): string {
@@ -103,22 +104,16 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
        WHERE created_at >= ? ORDER BY id DESC LIMIT 5000`,
     ).all(sinceMs) as FpRow[];
     for (const row of recent) {
-      const other: TextFingerprint = {
-        normalized: fingerprintText(row.sample).normalized,
-        exactHash: row.exact_hash,
-        simhash: simhashFromDb(row.simhash),
-        len: fingerprintText(row.sample).len,
-      };
-      if (isNearDuplicate(fp, other)) return row.cluster_id;
+      if (isSameTemplate(fp, fingerprintText(row.sample))) return row.cluster_id;
     }
     return fp.exactHash;
   }
 
-  function findRepeatLead(projectId: number, senderUserId: number, fp: TextFingerprint): Lead | undefined {
+  function findRepeatLead(projectId: number, senderUserId: number, fp: TextFingerprint, beforeId = Number.MAX_SAFE_INTEGER): Lead | undefined {
     const since = Date.now() - REPEAT_WINDOW_MS;
     const rows = db.raw.prepare(
-      `SELECT * FROM leads WHERE project_id = ? AND author_user_id = ? AND date >= ? ORDER BY date DESC`,
-    ).all(projectId, senderUserId, since) as Record<string, unknown>[];
+      `SELECT * FROM leads WHERE project_id = ? AND author_user_id = ? AND date >= ? AND id < ? ORDER BY date DESC`,
+    ).all(projectId, senderUserId, since, beforeId) as Record<string, unknown>[];
     for (const r of rows) {
       const leadFp = fingerprintText(String(r.text));
       if (isNearDuplicate(fp, leadFp)) return db.getLead(r.id as number);
@@ -131,30 +126,34 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
     return db.getLead(leadId);
   }
 
-  function hideLeadsForTemplate(templateId: number, fp: TextFingerprint) {
+  function hideLeadsForTemplate(templateId: number) {
+    const row = db.raw.prepare('SELECT * FROM spam_templates WHERE id = ?').get(templateId) as TemplateRow;
     const leads = db.raw.prepare('SELECT id, text FROM leads WHERE status != ?').all('hidden') as { id: number; text: string }[];
     const stmt = db.raw.prepare('UPDATE leads SET status = ?, spam_template_id = ? WHERE id = ?');
     for (const l of leads) {
-      if (isNearDuplicate(fp, fingerprintText(l.text))) {
+      if (matchesTemplate(fingerprintText(l.text), row)) {
         stmt.run('hidden', templateId, l.id);
         emit({ type: 'lead:update', lead: db.getLead(l.id) });
       }
     }
   }
 
-  function upsertTemplate(fp: TextFingerprint, sample: string, source: SpamTemplate['source'], status: SpamTemplate['status']): TemplateRow {
-    const existing = findMatchingTemplate(fp);
+  function upsertTemplate(
+    fp: TextFingerprint, sample: string, source: SpamTemplate['source'], status: SpamTemplate['status'], clusterId: string,
+  ): TemplateRow {
+    const existing = db.raw.prepare('SELECT * FROM spam_templates WHERE cluster_id = ?').get(clusterId) as TemplateRow | undefined
+      ?? findMatchingTemplate(fp);
     const now = Date.now();
     if (existing) {
       db.raw.prepare(
-        'UPDATE spam_templates SET messages = messages + 1, last_seen_at = ?, sample = ?, status = ?, source = ? WHERE id = ?',
-      ).run(now, sample, status, source, existing.id);
+        'UPDATE spam_templates SET messages = messages + 1, last_seen_at = ?, sample = ?, status = ?, source = ?, cluster_id = ? WHERE id = ?',
+      ).run(now, sample, status, source, existing.cluster_id ?? clusterId, existing.id);
       return db.raw.prepare('SELECT * FROM spam_templates WHERE id = ?').get(existing.id) as TemplateRow;
     }
     const res = db.raw.prepare(
-      `INSERT INTO spam_templates(sample, exact_hash, simhash, authors, messages, status, source, created_at, last_seen_at)
-       VALUES(?, ?, ?, 0, 1, ?, ?, ?, ?)`,
-    ).run(sample, fp.exactHash, simhashToDb(fp.simhash), status, source, now, now);
+      `INSERT INTO spam_templates(sample, exact_hash, simhash, authors, messages, status, source, created_at, last_seen_at, cluster_id)
+       VALUES(?, ?, ?, 0, 1, ?, ?, ?, ?, ?)`,
+    ).run(sample, fp.exactHash, simhashToDb(fp.simhash), status, source, now, now, clusterId);
     return db.raw.prepare('SELECT * FROM spam_templates WHERE id = ?').get(Number(res.lastInsertRowid)) as TemplateRow;
   }
 
@@ -175,9 +174,11 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
        WHERE cluster_id = ? AND last_seen_at >= ? AND sender_user_id IS NOT NULL`,
     ).get(clusterId, since) as { n: number };
     if (row.n < MIN_SPAM_AUTHORS) return;
-    const tpl = upsertTemplate(fp, sample, 'auto', 'spam');
+    const known = db.raw.prepare('SELECT status FROM spam_templates WHERE cluster_id = ?').get(clusterId) as { status: string } | undefined;
+    if (known?.status === 'allowed') return;
+    const tpl = upsertTemplate(fp, sample, 'auto', 'spam', clusterId);
     refreshTemplateAuthors(tpl.id, clusterId);
-    hideLeadsForTemplate(tpl.id, fp);
+    hideLeadsForTemplate(tpl.id);
   }
 
   function indexMessage(m: TgMessage) {
@@ -228,6 +229,31 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
       for (const m of messages) indexMessage(m);
     },
 
+    learnExistingLeads() {
+      // a re-post by the same author that nobody answered folds into the first lead, as it would have live
+      const fresh = db.raw.prepare("SELECT id FROM leads WHERE status = 'new' AND author_user_id IS NOT NULL ORDER BY id").all() as { id: number }[];
+      for (const { id } of fresh) {
+        const l = db.getLead(id);
+        if (l.status !== 'new') continue;
+        const first = findRepeatLead(l.projectId, l.authorUserId!, fingerprintText(l.text), l.id);
+        if (!first) continue;
+        emit({ type: 'lead:update', lead: bumpRepeat(first.id, Math.max(first.date, l.date)) });
+        emit({ type: 'lead:update', lead: db.setLeadStatus(l.id, 'hidden') });
+      }
+      const leads = db.raw.prepare(
+        `SELECT * FROM leads l WHERE NOT EXISTS (SELECT 1 FROM message_fingerprints f
+           WHERE f.tg_chat_id = l.tg_chat_id AND f.tg_message_id = l.tg_message_id) ORDER BY id`,
+      ).all() as Record<string, unknown>[];
+      for (const r of leads) {
+        const l = db.getLead(r.id as number);
+        indexMessage({
+          chatId: l.tgChatId, messageId: l.tgMessageId, date: l.date, text: l.text, senderUserId: l.authorUserId,
+          senderChatId: null, senderName: l.authorName, senderUsername: l.authorUsername, senderIsBot: false, voice: null,
+          photo: null, document: null, replyToMessageId: null, link: l.link, isOutgoing: false,
+        });
+      }
+    },
+
     messagesForQualify(projectId: number, messages: TgMessage[]): TgMessage[] {
       const verdicts = this.check(projectId, messages);
       return messages.filter((_, i) => verdicts[i].verdict === 'new');
@@ -236,10 +262,10 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
     markSpam(leadId: number): Lead {
       const lead = db.getLead(leadId);
       const fp = fingerprintText(lead.text);
-      const tpl = upsertTemplate(fp, lead.text, 'owner', 'spam');
       const clusterId = findClusterId(fp, Date.now() - FP_LOOKBACK_MS);
+      const tpl = upsertTemplate(fp, lead.text, 'owner', 'spam', clusterId);
       refreshTemplateAuthors(tpl.id, clusterId);
-      hideLeadsForTemplate(tpl.id, fp);
+      hideLeadsForTemplate(tpl.id);
       db.raw.prepare('UPDATE leads SET status = ?, spam_template_id = ? WHERE id = ?').run('hidden', tpl.id, leadId);
       const updated = db.getLead(leadId);
       emit({ type: 'lead:update', lead: updated });
@@ -257,8 +283,7 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
           emit({ type: 'lead:update', lead: db.getLead(l.id) });
         }
       } else if (status === 'spam') {
-        const fp = templateFp(row);
-        hideLeadsForTemplate(id, fp);
+        hideLeadsForTemplate(id);
       }
       return toTemplate(db.raw.prepare('SELECT * FROM spam_templates WHERE id = ?').get(id) as TemplateRow);
     },

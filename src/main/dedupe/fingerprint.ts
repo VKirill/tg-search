@@ -3,19 +3,29 @@ import { normalizeMessageText } from './normalize';
 
 export const MIN_NEAR_LEN = 20;
 export const MAX_HAMMING = 3;
+// Spun templates («помочь с парой / сделать несколько карточек, оплата по результату / сдельная») share words, not
+// word order: measured on live spam, variants overlap 0.22–0.39 by word stems, real requests ≤ 0.11 against them.
+export const TEMPLATE_JACCARD = 0.3;
+export const MIN_TEMPLATE_STEMS = 8; // short texts overlap by chance
 
 export interface TextFingerprint {
   normalized: string;
   exactHash: string;
   simhash: bigint;
   len: number;
+  stems: string[]; // unique word stems (first 5 letters of words longer than 2)
 }
 
 export function fingerprintText(raw: string): TextFingerprint {
   const { text: normalized } = normalizeMessageText(raw);
   const exactHash = createHash('sha256').update(normalized).digest('hex');
   const simhash = computeSimhash(normalized);
-  return { normalized, exactHash, simhash, len: normalized.length };
+  return { normalized, exactHash, simhash, len: normalized.length, stems: stemsOf(normalized) };
+}
+
+function stemsOf(normalized: string): string[] {
+  const words = normalized.toLowerCase().match(/\p{L}+/gu) ?? [];
+  return [...new Set(words.filter((w) => w.length > 2).map((w) => w.slice(0, 5)))];
 }
 
 function computeSimhash(normalized: string): bigint {
@@ -68,6 +78,15 @@ export function isNearDuplicate(a: TextFingerprint, b: TextFingerprint): boolean
   const short = a.len < MIN_NEAR_LEN || b.len < MIN_NEAR_LEN;
   if (short) return a.exactHash === b.exactHash;
   return hammingDistance(a.simhash, b.simhash) <= MAX_HAMMING;
+}
+
+// Same spam template: a near-duplicate, or a spun variant with the same vocabulary
+export function isSameTemplate(a: TextFingerprint, b: TextFingerprint): boolean {
+  if (isNearDuplicate(a, b)) return true;
+  if (a.stems.length < MIN_TEMPLATE_STEMS || b.stems.length < MIN_TEMPLATE_STEMS) return false;
+  const bs = new Set(b.stems);
+  const common = a.stems.filter((s) => bs.has(s)).length;
+  return common / (a.stems.length + b.stems.length - common) >= TEMPLATE_JACCARD;
 }
 
 export function simhashToDb(n: bigint): string {

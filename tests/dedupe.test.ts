@@ -80,6 +80,55 @@ describe('normalize + fingerprint', () => {
 });
 
 describe('dedupe pipeline', () => {
+  // Live campaign of 2026-10-21: one template spun across a dozen fresh accounts and chats
+  const SPUN = [
+    'Всем привет! Нужно помочь с парой карточек. Оплата по результату. Пишите в личку — объясню все подробности 😊',
+    'Здравствуйте, ребята! Нужно помочь с парой карточек. Оплата по результату. Пишите в личку — расскажу, что нужно',
+    'Всем привет! Нужно сделать несколько карточек. Оплата за выполненную работу. Пишите в личку — расскажу, что нужно',
+    'Всем добрый день! Нужно сделать пару карточек. Оплата по результату. Пишите в личку — дам дополнительную информацию',
+    'Здравствуйте, ребята! Нужно сделать несколько карточек. Оплата сдельная. Пишите в личку — дам дополнительную информацию',
+  ];
+  const REAL = [
+    'Нужен дизайнер карточек товаров. Инфографика, фото, нейросети.',
+    'Привет! Ищу дизайнера для разработки карточек в нише текстиля для Wildberries, нужен опыт и портфолио',
+    'Требуется СЕОшник по карточкам вайлдберрис, нужно поднять в топ, напишите в личку с кейсами',
+  ];
+
+  it('spun variants from different authors become one spam template; real requests stay', async () => {
+    const { db, dedupe, project, source, ai } = setup();
+    const pipeline = { db, engine: {} as never, ai, emit: () => {}, dedupe };
+    const all = [...SPUN.map((t, i) => makeMsg(100, i + 1, t, { senderUserId: 2000 + i })),
+      ...REAL.map((t, i) => makeMsg(100, 50 + i, t, { senderUserId: 3000 + i }))];
+    for (const m of all) await qualifyAndAddLeads(pipeline, project, source.id, [m]);
+    const leads = db.listLeads(project.id, { status: 'all' });
+    const spamLeads = leads.filter((l) => l.status === 'hidden').map((l) => l.text);
+    expect(spamLeads.sort()).toEqual(leads.filter((l) => SPUN.includes(l.text)).map((l) => l.text).sort());
+    expect(leads.filter((l) => REAL.includes(l.text)).every((l) => l.status !== 'hidden')).toBe(true);
+    expect(dedupe.listTemplates()).toHaveLength(1);
+  });
+
+  it('leads found before dedupe are clustered once on start', () => {
+    const { db, dedupe, project, source } = setup();
+    SPUN.forEach((text, i) => db.addLead({
+      projectId: project.id, sourceId: source.id, tgChatId: 100, tgMessageId: i + 1, authorUserId: 2000 + i,
+      authorName: 'A', authorUsername: null, text, date: Date.now(), link: null, score: 90, label: 'demand', reason: '',
+    }));
+    dedupe.learnExistingLeads();
+    expect(db.listLeads(project.id, { status: 'all' }).every((l) => l.status === 'hidden')).toBe(true);
+  });
+
+  it('old re-posts by one author fold into the first lead on start', () => {
+    const { db, dedupe, project, source } = setup();
+    const text = 'Привет! Ищу творческого человека, который умеет делать инфографику для карточек Wildberries';
+    [1, 2, 3].forEach((id) => db.addLead({
+      projectId: project.id, sourceId: source.id, tgChatId: 100, tgMessageId: id, authorUserId: 77,
+      authorName: 'A', authorUsername: null, text, date: Date.now() + id, link: null, score: 90, label: 'demand', reason: '',
+    }));
+    dedupe.learnExistingLeads();
+    const leads = db.listLeads(project.id, { status: 'all' });
+    expect(leads.filter((l) => l.status !== 'hidden').map((l) => [l.tgMessageId, l.repeatCount])).toEqual([[1, 2]]);
+  });
+
   it('same author ×10 → one lead with repeat_count 9', async () => {
     const { db, dedupe, project, source, ai } = setup();
     const pipeline = { db, engine: {} as never, ai, emit: () => {}, dedupe };

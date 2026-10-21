@@ -42,4 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_spam_tpl_hash ON spam_templates(exact_hash);
 
 export function ensureDedupeSchema(raw: DatabaseSync): void {
   raw.exec(DEDUPE_DDL);
+  const cols = (raw.prepare('PRAGMA table_info(spam_templates)').all() as { name: string }[]).map((c) => c.name);
+  // the cluster of a template: a message matching any of its variants is spam, not only one matching the sample
+  if (!cols.includes('cluster_id')) raw.exec('ALTER TABLE spam_templates ADD COLUMN cluster_id TEXT');
 }
