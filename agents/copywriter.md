@@ -2,6 +2,7 @@
 description: Тексты, посты и контент-планы для соцсетей и рекламы
 mode: subagent
 model: fast
+needs: writing, russian
 temperature: 0.5
 steps: 10
 permission:

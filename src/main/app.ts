@@ -339,6 +339,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       models: (aiEngine?.catalog() ?? []).map((m) => ({
         ref: `${m.providerID}/${m.id}`, providerID: m.providerID, name: m.name, vision: m.vision, tools: m.tools,
         variants: m.variants, costIn: m.costIn, costOut: m.costOut, context: m.context, free: isFreeModel(m),
+        ...(aiEngine?.profileView(`${m.providerID}/${m.id}`) ?? { summary: null, strengths: [] }),
       })),
       main: choice.main,
       helpers: choice.helpers,

@@ -1,6 +1,7 @@
 // Which OpenCode model does what. The owner picks the main chat model and ticks helper models in Settings; the app
 // routes each job by what it needs (tools, vision) and how hard it is, and sets the reasoning level (variant).
 import type { ModelRef } from './session';
+import { fitScore, type ModelProfile, type Skill } from './profiles';
 
 export type ModelRole = 'chat' | 'fast' | 'vision' | 'smart';
 
@@ -32,9 +33,9 @@ const EFFORT: Record<ModelRole, string[]> = {
   smart: ['high', 'xhigh', 'thinking', 'medium'],
 };
 
-// OpenRouter's free models («…:free» and its free router) cost nothing; zero-priced meta routers (auto, fusion…) do
-export const isFreeModel = (m: { providerID: string; id: string }) =>
-  m.providerID === 'openrouter' && (m.id.endsWith(':free') || m.id === 'openrouter/free');
+// OpenRouter's free models («…:free») cost nothing. Its routers (free, auto, fusion…) are not models: they pick one we
+// can't see or control, so they are never used.
+export const isFreeModel = (m: { providerID: string; id: string }) => m.providerID === 'openrouter' && m.id.endsWith(':free');
 
 // Parameters in billions from the id («nemotron-3-ultra-550b-a55b» → 550, «gemma-4-31b-it» → 31); unknown → 0
 export function sizeB(id: string): number {
@@ -46,21 +47,33 @@ const UNFIT_FREE = /safety|guard|lyria|embed/i;
 const QUICK = /flash|lightning|small|mini|nano|lite/i;
 const THINKS = ['high', 'xhigh', 'max', 'thinking'];
 
-// Free models for a role, best first. Unknown size counts as a big hosted model; the free router goes last.
-function rankFree(free: CatalogModel[], role: ModelRole): CatalogModel[] {
+// What a job needs when its agent says nothing
+export const ROLE_NEEDS: Record<ModelRole, Skill[]> = {
+  chat: ['russian', 'agentic'],
+  fast: ['speed', 'russian'],
+  vision: ['vision'],
+  smart: ['reasoning'],
+};
+
+// Free models for a job, best first: by the profile from the model's description (how well it covers the job's needs);
+// a model without a profile yet is placed by its name — size, reasoning levels, «flash»-like speed.
+function rankFree(free: CatalogModel[], role: ModelRole, needs: Skill[], profile: (ref: string) => ModelProfile | undefined): CatalogModel[] {
   const size = (m: CatalogModel) => sizeB(m.id) || 100;
-  const usable = free.filter((m) => !UNFIT_FREE.test(m.id) && m.id !== 'openrouter/free' && size(m) >= 8);
-  const router = free.filter((m) => m.id === 'openrouter/free');
-  let ranked: CatalogModel[];
-  if (role === 'smart') {
-    ranked = usable.filter((m) => size(m) >= 25 && m.variants.some((v) => THINKS.includes(v)))
-      .sort((a, b) => Number(QUICK.test(a.id)) - Number(QUICK.test(b.id)) || size(b) - size(a)); // speed-tuned ones last
-  } else if (role === 'fast') {
-    ranked = [...usable].sort((a, b) => Number(QUICK.test(b.id)) - Number(QUICK.test(a.id)) || size(a) - size(b));
-  } else {
-    ranked = [...usable].sort((a, b) => size(b) - size(a));
-  }
-  return [...ranked, ...(role === 'smart' ? [] : router)];
+  const now = Date.now();
+  const usable = free.filter((m) => {
+    const p = profile(refString(m));
+    if (UNFIT_FREE.test(m.id) || size(m) < 8 || (p?.expiresAt && p.expiresAt < now)) return false;
+    if (!p) return role !== 'smart' || (size(m) >= 25 && m.variants.some((v) => THINKS.includes(v)));
+    if (needs.some((n) => p.skills[n] === 0)) return false; // can't do a part of the job
+    return role !== 'smart' || (p.skills.reasoning ?? 0) >= 2;
+  });
+  let byName: CatalogModel[];
+  if (role === 'smart') byName = [...usable].sort((a, b) => Number(QUICK.test(a.id)) - Number(QUICK.test(b.id)) || size(b) - size(a));
+  else if (role === 'fast') byName = [...usable].sort((a, b) => Number(QUICK.test(b.id)) - Number(QUICK.test(a.id)) || size(a) - size(b));
+  else byName = [...usable].sort((a, b) => size(b) - size(a));
+  const neutral = needs.length * 1.5; // an unprofiled model counts as average
+  const fit = (m: CatalogModel) => fitScore(profile(refString(m)), needs) ?? neutral;
+  return byName.map((m, i) => ({ m, i, f: fit(m) })).sort((a, b) => b.f - a.f || a.i - b.i).map((x) => x.m);
 }
 
 function variantFor(m: CatalogModel, role: ModelRole): string | undefined {
@@ -70,6 +83,8 @@ function variantFor(m: CatalogModel, role: ModelRole): string | undefined {
 export interface RouteOptions {
   useFree?: boolean; // OpenRouter's free models go first for helper jobs
   cooling?: (ref: string) => boolean; // failed recently (rate limit, error): tried last
+  needs?: Skill[]; // what the job needs (the agent's `needs`); the role's default otherwise
+  profile?: (ref: string) => ModelProfile | undefined; // what a model is good at, from its description
 }
 
 // Every model that can do the job, in the order to try them. Client chat stays on the main model (the owner's
@@ -94,7 +109,7 @@ export function rankModels(
   const cooling = opts.cooling ?? (() => false);
   // a few free models that are not resting, so a paid one is always within the attempts
   const free = opts.useFree && role !== 'chat'
-    ? rankFree(catalog.filter((m) => fit(m) && isFreeModel(m)), role).filter((m) => !cooling(refString(m))).slice(0, role === 'smart' ? 2 : 3)
+    ? rankFree(catalog.filter((m) => fit(m) && isFreeModel(m)), role, opts.needs?.length ? opts.needs : ROLE_NEEDS[role], opts.profile ?? (() => undefined)).filter((m) => !cooling(refString(m))).slice(0, role === 'smart' ? 2 : 3)
     : [];
   const order = [...new Set([...free, ...paid])];
   const ready = [...order.filter((m) => !cooling(refString(m))), ...order.filter((m) => cooling(refString(m)))];

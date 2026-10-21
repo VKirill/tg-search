@@ -536,7 +536,7 @@ const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9
 function mockAiModels(): AiModelsView {
   const m = (ref: string, name: string, vision: boolean, costIn: number, costOut: number, variants: string[] = []): AiModel => ({
     ref, providerID: ref.split('/')[0], name, vision, tools: true, variants, costIn, costOut, context: 200_000,
-    free: ref.endsWith(':free'),
+    free: ref.endsWith(':free'), summary: null, strengths: [],
   });
   return {
     models: [
@@ -991,6 +991,7 @@ const builtinAgentDefaults: AgentDef[] = [
     model: '',
     temperature: 0.4,
     steps: 8,
+    needs: [],
     permission: { '*': 'allow', request_payment: 'ask' },
     prompt:
       'Ты — помощник Кирилла. Собираешь заявку, продаёшь услуги из каталога, предлагаешь подписку. ' +
@@ -1004,6 +1005,7 @@ const builtinAgentDefaults: AgentDef[] = [
     model: 'deepseek',
     temperature: 0.2,
     steps: 12,
+    needs: ['research', 'russian'],
     permission: { web_search: 'allow', fetch_url: 'allow', '*': 'deny' },
     prompt: 'Ты — исследователь. Ищи в сети, читай страницы, отвечай со ссылками на источники.',
     builtIn: true,

@@ -2,6 +2,7 @@
 description: Решение школьных и студенческих заданий по условию
 mode: subagent
 model: smart
+needs: reasoning
 temperature: 0.2
 steps: 8
 permission:

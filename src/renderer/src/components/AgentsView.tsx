@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentDef, ToolPermission } from '../../../shared/types';
+import { MODEL_SKILLS, type AgentDef, type ToolPermission } from '../../../shared/types';
 import {
   KNOWN_AGENT_TOOLS,
   TOOL_PERMISSIONS,
@@ -11,10 +11,12 @@ import { useToast } from './Toast';
 
 type SheetTab = 'agent' | 'rules';
 
+// The model is a role; the router fills it from the models chosen in Settings → ИИ-движок
 const MODEL_PRESETS = [
-  { value: '', label: 'По умолчанию' },
-  { value: 'glm', label: 'GLM' },
-  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'main', label: 'Основная — общение' },
+  { value: 'fast', label: 'Быстрая — простые задачи' },
+  { value: 'vision', label: 'Со зрением — картинки' },
+  { value: 'smart', label: 'Умная — сложные задачи' },
 ] as const;
 
 function emptyAgent(): AgentDef {
@@ -25,6 +27,7 @@ function emptyAgent(): AgentDef {
     model: '',
     temperature: 0.4,
     steps: 8,
+    needs: [],
     permission: { '*': 'allow' },
     prompt: '',
     builtIn: false,
@@ -279,6 +282,21 @@ export function AgentsView() {
                     <div className="field">
                       <label>Шагов за ход</label>
                       <input type="number" min={1} max={32} value={editing.steps} onChange={(e) => patch({ steps: Number(e.target.value) })} />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Что нужно от модели — по этому выбирается бесплатная модель OpenRouter</label>
+                    <div className="needs-row">
+                      {Object.entries(MODEL_SKILLS).map(([k, label]) => (
+                        <label key={k} className={`chip-check${editing.needs.includes(k) ? ' chip-check--on' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={editing.needs.includes(k)}
+                            onChange={(e) => patch({ needs: e.target.checked ? [...editing.needs, k] : editing.needs.filter((n) => n !== k) })}
+                          />
+                          {label}
+                        </label>
+                      ))}
                     </div>
                   </div>
                   <div className="field">

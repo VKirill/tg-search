@@ -172,8 +172,9 @@ export function AiEngineSection() {
             <span>
               <b>★ Бесплатные модели OpenRouter — первыми, без отметок</b>
               <span className="field-hint">
-                {freeCount} {plural(freeCount, 'модель', 'модели', 'моделей')}. Для поручений и вспомогательной работы сначала пробуются они: для сложных задач — крупные
-                с рассуждением, для простых — быстрые. Упёрлась в лимит или ошиблась — задачу берёт следующая модель, а сбойная отдыхает. Переписку с клиентом
+                {freeCount} {plural(freeCount, 'модель', 'модели', 'моделей')}. Для поручений и вспомогательной работы сначала пробуются они: приложение раз в сутки читает
+                описания моделей на OpenRouter и отдаёт задачу той, чьи сильные стороны совпадают с нуждами агента (решателю — логика, копирайтеру — тексты).
+                 Упёрлась в лимит или ошиблась — задачу берёт следующая модель, а сбойная отдыхает. Переписку с клиентом
                 ведёт основная модель. Бесплатные модели могут сохранять запросы у себя — не включайте, если переписка конфиденциальна.
               </span>
             </span>
@@ -209,7 +210,10 @@ export function AiEngineSection() {
                               disabled={isMain || auto}
                               onChange={(e) => view && setChoice(view.main, e.target.checked ? [...view.helpers, m.ref] : view.helpers.filter((h) => h !== m.ref))}
                             />
-                            <span className="ai-models__name">{shortName(m, g.name)}</span>
+                            <span className="ai-models__title">
+                              <span className="ai-models__name">{shortName(m, g.name)}</span>
+                              {m.summary && <span className="ai-models__summary">{m.summary}</span>}
+                            </span>
                             {isMain && <span className="tag tag--category">основная</span>}
                             {auto && <span className="tag tag--free" title="Используется автоматически">★ авто</span>}
                             <ModelBadges m={m} />
@@ -271,6 +275,7 @@ export function AiEngineSection() {
 function ModelBadges({ m }: { m: AiModel }) {
   return (
     <span className="ai-badges">
+      {m.strengths.map((s) => <span key={s} className="tag tag--category" title="Сильная сторона по описанию модели">{s}</span>)}
       {m.vision && <span className="tag" title="Видит картинки">зрение</span>}
       {m.variants.length > 0 && <span className="tag" title={`Уровни рассуждения: ${m.variants.join(', ')}`}>рассуждение ×{m.variants.length}</span>}
       {!m.tools && <span className="tag tag--warn">без инструментов</span>}

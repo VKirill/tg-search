@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isFreeModel, rankModels, sizeB, type CatalogModel } from '../src/main/opencode/models';
+import { createProfiles, fitScore, type ModelProfile } from '../src/main/opencode/profiles';
+import { Db } from '../src/main/db';
 
 const m = (providerID: string, id: string, o: Partial<CatalogModel> = {}): CatalogModel => ({
   providerID, id, name: id, vision: false, tools: true, variants: [], costIn: 0, costOut: 0, context: 200_000, enabled: true, ...o,
@@ -22,8 +24,9 @@ const refs = (list: { providerID: string; id: string }[]) => list.map((x) => `${
 
 describe('model routing', () => {
   it('knows free models and model sizes', () => {
-    expect(catalog.filter(isFreeModel).map((x) => x.id)).toHaveLength(6);
+    expect(catalog.filter(isFreeModel).map((x) => x.id)).toHaveLength(5);
     expect(isFreeModel(m('openrouter', 'openrouter/auto'))).toBe(false);
+    expect(isFreeModel(m('openrouter', 'openrouter/free'))).toBe(false); // a router to unknown models, not a model
     expect(sizeB('nvidia/nemotron-3-ultra-550b-a55b:free')).toBe(550);
     expect(sizeB('liquid/lfm-2.5-2.6b:free')).toBe(2.6);
     expect(sizeB('minimax/minimax-m3.1-flash:free')).toBe(0);
@@ -47,7 +50,7 @@ describe('model routing', () => {
       'openrouter/nvidia/nemotron-3.5-lightning:free', 'openrouter/google/gemma-4-31b-it:free',
     ]);
     const vision = refs(rankModels(catalog, choice, 'vision', { tools: true }, { useFree: true }));
-    expect(vision).toEqual(['openrouter/google/gemma-4-31b-it:free', 'openrouter/openrouter/free', 'router9/gemini-3.8-flash', 'openlux-claude/claude-sonnet-5-5']);
+    expect(vision).toEqual(['openrouter/google/gemma-4-31b-it:free', 'router9/gemini-3.8-flash', 'openlux-claude/claude-sonnet-5-5']);
   });
 
   it('client chat stays on the main model; free models off means the ticked ones only', () => {
@@ -65,5 +68,41 @@ describe('model routing', () => {
       'zai-coding-plan/glm-5.3-flash',
       'openlux-claude/claude-sonnet-5-5',
     ]);
+  });
+
+  it('with profiles from the descriptions, the job goes to the model whose strengths match the agent\'s needs', () => {
+    const profiles: Record<string, ModelProfile> = {
+      'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free': { skills: { reasoning: 3, writing: 1, russian: 1 }, summary: 'математика', expiresAt: null },
+      'openrouter/google/gemma-4-31b-it:free': { skills: { reasoning: 2, writing: 3, russian: 3, vision: 2 }, summary: 'тексты', expiresAt: null },
+      'openrouter/nvidia/nemotron-3.5-lightning:free': { skills: { reasoning: 1, writing: 2, russian: 0, speed: 3 }, summary: 'быстрая', expiresAt: null },
+    };
+    const profile = (ref: string) => profiles[ref];
+    const top = (needs: any[], role: 'smart' | 'fast' = 'fast') =>
+      refs(rankModels(catalog, choice, role, { tools: true }, { useFree: true, needs, profile }))[0];
+    expect(top(['writing', 'russian'])).toBe('openrouter/google/gemma-4-31b-it:free'); // copywriter
+    expect(top(['reasoning'], 'smart')).toBe('openrouter/nvidia/nemotron-3-ultra-550b-a55b:free'); // solver
+    // no Russian at all: never gets a Russian job, even being the fastest
+    expect(refs(rankModels(catalog, choice, 'fast', {}, { useFree: true, profile }))).not.toContain('openrouter/nvidia/nemotron-3.5-lightning:free');
+    // a retired free model is skipped
+    profiles['openrouter/google/gemma-4-31b-it:free'].expiresAt = Date.now() - 1000;
+    expect(top(['writing', 'russian'])).not.toBe('openrouter/google/gemma-4-31b-it:free');
+  });
+
+  it('profiles: only new or changed descriptions are scored, scores are clamped, no image input means no vision', async () => {
+    const db = new Db(':memory:');
+    const profiles = createProfiles(db);
+    const meta = { id: 'x/model:free', name: 'X', description: 'Great at math', input: ['text'], params: ['tools'], context: 1000, expiresAt: null };
+    const prompts: string[] = [];
+    const ask = async (p: string) => {
+      prompts.push(p);
+      return '```json\n{"x/model:free": {"skills": {"reasoning": 7, "vision": 3, "writing": 1}, "summary": "Математика и логика"}}\n```';
+    };
+    expect(await profiles.refresh([meta], ask)).toBe(1);
+    expect(profiles.get('openrouter/x/model:free')).toEqual({ skills: { reasoning: 3, vision: 0, writing: 1 }, summary: 'Математика и логика', expiresAt: null });
+    expect(await profiles.refresh([meta], ask)).toBe(0);
+    expect(prompts).toHaveLength(1);
+    expect(await profiles.refresh([{ ...meta, description: 'Now also writes' }], ask)).toBe(1);
+    expect(createProfiles(db).get('openrouter/x/model:free')?.summary).toBe('Математика и логика'); // survives a restart
+    expect(fitScore(profiles.get('openrouter/x/model:free'), ['reasoning', 'russian'])).toBe(4); // unknown skill counts as 1
   });
 });

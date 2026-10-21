@@ -33,8 +33,9 @@ export function toolPermissionLabel(p: ToolPermission): string {
 }
 
 export function agentModelLabel(model: string): string {
-  if (!model) return 'По умолчанию';
-  if (model === 'glm') return 'GLM';
-  if (model === 'deepseek') return 'DeepSeek';
+  if (!model || model === 'main' || model === 'glm') return 'Основная';
+  if (model === 'fast') return 'Быстрая';
+  if (model === 'vision' || model === 'gemini') return 'Со зрением';
+  if (model === 'smart' || model === 'deepseek') return 'Умная';
   return model;
 }

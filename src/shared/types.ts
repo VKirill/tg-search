@@ -346,6 +346,18 @@ export interface Service {
 // subagents perform delegated work. Files: userData/agents/<name>.md (front matter + system prompt body).
 export type ToolPermission = 'allow' | 'ask' | 'deny'; // ask: the owner approves in «Согласования» before it runs
 
+// Skills the model router matches: an agent's `needs` against what a model's description says it is good at
+export const MODEL_SKILLS = {
+  reasoning: 'логика и математика',
+  code: 'код',
+  writing: 'тексты',
+  russian: 'русский язык',
+  vision: 'картинки',
+  agentic: 'инструменты',
+  research: 'длинные документы и факты',
+  speed: 'скорость',
+} as const;
+
 export interface AgentDef {
   name: string; // file name without .md
   description: string; // what it does and when to use it (the router and the primary agent read this)
@@ -353,6 +365,7 @@ export interface AgentDef {
   model: string; // 'glm' | 'deepseek' | '<provider>/<model>' | '' (= operator provider switch)
   temperature: number | null;
   steps: number; // max tool iterations per turn; at the limit the agent summarizes what is left
+  needs: string[]; // what a model must be good at for this agent's jobs (reasoning, writing, russian, vision…) — the router matches them
   permission: Record<string, ToolPermission>; // tool name or glob ('*', 'order_*') → permission; last match wins
   prompt: string; // the body: role, how to talk, what to do and never do
   builtIn: boolean; // shipped default (editable; «Сбросить» restores it)
@@ -403,6 +416,8 @@ export interface AiModel {
   costOut: number;
   context: number;
   free: boolean; // OpenRouter's free model
+  summary: string | null; // what the model is best at, from its OpenRouter description
+  strengths: string[]; // its strongest skills, in Russian
 }
 
 export interface AiProvider {

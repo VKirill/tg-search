@@ -2,6 +2,7 @@
 description: Яндекс Директ — семантика с группами и минус-словами, объявления для ЕПК, выгрузка в Excel
 mode: subagent
 model: smart
+needs: writing, russian, reasoning
 temperature: 0.3
 steps: 10
 permission:

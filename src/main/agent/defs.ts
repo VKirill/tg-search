@@ -165,6 +165,7 @@ export function parseAgentFile(name: string, raw: string, builtIn: boolean): Age
     model: String(meta.model ?? ''),
     temperature: temp === null || temp === undefined ? null : Number(temp),
     steps: Math.max(1, Number(meta.steps ?? 8)),
+    needs: (Array.isArray(meta.needs) ? meta.needs.map(String) : String(meta.needs ?? '').split(',')).map((x) => x.trim()).filter(Boolean),
     permission,
     prompt: body,
     builtIn,
@@ -179,6 +180,7 @@ function serializeAgentFile(def: AgentDef): string {
     `model: ${def.model}`,
     `temperature: ${def.temperature ?? ''}`,
     `steps: ${def.steps}`,
+    ...(def.needs?.length ? [`needs: ${def.needs.join(', ')}`] : []),
     'permission:',
   ];
   for (const [k, v] of Object.entries(def.permission)) {

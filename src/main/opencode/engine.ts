@@ -13,7 +13,8 @@ import { recordUsage } from '../usage';
 import { createBridge, type SessionBinding, type ToolCatalogEntry } from './bridge';
 import { TOOL_PREFIX, writeOpencodeConfig, type AgentConfig, type ProviderConfig } from './config';
 import { importFromUserOpencode, mergeProviders, providersFromSettings } from './importProviders';
-import { pickModel, rankModels, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
+import { isFreeModel, pickModel, rankModels, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
+import { createProfiles, fetchOpenRouterMeta, SKILL_LABELS, SKILLS, type Skill } from './profiles';
 import { createOpencodeRuntime } from './runtime';
 import { createOpencodeServer, type OpencodeStatus } from './server';
 import { createSessions, ONESHOT_AGENT, type ModelRef, type TurnResult } from './session';
@@ -63,6 +64,7 @@ export function createAiEngine(deps: {
     onStatus: (s) => deps.emit({ type: 'ai:status', status: s }),
   });
   const sessions = createSessions(server, bridge);
+  const profiles = createProfiles(deps.db);
 
   function providers(): ProviderConfig[] {
     try {
@@ -148,7 +150,10 @@ export function createAiEngine(deps: {
   }
 
   const cooling = new Map<string, number>(); // model ref → resting until
-  const routeOpts = () => ({ useFree: choice().useFree, cooling: (ref: string) => (cooling.get(ref) ?? 0) > Date.now() });
+  const routeOpts = (needs?: Skill[]) => ({
+    useFree: choice().useFree, needs, profile: profiles.get,
+    cooling: (ref: string) => (cooling.get(ref) ?? 0) > Date.now(),
+  });
   const refOf = (m: ModelRef) => `${m.providerID}/${m.id}`;
   function failed(m: ModelRef, error: string) {
     cooling.set(refOf(m), Date.now() + cooldownMs(error));
@@ -160,8 +165,8 @@ export function createAiEngine(deps: {
   }
 
   // the models to try for a job, best first; at least the one pickModel would give (or its error)
-  function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }): ModelRef[] {
-    const list = rankModels(catalog, choice(), role, need, routeOpts()).slice(0, MAX_ATTEMPTS);
+  function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[]): ModelRef[] {
+    const list = rankModels(catalog, choice(), role, need, routeOpts(needs)).slice(0, MAX_ATTEMPTS);
     return list.length ? list : [model(role, need)];
   }
 
@@ -198,7 +203,7 @@ export function createAiEngine(deps: {
     requireText?: boolean; // the turn's text is the result (subagents): an empty one counts as a failure
     canRetry?: () => boolean;
   }): Promise<TurnResult & { model: string }> {
-    const models = candidates(opts.role, { tools: true, vision: !!opts.files?.length });
+    const models = candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName));
     const row = opts.key
       ? deps.db.raw.prepare('SELECT session_id, synced_message_id FROM opencode_sessions WHERE key = ?').get(opts.key) as { session_id: string; synced_message_id: number } | undefined
       : undefined;
@@ -232,6 +237,33 @@ export function createAiEngine(deps: {
     }
   }
 
+  function agentNeeds(name: string): Skill[] | undefined {
+    try {
+      return deps.agents().get(name).needs.filter((n): n is Skill => (SKILLS as string[]).includes(n));
+    } catch {
+      return undefined;
+    }
+  }
+
+  // What the free (and ticked OpenRouter) models are good at, from OpenRouter's descriptions; only new or changed ones
+  // are scored, by the main model
+  async function refreshProfiles(): Promise<number> {
+    if (!providers().some((p) => p.id === 'openrouter')) return 0;
+    const wanted = new Set(catalog.filter((m) => m.providerID === 'openrouter' && (isFreeModel(m) || choice().helpers.includes(refString(m)))).map((m) => m.id));
+    const metas = (await fetchOpenRouterMeta()).filter((m) => wanted.has(m.id));
+    const n = await profiles.refresh(metas, (prompt) => gateway.complete({ role: 'chat', messages: [{ role: 'user', text: prompt }], json: true, title: 'model-profiles' }));
+    if (n) console.log(`model profiles: ${n} updated`);
+    return n;
+  }
+
+  // For Settings: the model's one-line summary and its strongest skills
+  function profileView(ref: string): { summary: string | null; strengths: string[] } {
+    const p = profiles.get(ref);
+    if (!p) return { summary: null, strengths: [] };
+    const top = SKILLS.filter((k) => (p.skills[k] ?? 0) >= 3);
+    return { summary: p.summary || null, strengths: (top.length ? top : SKILLS.filter((k) => (p.skills[k] ?? 0) >= 2)).map((k) => SKILL_LABELS[k]) };
+  }
+
   let updateTimer: ReturnType<typeof setInterval> | null = null;
 
   return {
@@ -241,6 +273,8 @@ export function createAiEngine(deps: {
     model,
     agentTurn,
     bridge,
+    profileView,
+    refreshProfiles,
 
     async start() {
       setLlmGateway(gateway);
@@ -248,6 +282,7 @@ export function createAiEngine(deps: {
       writeConfig();
       await server.start();
       await refreshCatalog();
+      void refreshProfiles().catch((e) => console.error('model profiles', e)); // in the background: the engine works without them
       updateTimer = setInterval(() => void this.update().catch((e) => console.error('opencode update', e)), UPDATE_CHECK_MS);
       updateTimer.unref?.();
       setTimeout(() => void this.update().catch((e) => console.error('opencode update', e)), 5 * 60_000).unref?.();
@@ -263,6 +298,7 @@ export function createAiEngine(deps: {
     async update(): Promise<string> {
       const msg = await server.update();
       await refreshCatalog();
+      await refreshProfiles().catch((e) => console.error('model profiles', e));
       return msg;
     },
 
