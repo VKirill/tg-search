@@ -48,7 +48,20 @@ let settings: Settings = {
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
+  ttsVoice: 'nova',
+  jevPricePerMTok: '0.042',
+  sttPricePerMin: '0.006',
+  ttsPricePerMin: '0.015',
+  imagePricePerImage: '0.04',
+  requestThreshold: '0.2',
+  yookassaShopId: '123456',
+  yookassaSecretKey: '',
+  yookassaReturnUrl: 'https://t.me/kirill_work',
+  auxBaseUrl: 'https://9router.example/v1',
+  auxApiKey: '',
+  auxModel: 'ag/gemini-3.8-flash',
+  falKey: '',
+  imageModel: 'fal-ai/nano-banana-2/edit',
 };
 
 const accounts: Account[] = [
@@ -517,12 +530,94 @@ const mockServices: Service[] = [
   { id: 4, kind: 'copywriting', name: 'Тексты и контент-план', categoryId: 6, enabled: true, priceMin: 300, priceMax: 3000, instructions: 'Посты и контент-план без брифа: допущения называем явно.', model: '', previewEnabled: true, revisions: 2 },
 ];
 
-const mockOrders: Order[] = [];
+const MOCK_IMG = {
+  input: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFElEQVR42mP8z8BQzwAE/AUIhC6e3QAAAABJRU5ErkJggg==',
+  output: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAF0lEQVR42mNkYGD4z0AEYBxVSF+FABJSAQ8bAW0AAAAASUVORK5CYII=',
+};
+
+const mockOrders: Order[] = [
+  {
+    id: 101, leadId: 1, serviceId: 2, status: 'collecting', price: null,
+    brief: 'Карточка кроссовок, референс — Nike Air, 5 слайдов инфографики.',
+    files: [{ path: MOCK_IMG.input, role: 'input', name: 'ref.jpg', mime: 'image/png' }],
+    paymentId: null, paymentUrl: null, paidAt: null, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 5 * 3600_000, updatedAt: now - 3600_000,
+  },
+  {
+    id: 102, leadId: 1, serviceId: 1, status: 'quoted', price: 800,
+    brief: 'Физика 9 класс, 4 задачи по фото.',
+    files: [], paymentId: null, paymentUrl: null, paidAt: null, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 2 * 86400_000, updatedAt: now - 86400_000,
+  },
+  {
+    id: 103, leadId: 1, serviceId: 3, status: 'awaiting_payment', price: 1500,
+    brief: 'Нейрофото для аватара канала, стиль «деловой портрет».',
+    files: [{ path: MOCK_IMG.preview, role: 'preview', name: 'preview.png', mime: 'image/png' }],
+    paymentId: 'pay-demo-1', paymentUrl: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=demo-wb-103',
+    paidAt: null, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 3 * 86400_000, updatedAt: now - 12 * 3600_000,
+  },
+  {
+    id: 104, leadId: 1, serviceId: 4, status: 'paid', price: 600,
+    brief: 'Контент-план на неделю для Telegram-канала про разработку.',
+    files: [], paymentId: 'pay-demo-2', paymentUrl: null, paidAt: now - 6 * 3600_000, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 4 * 86400_000, updatedAt: now - 5 * 3600_000,
+  },
+  {
+    id: 105, leadId: 1, serviceId: 2, status: 'in_progress', price: 2200,
+    brief: 'Карточка термоса для Ozon, 3 SKU.',
+    files: [{ path: MOCK_IMG.input, role: 'input', name: 'product.jpg', mime: 'image/png' }],
+    paymentId: null, paymentUrl: null, paidAt: now - 2 * 86400_000, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 5 * 86400_000, updatedAt: now - 2 * 3600_000,
+  },
+  {
+    id: 106, leadId: 2, serviceId: 2, status: 'delivered', price: 1800,
+    brief: 'WB: чехол для iPhone, SEO и инфографика.',
+    files: [
+      { path: MOCK_IMG.output, role: 'output', name: 'card-final.png', mime: 'image/png' },
+      { path: MOCK_IMG.preview, role: 'preview', name: 'preview.png', mime: 'image/png' },
+    ],
+    paymentId: null, paymentUrl: null, paidAt: now - 3 * 86400_000,
+    result: 'Готово: 5 слайдов инфографики + описание и характеристики в файле.',
+    revisionsUsed: 0, error: null,
+    createdAt: now - 7 * 86400_000, updatedAt: now - 86400_000,
+  },
+  {
+    id: 107, leadId: 2, serviceId: 3, status: 'revision', price: 900,
+    brief: 'Нейрофото, клиент просит другой фон.',
+    files: [{ path: MOCK_IMG.output, role: 'output', name: 'v1.png', mime: 'image/png' }],
+    paymentId: null, paymentUrl: null, paidAt: now - 5 * 86400_000, result: 'Первая версия портрета.', revisionsUsed: 1, error: null,
+    createdAt: now - 6 * 86400_000, updatedAt: now - 4 * 3600_000,
+  },
+  {
+    id: 108, leadId: 2, serviceId: 1, status: 'done', price: 500,
+    brief: 'Математика, контрольная.',
+    files: [], paymentId: null, paymentUrl: null, paidAt: now - 10 * 86400_000,
+    result: 'Решение с пояснениями отправлено в PDF.', revisionsUsed: 0, error: null,
+    createdAt: now - 12 * 86400_000, updatedAt: now - 9 * 86400_000,
+  },
+  {
+    id: 109, leadId: 2, serviceId: 4, status: 'cancelled', price: null,
+    brief: 'Клиент передумал.',
+    files: [], paymentId: null, paymentUrl: null, paidAt: null, result: null, revisionsUsed: 0, error: null,
+    createdAt: now - 8 * 86400_000, updatedAt: now - 7 * 86400_000,
+  },
+  {
+    id: 110, leadId: 2, serviceId: 2, status: 'failed', price: 1200,
+    brief: 'Сложный макет, fal.ai недоступен.',
+    files: [], paymentId: null, paymentUrl: null, paidAt: now - 86400_000, result: null, revisionsUsed: 0,
+    error: 'Генерация изображения не удалась после 3 попыток. Передано владельцу.',
+    createdAt: now - 2 * 86400_000, updatedAt: now - 20 * 3600_000,
+  },
+];
 
 function mockOrderPatch(id: number, patch: Partial<Order>): Order {
   const o = mockOrders.find((x) => x.id === id)!;
   Object.assign(o, patch, { updatedAt: Date.now() });
-  return { ...o };
+  const copy = { ...o, files: [...o.files] };
+  emit({ type: 'order:update', order: copy });
+  return copy;
 }
 
 const mockChats: ChatSummary[] = [
@@ -985,8 +1080,23 @@ export function createMockApi(): Api {
         const lower = leadText.toLowerCase();
         const handoff = lower.includes('готов оплатить') || lower.includes('давайте созвонимся') || lower.includes('созвон');
         const p = projects.find((x) => x.id === projectId);
-        const mgr = settingsOverride ?? p?.manager;
         const owner = settings.ownerName;
+        if (lower.includes('карточк') && (lower.includes('wb') || lower.includes('wildberries') || lower.includes('вб'))) {
+          return {
+            reply:
+              'Сделаем карточку для Wildberries: уточню категорию, конкурентов и сколько слайдов инфографики нужно. Могу набросать превью обложки — это бесплатно.',
+            handoff: false,
+            reason: '',
+            order: {
+              serviceId: 2,
+              brief: 'Карточка товара для WB: клиент прислал ссылку на конкурента, нужны SEO-название, описание и 3–5 слайдов инфографики.',
+              agreedPrice: 1200,
+              wantsPreview: true,
+              readyToPay: false,
+              photoConsent: false,
+            },
+          };
+        }
         if (handoff) {
           return { reply: `Спасибо! Передаю заявку ${owner}, он свяжется с вами лично.`, handoff: true, reason: 'Клиент готов к следующему шагу' };
         }
@@ -1071,7 +1181,9 @@ export function createMockApi(): Api {
           paidAt: null, result: null, revisionsUsed: 0, error: null, createdAt: Date.now(), updatedAt: Date.now(),
         };
         mockOrders.unshift(o);
-        return { ...o };
+        const copy = { ...o, files: [] };
+        emit({ type: 'order:update', order: copy });
+        return copy;
       },
       async update(id, patch) {
         return mockOrderPatch(id, patch);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { Account, ManagerSettings, Project, ProjectInput, ProjectTask, SequenceStep, Source } from '../../../shared/types';
+import type { Account, ManagerOrderIntent, ManagerSettings, Project, ProjectInput, ProjectTask, SequenceStep, Service, Source } from '../../../shared/types';
 import { DEFAULT_MANAGER } from '../../../shared/types';
-import { foundByLabel, sourceStatusLabel, taskLabel } from '../utils/format';
+import { formatPriceRange, foundByLabel, serviceKindLabel, sourceStatusLabel, taskLabel } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { AutopilotDialog } from './AutopilotDialog';
 import { useToast } from './Toast';
@@ -31,9 +31,10 @@ type Props = {
   accounts: Account[];
   onClose: () => void;
   onSaved: () => void;
+  onOpenServices?: () => void;
 };
 
-export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Props) {
+export function ProjectEditorSheet({ project, accounts, onClose, onSaved, onOpenServices }: Props) {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('search');
   const [p, setP] = useState<ProjectInput & { id?: number }>(() => emptyProject());
@@ -43,6 +44,8 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
   const [sandboxIn, setSandboxIn] = useState('');
   const [sandboxHist, setSandboxHist] = useState<{ direction: 'in' | 'out'; text: string }[]>([]);
   const [sandboxOut, setSandboxOut] = useState('');
+  const [sandboxOrder, setSandboxOrder] = useState<ManagerOrderIntent | null | undefined>(undefined);
+  const [catalog, setCatalog] = useState<Service[]>([]);
   const [showAutopilot, setShowAutopilot] = useState(false);
   const [liveProject, setLiveProject] = useState<Project | null>(project);
 
@@ -78,7 +81,14 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
     });
     setLiveProject(project);
     getApi().sources.list(project.id).then(setSources).catch(() => {});
+    getApi().services.list().then((list) => setCatalog(list.filter((s) => s.enabled))).catch(() => {});
   }, [project]);
+
+  useEffect(() => {
+    if (tab === 'manager') {
+      getApi().services.list().then((list) => setCatalog(list.filter((s) => s.enabled))).catch(() => {});
+    }
+  }, [tab]);
 
   const save = async () => {
     const { id, ...input } = p;
@@ -114,6 +124,7 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
       const r = await getApi().manager.test(pid, sandboxIn, sandboxHist, p.manager);
       setSandboxHist([...sandboxHist, { direction: 'in', text: sandboxIn }, { direction: 'out', text: r.reply }]);
       setSandboxOut(r.handoff ? `${r.reply} [передача: ${r.reason}]` : r.reply);
+      setSandboxOrder(r.order ?? null);
       setSandboxIn('');
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
@@ -184,6 +195,28 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
                 ИИ-менеджер включён
               </label>
               {p.manager.enabled && <p className="crm-warn">Менеджер будет отвечать клиентам от вашего имени. Проверьте промпт и лимиты.</p>}
+              <div className="manager-catalog">
+                <div className="manager-catalog__head">
+                  <h3>Услуги в продаже</h3>
+                  {onOpenServices && (
+                    <button type="button" className="btn btn--sm btn--ghost" onClick={() => { onClose(); onOpenServices(); }}>
+                      Исполнители →
+                    </button>
+                  )}
+                </div>
+                {catalog.length === 0 ? (
+                  <p className="crm-muted">Нет включённых услуг — настройте каталог в разделе «Исполнители».</p>
+                ) : (
+                  <ul className="manager-catalog__list">
+                    {catalog.map((s) => (
+                      <li key={s.id}>
+                        <span className="manager-catalog__name">{s.name}</span>
+                        <span className="crm-muted">{serviceKindLabel(s.kind)} · {formatPriceRange(s.priceMin, s.priceMax)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <ManagerFields mgr={p.manager} onChange={(m) => patch({ manager: m })} />
               <div className="sandbox">
                 <h3>Песочница</h3>
@@ -192,6 +225,24 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved }: Prop
                     <div key={i} className={`bubble bubble--${h.direction === 'in' ? 'in' : 'out'}`}>{h.text}</div>
                   ))}
                   {sandboxOut && <div className="sandbox__last">{sandboxOut}</div>}
+                  {sandboxOrder !== undefined && sandboxOrder != null && (
+                    <div className="sandbox-order">
+                      <div className="sandbox-order__title">Намерение по заказу</div>
+                      <dl className="sandbox-order__dl">
+                        <dt>Услуга</dt>
+                        <dd>{catalog.find((s) => s.id === sandboxOrder.serviceId)?.name ?? `#${sandboxOrder.serviceId}`}</dd>
+                        <dt>Цена</dt>
+                        <dd>{sandboxOrder.agreedPrice != null ? `${sandboxOrder.agreedPrice} ₽` : '—'}</dd>
+                        <dt>Превью</dt>
+                        <dd>{sandboxOrder.wantsPreview ? 'да' : 'нет'}</dd>
+                        <dt>К оплате</dt>
+                        <dd>{sandboxOrder.readyToPay ? 'да' : 'нет'}</dd>
+                        <dt>Согласие на фото</dt>
+                        <dd>{sandboxOrder.photoConsent ? 'да' : 'нет'}</dd>
+                      </dl>
+                      <p className="sandbox-order__brief">{sandboxOrder.brief}</p>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input className="text-input" style={{ flex: 1 }} value={sandboxIn} onChange={(e) => setSandboxIn(e.target.value)} placeholder="Сообщение клиента…" onKeyDown={(e) => e.key === 'Enter' && managerTest()} />

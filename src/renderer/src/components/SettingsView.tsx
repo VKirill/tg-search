@@ -76,6 +76,24 @@ export function SettingsView() {
           <div className="field"><label>Модель</label><input value={s.llmModel} onChange={(e) => setS({ ...s, llmModel: e.target.value })} /></div>
         </section>
         <section>
+          <h2 className="section-title">Оплата (ЮKassa)</h2>
+          <p className="field-hint">Сейчас тестовый магазин — после проверки подключите рабочий.</p>
+          <div className="field"><label>Shop ID</label><input value={s.yookassaShopId} onChange={(e) => setS({ ...s, yookassaShopId: e.target.value })} /></div>
+          <div className="field"><label>Секретный ключ</label><input type="password" autoComplete="off" value={s.yookassaSecretKey} onChange={(e) => setS({ ...s, yookassaSecretKey: e.target.value })} /></div>
+          <div className="field"><label>Return URL</label><input value={s.yookassaReturnUrl} onChange={(e) => setS({ ...s, yookassaReturnUrl: e.target.value })} placeholder="https://t.me/your_bot" /></div>
+        </section>
+        <section>
+          <h2 className="section-title">Вспомогательная модель (подноготная клиентов)</h2>
+          <div className="field"><label>Base URL</label><input value={s.auxBaseUrl} onChange={(e) => setS({ ...s, auxBaseUrl: e.target.value })} placeholder="https://9router.example/v1" /></div>
+          <div className="field"><label>API key</label><input type="password" autoComplete="off" value={s.auxApiKey} onChange={(e) => setS({ ...s, auxApiKey: e.target.value })} /></div>
+          <div className="field"><label>Модель</label><input value={s.auxModel} onChange={(e) => setS({ ...s, auxModel: e.target.value })} placeholder="ag/gemini-3.8-flash" /></div>
+        </section>
+        <section>
+          <h2 className="section-title">Изображения (fal.ai)</h2>
+          <div className="field"><label>API key</label><input type="password" autoComplete="off" value={s.falKey} onChange={(e) => setS({ ...s, falKey: e.target.value })} /></div>
+          <div className="field"><label>Модель</label><input value={s.imageModel} onChange={(e) => setS({ ...s, imageModel: e.target.value })} /></div>
+        </section>
+        <section>
           <h2 className="section-title">Речь</h2>
           <div className="field"><label>STT base URL</label><input value={s.sttBaseUrl} onChange={(e) => setS({ ...s, sttBaseUrl: e.target.value })} /></div>
           <div className="field"><label>STT key</label><input type="password" value={s.sttApiKey} onChange={(e) => setS({ ...s, sttApiKey: e.target.value })} /></div>
