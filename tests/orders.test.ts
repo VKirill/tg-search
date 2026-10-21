@@ -275,6 +275,37 @@ describe('orders pipeline', () => {
     expect(engine.sentFiles.length).toBeGreaterThan(0);
   });
 
+  it('a repeated intent never re-bills or downgrades a paid order', async () => {
+    const { db, lead, service } = setupDb();
+    const engine = new FakeEngine();
+    const payments = new FakePayments();
+    const { orders } = ordersPipeline(db, engine, payments, makeExecutors(async () => new Promise(() => {})), dataDir);
+    const intent = {
+      serviceId: service.id, brief: 'Домашка', agreedPrice: service.priceMin, wantsPreview: false, readyToPay: true, photoConsent: false,
+    };
+    await orders.applyManagerIntent(lead.id, intent);
+    const order = db.listOrders(lead.id)[0];
+    db.updateOrder(order.id, { status: 'paid', paidAt: Date.now() });
+    await orders.applyManagerIntent(lead.id, intent); // the manager repeats itself in the next turn
+    expect(db.getOrder(order.id).status).toBe('paid');
+    expect(payments.createCalls).toHaveLength(1);
+    expect(engine.sent.filter((m) => m.text.includes('https://pay.test'))).toHaveLength(1);
+  });
+
+  it('does not resend the payment link while awaiting payment', async () => {
+    const { db, lead, service } = setupDb();
+    const engine = new FakeEngine();
+    const payments = new FakePayments();
+    const { orders } = ordersPipeline(db, engine, payments, makeExecutors(async () => ({ text: '', files: [] })), dataDir);
+    const intent = {
+      serviceId: service.id, brief: 'Домашка', agreedPrice: service.priceMin, wantsPreview: false, readyToPay: true, photoConsent: false,
+    };
+    await orders.applyManagerIntent(lead.id, intent);
+    await orders.applyManagerIntent(lead.id, intent);
+    expect(payments.createCalls).toHaveLength(1);
+    expect(db.listOrders(lead.id)[0].status).toBe('awaiting_payment');
+  });
+
   it('rejects agreed price outside range in manager intent', async () => {
     const { db, lead, service } = setupDb();
     const engine = new FakeEngine();

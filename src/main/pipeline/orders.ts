@@ -232,7 +232,11 @@ export function createOrders(deps: OrdersDeps) {
       order = patchOrder(order.id, { brief: intent.brief });
     }
 
-    if (intent.agreedPrice != null) {
+    // Price and billing change only before payment: the manager repeats itself across turns, and a paid or
+    // awaiting order must never be re-billed or moved back to «quoted».
+    const negotiable = order.status === 'collecting' || order.status === 'quoted';
+
+    if (intent.agreedPrice != null && negotiable) {
       if (!priceInRange(service, intent.agreedPrice)) {
         throw new Error(`Цена вне вилки ${service.priceMin}–${service.priceMax} ₽`);
       }
@@ -259,7 +263,7 @@ export function createOrders(deps: OrdersDeps) {
       await deliverPreview(leadId, output.text, previews);
     }
 
-    if (intent.readyToPay && intent.agreedPrice != null && priceInRange(service, intent.agreedPrice)) {
+    if (negotiable && intent.readyToPay && intent.agreedPrice != null && priceInRange(service, intent.agreedPrice)) {
       await requestPayment(order.id);
     }
   }
