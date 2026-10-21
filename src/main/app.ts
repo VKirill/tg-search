@@ -451,6 +451,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       const questions: Record<string, object> = {};
       items.forEach((_, i) => {
         questions[`fit${i}`] = { type: 'noul', instructions: `Is \`item${i}\` worth posting today in the channel described in \`channel\` — timely, useful or interesting for its audience? Old news, ads, job offers and opinion pieces are not.` };
+        questions[`urgent${i}`] = { type: 'noul', instructions: `Is \`item${i}\` an urgent practical alert for residents today — a transport disruption or strike, a weather warning, a road closure, a water or power cut, an emergency — that people should know right now? Ordinary news, plans and offers are not.` };
         if (desk.area) questions[`local${i}`] = { type: 'noul', instructions: `Does \`item${i}\` happen in, or directly concern people in, the area described in \`area\`? Places elsewhere in the region, the country or abroad do not count.` };
         questions[`kind${i}`] = {
           type: 'choice', instructions: `What is \`item${i}\`?`,
@@ -472,6 +473,7 @@ export function createApp(deps: AppDeps): AppHandlers {
           kind: (a(`kind${i}`)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
           category: rubric && rubric !== 'other' ? rubric : null,
           audiences: desk.audiences.filter((au) => (a(`aud${i}_${au.id}`)?.noul ?? 0) >= 0.6).map((au) => au.id),
+          urgent: a(`urgent${i}`)?.noul ?? 0,
         };
       });
     },
@@ -1009,6 +1011,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       rejectPost: async (id) => channels.rejectPost(id),
       unpublish: async (id) => channels.unpublish(id),
       redrawCover: async (id) => channels.redrawCover(id),
+      cloneForCity: async (fromDeskId, accountId, city, target) => channels.cloneForCity(fromDeskId, accountId, city, target),
+      setAvatar: async (deskId, path) => {
+        const file = path ?? (deps.pickFiles ? (await deps.pickFiles({ title: 'Аватар канала', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0] : undefined);
+        if (file) await channels.setAvatar(deskId, file);
+      },
     },
     assistants: {
       status: async () => integrations.status(),

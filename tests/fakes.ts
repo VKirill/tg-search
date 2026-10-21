@@ -126,6 +126,10 @@ export class FakeEngine implements TelegramEngine {
     }
     return this.history.get(String(chatId)) ?? [];
   }
+  photos: { chatId: number; path: string }[] = [];
+  async setChatPhoto(_accountId: number, chatId: number, path: string): Promise<void> {
+    this.photos.push({ chatId, path });
+  }
   async createChannel(_accountId: number, opts: { title: string; description: string; username?: string }): Promise<TgChat> {
     if (opts.username === 'taken_name') throw new Error('@taken_name: ссылка уже занята');
     const chat: TgChat = { chatId: -1009000000099, title: opts.title, username: opts.username ?? null, kind: 'channel', memberCount: 1, description: opts.description, isMember: true, isAdmin: true };

@@ -579,7 +579,7 @@ export interface HelperRequest {
 // writes a post in the channel's language from the best fresh items, with links — published or left for approval.
 export type ChannelSourceKind = 'telegram' | 'rss' | 'gnews' | 'web' | 'search' | 'browser';
 export type ChannelItemKind = 'news' | 'deal' | 'event';
-export type ChannelSlotKind = 'digest' | 'deals' | 'top';
+export type ChannelSlotKind = 'digest' | 'deals' | 'top' | 'alert'; // alert — urgent, right away, never on a schedule
 
 export const CHANNEL_SOURCE_KINDS: Record<ChannelSourceKind, { label: string; hint: string; interval: number }> = {
   telegram: { label: 'Telegram', hint: 'публичный канал или группа: @username или t.me/…', interval: 15 },
@@ -594,6 +594,7 @@ export const CHANNEL_SLOT_KINDS: Record<ChannelSlotKind, string> = {
   digest: 'Дайджест — главные новости',
   deals: 'Акции, скидки и события',
   top: 'Одна главная новость подробно',
+  alert: 'Срочно — сразу, вне расписания',
 };
 
 export interface ChannelSlot {
@@ -601,6 +602,7 @@ export interface ChannelSlot {
   kind: ChannelSlotKind;
   categories?: string[]; // rubrics («events») or sub-rubrics («events.music») the post is made of; empty — by kind
   audiences?: string[]; // audiences («kids», «evening») the post is for; empty — anyone
+  days?: number[]; // days of the week it runs, 0 — Sunday … 6 — Saturday; empty — every day
 }
 
 // Who a story suits — across rubrics: one event can be for kids and for the weekend at once
@@ -616,6 +618,7 @@ export const DEFAULT_CHANNEL_AUDIENCES: ChannelAudience[] = [
   { id: 'evening', name: 'Куда сходить вечером', hint: 'an evening plan for adults: concerts, bars, dinners, shows, nightlife, after-work' },
   { id: 'weekend', name: 'На выходные', hint: 'a plan that happens on the coming weekend (Saturday or Sunday)' },
   { id: 'free', name: 'Бесплатно', hint: 'free of charge for the public' },
+  { id: 'lastday', name: 'Последний день', hint: 'an offer, exhibition or event that ends today or tomorrow — the last chance to go' },
 ];
 
 // The channel's rubrics: Jev files every story under one sub-rubric; posts can be made of chosen rubrics
@@ -678,6 +681,7 @@ export interface ChannelDesk {
   links: 'none' | 'sources'; // none — posts are the channel's own stories: no links, no mention of sources
   categories: ChannelCategory[];
   audiences: ChannelAudience[];
+  alerts: boolean; // urgent stories (transport disruption, weather warning, closures, cuts) go out at once, outside the schedule
   cover: boolean; // each post gets a cover drawn for it (Muse Image, from the issue's stories)
   coverStyle: string; // the covers' art direction, e.g. «warm flat illustration, orange and blue»; empty — a neutral default
   createdAt: number;
@@ -1297,7 +1301,11 @@ export interface Api {
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;
     unpublish(id: number): Promise<ChannelPost>;
-    redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again // a published post deleted from the channel; its stories return to work
+    redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again
+    setAvatar(deskId: number, path?: string): Promise<void>;
+    // The same desk for another city: its structure copied, the texts and the search queries rewritten for the city, local
+    // feeds and official news pages proposed and kept only when they answer. `target` — an existing channel or a new one.
+    cloneForCity(fromDeskId: number, accountId: number, city: string, target: { link: string } | { title: string; description: string; username?: string }): Promise<{ desk: ChannelDesk; sources: number; rejected: string[] }>; // the channel's picture; no path — the system file dialog // a published post deleted from the channel; its stories return to work
   };
   assistants: {
     status(): Promise<AiAssistantsStatus>;

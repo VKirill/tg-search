@@ -27,7 +27,10 @@ const LATE_SLOT_MS = 3600_000; // a slot missed while the app was off: still pos
 const MIN_TELEGRAM_TEXT = 60;
 const SCORE_BATCH = 8;
 const GNEWS_ITEMS = 25; // newest Google News results per read
-const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 8, deals: 6, top: 1 };
+const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 8, deals: 6, top: 1, alert: 1 };
+const ALERT_SCORE = 0.75; // Jev: urgent for residents today
+const ALERTS_PER_DAY = 4;
+const ALERT_FRESH_MS = 6 * 3600_000;
 const STORY_WINDOW_MS = 3 * 86400_000; // a story is matched against what was found in the last three days
 // Embeddings find candidates, Jev decides: news on one topic (a flood's aid packages) is as close as one story's retellings
 export const STORY_CANDIDATE = 0.82; // cosine similarity worth asking about
@@ -50,7 +53,7 @@ export interface ChannelsDeps {
   llm: (prompt: string, opts: { json?: boolean; role: 'chat' | 'fast' | 'smart'; title: string }) => Promise<string>;
   // Jev: for each item — how well it fits the channel (0–1), whether it happens in the channel's area, what it is, its rubric
   score: (desk: { about: string; area: string; categories: ChannelCategory[]; audiences: ChannelAudience[] }, items: { title: string; text: string }[]) =>
-    Promise<{ p: number; local: number | null; kind: ChannelItemKind | 'other'; category: string | null; audiences: string[] }[]>;
+    Promise<{ p: number; local: number | null; kind: ChannelItemKind | 'other'; category: string | null; audiences: string[]; urgent?: number }[]>;
   embed?: (text: string) => Promise<Float32Array | null>; // local embeddings: the same story from different sources
   // Jev: for each candidate — the probability it reports the same event as `item`; absent — similarity alone decides
   cover?: (prompt: string, deskId: number) => Promise<string | null>; // draws a cover (Muse Image), the file's path
@@ -89,7 +92,7 @@ const toDesk = (r: Row): ChannelDesk => ({
   language: r.language, about: r.about, editorPrompt: r.editor_prompt, slots: JSON.parse(r.slots), autopublish: !!r.autopublish,
   threshold: r.threshold, area: r.area ?? '', links: r.links === 'sources' ? 'sources' : 'none',
   categories: r.categories ? JSON.parse(r.categories) : DEFAULT_CHANNEL_CATEGORIES,
-  audiences: r.audiences ? JSON.parse(r.audiences) : DEFAULT_CHANNEL_AUDIENCES, cover: r.cover !== 0, coverStyle: r.cover_style ?? '',
+  audiences: r.audiences ? JSON.parse(r.audiences) : DEFAULT_CHANNEL_AUDIENCES, alerts: r.alerts === 1, cover: r.cover !== 0, coverStyle: r.cover_style ?? '',
   createdAt: r.created_at,
 });
 const toSource = (r: Row): ChannelSource => ({
@@ -127,6 +130,9 @@ export interface IssueItem {
   where: string;
   price: string;
   tags: string[];
+  story?: number; // which story of the materials it tells (1-based), for the places step
+  places: { name: string; where: string }[]; // several venues of one story (Open House buildings, a route): a folded list
+  placesTitle: string;
   source?: string;
 }
 export interface Issue {
@@ -144,7 +150,10 @@ export function parseIssue(raw: string): Issue {
     title: str(sec?.title),
     items: (Array.isArray(sec?.items) ? sec.items : []).map((it: any) => ({
       emoji: str(it?.emoji), title: str(it?.title), text: str(it?.text), when: str(it?.when), where: str(it?.where), price: str(it?.price),
-      tags: (Array.isArray(it?.tags) ? it.tags : []).map(str).filter(Boolean).slice(0, 2),
+      tags: (Array.isArray(it?.tags) ? it.tags : []).map(str).filter((t: string) => /\p{L}/u.test(t)).slice(0, 2), // «🆓» alone says nothing
+      places: (Array.isArray(it?.places) ? it.places : []).map((p: any) => ({ name: str(p?.name), where: str(p?.where) || str(p?.name) })).filter((p: { name: string }) => p.name).slice(0, 25),
+      placesTitle: str(it?.placesTitle),
+      ...(Number.isInteger(Number(it?.story)) && Number(it?.story) > 0 ? { story: Number(it.story) } : {}),
       ...(str(it?.source) ? { source: str(it?.source) } : {}),
     })).filter((it: IssueItem) => it.title),
   })).filter((sec: { items: IssueItem[] }) => sec.items.length);
@@ -153,33 +162,67 @@ export function parseIssue(raw: string): Issue {
 
 const mapIssue = (i: Issue, f: (t: string) => string): Issue => ({
   title: f(i.title), lead: f(i.lead), footer: f(i.footer),
-  sections: i.sections.map((sec) => ({ title: f(sec.title), items: sec.items.map((it) => ({ ...it, title: f(it.title), text: f(it.text), when: f(it.when), where: f(it.where), price: f(it.price), tags: it.tags.map(f).filter(Boolean) })) })),
+  sections: i.sections.map((sec) => ({ title: f(sec.title), items: sec.items.map((it) => ({
+    ...it, title: f(it.title), text: f(it.text), when: f(it.when), where: f(it.where), price: f(it.price), tags: it.tags.map(f).filter(Boolean),
+    placesTitle: f(it.placesTitle), places: it.places.map((p) => ({ name: f(p.name), where: f(p.where) })).filter((p) => p.name),
+  })) })),
 });
+
+// The proofreader's fixes on the editor's issue: a field set, an item dropped; anything malformed is ignored
+export function applyFixes(issue: Issue, f: { fixes?: unknown[]; drop?: unknown[] }): Issue {
+  const out: Issue = JSON.parse(JSON.stringify(issue));
+  const fields = new Set(['title', 'text', 'when', 'where', 'price', 'tags', 'places']);
+  for (const x of (Array.isArray(f.fixes) ? f.fixes : []) as Record<string, unknown>[]) {
+    if (x?.field === 'lead') out.lead = str(x.value);
+    if (x?.field === 'issueTitle') out.title = str(x.value) || out.title;
+    const it = out.sections[Number(x?.section)]?.items[Number(x?.item)] as unknown as Record<string, unknown> | undefined;
+    const field = String(x?.field ?? '');
+    if (!it || !fields.has(field)) continue;
+    if (field === 'tags') it.tags = Array.isArray(x.value) ? x.value.map(str).filter((t) => /\p{L}/u.test(t)).slice(0, 2) : [];
+    else if (field === 'places') it.places = Array.isArray(x.value) ? (x.value as any[]).map((p) => ({ name: str(p?.name), where: str(p?.where) || str(p?.name) })).filter((p) => p.name) : [];
+    else it[field] = str(x.value);
+  }
+  const drop = new Set(((Array.isArray(f.drop) ? f.drop : []) as Record<string, unknown>[]).map((x) => `${Number(x?.section)}:${Number(x?.item)}`));
+  out.sections = out.sections
+    .map((sec, si) => ({ ...sec, items: sec.items.filter((it, ii) => it.title && !drop.has(`${si}:${ii}`)) }))
+    .filter((sec) => sec.items.length);
+  return out;
+}
 
 // Google Maps search for a place as people would type it: the reader gets there in one tap
 export const mapsLink = (where: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(where)}`;
 
-// The issue as a Rich Message: the title, the lead as a quote, sections divided by rules, each item — a bold title with
-// its tags, the gist, and a line «🗓 when · 📍 place (on the map) · 💶 price»
+// The issue as a Rich Message: the title, the lead as a quote, sections divided by rules, each item — a small heading,
+// the gist, and a line «tags · 🗓 when · 📍 place (on the map) · 💶 price»
 export function renderIssue(issue: Issue, o: { own: boolean; username: string | null }): string {
   const out: string[] = [];
   if (issue.title) out.push(`## ${issue.title}`, '');
   if (issue.lead) out.push(`> ${issue.lead}`, '');
   for (const sec of issue.sections) {
-    out.push('---', '', `### ${sec.title}`, '');
+    out.push('---', '');
+    if (sec.title) out.push(`### ${sec.title}`, '');
     for (const it of sec.items) {
-      const head = `**${it.emoji ? `${it.emoji} ` : ''}${it.title}**${it.tags.length ? ` · ${it.tags.join(' · ')}` : ''}`;
+      // the item's title is a small heading: Telegram gives headings room above, plain paragraphs sit back to back
+      const head = `#### ${it.emoji ? `${it.emoji} ` : ''}${it.title}`;
       const meta = [
+        ...it.tags,
         it.when && `🗓 ${it.when}`,
         // a map link only for a real place (a venue with its town, an address), not for «the city» or a region
         it.where && (/,|\d/.test(it.where) ? `📍 [${it.where}](${mapsLink(it.where)})` : `📍 ${it.where}`),
         it.price && `💶 ${it.price}`,
         !o.own && it.source && /^https?:/.test(it.source) ? `[↗](${it.source})` : '',
       ].filter(Boolean).join(' · ');
-      out.push([head, it.text, meta].filter(Boolean).join('\n'), '');
+      out.push(head, '', [it.text, meta && `*${meta}*`].filter(Boolean).join('\n'), '');
+      // several places of one story: folded, each on the map
+      if (it.places.length > 1) {
+        out.push(`<details><summary>${it.placesTitle || `📍 ${it.places.length}`}</summary>`, '');
+        out.push(...it.places.map((p) => `- [${p.name}](${mapsLink(p.where)})`), '', '</details>', '');
+      }
     }
   }
-  if (issue.footer) out.push('---', '', issue.footer);
+  // the channel's signature: the editor's, or at least the channel's @name — subscribers come from forwards
+  const footer = issue.footer || (o.username ? `📲 @${o.username}` : '');
+  if (footer) out.push('---', '', footer);
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -237,7 +280,7 @@ export function createChannels(deps: ChannelsDeps) {
   for (const [table, column] of [
     ['channel_desks', 'area TEXT NOT NULL DEFAULT \'\''], ['channel_desks', 'links TEXT NOT NULL DEFAULT \'none\''], ['channel_desks', 'categories TEXT'],
     ['channel_desks', 'audiences TEXT'], ['channel_items', 'audiences TEXT'], ['channel_posts', 'scheduled_at INTEGER'], ['channel_posts', 'slot_key TEXT'],
-    ['channel_slot_runs', 'post_id INTEGER'], ['channel_desks', 'cover INTEGER NOT NULL DEFAULT 1'], ['channel_posts', 'issue TEXT'], ['channel_desks', 'cover_style TEXT NOT NULL DEFAULT \'\''],
+    ['channel_slot_runs', 'post_id INTEGER'], ['channel_desks', 'cover INTEGER NOT NULL DEFAULT 1'], ['channel_desks', 'alerts INTEGER NOT NULL DEFAULT 0'], ['channel_items', 'urgent REAL'], ['channel_posts', 'issue TEXT'], ['channel_desks', 'cover_style TEXT NOT NULL DEFAULT \'\''],
     ['channel_items', 'local REAL'], ['channel_items', 'category TEXT'], ['channel_items', 'story_id INTEGER'], ['channel_items', 'vec BLOB'],
   ]) {
     try {
@@ -421,6 +464,7 @@ export function createChannels(deps: ChannelsDeps) {
       if (added) {
         await assignStories(d);
         await scorePending(d);
+        await sendAlerts(d);
       }
       return added;
     } catch (err) {
@@ -480,8 +524,8 @@ export function createChannels(deps: ChannelsDeps) {
       rows.forEach((r, i) => {
         const v = verdicts[i] ?? { p: 0, local: null, kind: 'other', category: null, audiences: [] };
         const keep = v.kind !== 'other' && v.p >= d.threshold && (v.local === null || v.local >= 0.5);
-        raw.prepare('UPDATE channel_items SET score = ?, local = ?, kind = ?, category = ?, audiences = ?, status = ? WHERE id = ?')
-          .run(v.p, v.local, v.kind === 'other' ? null : v.kind, v.category, JSON.stringify(v.audiences ?? []), keep ? 'new' : 'skipped', r.id);
+        raw.prepare('UPDATE channel_items SET score = ?, local = ?, kind = ?, category = ?, audiences = ?, urgent = ?, status = ? WHERE id = ?')
+          .run(v.p, v.local, v.kind === 'other' ? null : v.kind, v.category, JSON.stringify(v.audiences ?? []), v.urgent ?? null, keep ? 'new' : 'skipped', r.id);
       });
     }
     // duplicates whose story got its verdict in this round
@@ -517,13 +561,39 @@ export function createChannels(deps: ChannelsDeps) {
     return ranked.slice(0, POST_ITEMS[kind]).map((r) => r.id);
   }
 
+  // Urgent for residents (a metro line stopped, a weather warning, a closure): out at once as a short post, not waiting
+  // for the evening issue; a few a day, never at night
+  async function sendAlerts(d: ChannelDesk) {
+    if (!d.alerts) return;
+    const t = now();
+    const h = new Date(t).getHours();
+    if (h < 7 || h >= 23) return;
+    const today = new Date(t);
+    const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    let sent = (raw.prepare("SELECT COUNT(*) AS n FROM channel_posts WHERE desk_id = ? AND kind = 'alert' AND created_at >= ?").get(d.id, dayStart) as Row).n as number;
+    const urgent = raw.prepare(`SELECT DISTINCT COALESCE(story_id, id) AS sid FROM channel_items WHERE desk_id = ? AND status = 'new' AND urgent >= ?
+      AND score >= ? AND (local IS NULL OR local >= 0.5) AND published_at >= ? ORDER BY urgent DESC`).all(d.id, ALERT_SCORE, d.threshold, t - ALERT_FRESH_MS) as Row[];
+    for (const u of urgent) {
+      if (sent >= ALERTS_PER_DAY) return;
+      try {
+        const p = await compose(d.id, 'alert', [u.sid]);
+        sent++;
+        if (d.autopublish) await publish(p.id);
+      } catch (err) {
+        console.warn(`channel «${d.title}» alert:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
   // The editor writes an issue as data, not as text: the layout is the code's, so every issue reads the same way —
   // a title, a lead, sections, and items with what / when / where / price and a map link
   async function writeIssue(d: ChannelDesk, kind: ChannelSlotKind, stories: ChannelItem[][], o: { rubrics: string[]; forWhom: (string | undefined)[]; own: boolean }): Promise<Issue> {
     const what = kind === 'digest'
       ? 'полный выпуск: раздел новостей города и раздел мероприятий (события, планы, акции); названия разделов — на языке поста, коротко, с эмодзи'
-      : kind === 'deals' ? 'подборку акций, планов и событий: разделы по смыслу (например, «сегодня и завтра», «на выходные», «скидки»)' : 'один главный сюжет подробно: один раздел, один пункт, текст до 5 предложений';
-    const schema = `{"title": "заголовок выпуска: название канала, день и дата", "lead": "1–2 предложения: главное за день и почему стоит дочитать", "sections": [{"title": "🎭 название раздела", "items": [{"emoji": "🎶", "title": "что это, конкретно", "text": "одно-два коротких предложения, до 220 знаков: суть и что это значит для читателя", "when": "день, дата и время, если есть", "where": "конкретное место так, как его ищут на картах: заведение или адрес и город (например «Recinto Ágora, Torrent»); для новостей без конкретного места — пусто", "price": "цена, «gratis» или условия входа, если есть", "tags": ["0–2 метки с эмодзи на языке поста и только из этих смыслов: бесплатно, с детьми, для семьи, вечером, на выходные, сегодня, последний день; тематических меток не ставь"]${o.own ? '' : ', "source": "url источника"'}}]}], "footer": "подпись канала по правилам редактора, если есть"}`;
+      : kind === 'deals' ? 'подборку акций, планов и событий: разделы по смыслу (например, «сегодня и завтра», «на выходные», «скидки»)'
+        : kind === 'alert' ? 'срочное сообщение: заголовок выпуска — «⚠️» и суть в нескольких словах, без вступления, один раздел без названия, один пункт: что случилось, где, до какого времени и что делать читателю (обход, замена, как себя вести)'
+          : 'один главный сюжет подробно: заголовок выпуска — о самом сюжете, один раздел, один пункт, текст 3–5 предложений со всеми практическими деталями из материалов';
+    const schema = `{"title": "заголовок выпуска: название канала, день и дата", "lead": "1–2 предложения: главное за день и почему стоит дочитать", "sections": [{"title": "🎭 название раздела", "items": [{"story": "номер сюжета из материалов (n)", "emoji": "🎶", "title": "что это, конкретно", "text": "одно-два коротких предложения, до 220 знаков: суть и что это значит для читателя", "when": "день, дата и время, если есть", "where": "конкретное место так, как его ищут на картах: заведение или адрес и город (например «Recinto Ágora, Torrent»); для новостей без конкретного места — пусто", "price": "цена, «gratis» или условия входа, если есть", "places": [{"name": "место", "where": "как искать на картах: название и город"}] — если в материалах названо несколько конкретных мест одного сюжета (здания дня открытых дверей, заведения акции, точки маршрута), перечисли ВСЕ названные, иначе [], "placesTitle": "подпись свёрнутого списка на языке поста с эмодзи, например «📍 Ver los 12 edificios en el mapa»", "tags": ["0–2 метки: эмодзи и слово, ПЕРЕВЕДЁННЫЕ на язык поста, только из смыслов free / with kids / family / tonight / this weekend / today / last day (например, по-испански «🆓 gratis», «👧 con niños», «📅 este finde», «⏳ último día»); тематических меток не ставь"]${o.own ? '' : ', "source": "url источника"'}}]}], "footer": "подпись канала по правилам редактора, если есть"}`;
     const prompt = [
       `Ты — редактор Telegram-канала. О канале и аудитории: ${d.about || '—'}.`,
       d.area ? `География канала: ${d.area}. Пиши только о том, что происходит там; что за её пределами — пропусти.` : '',
@@ -539,7 +609,7 @@ export function createChannels(deps: ChannelsDeps) {
       '',
       ...stories.map((st, i) => [
         `<story n="${i + 1}" kind="${st[0].kind}" rubric="${channelCategoryName(d.categories, st[0].category)}">`,
-        ...st.map((it) => `<source${o.own ? '' : ` url="${it.url ?? ''}"`} date="${new Date(it.publishedAt).toISOString().slice(0, 16)}">\n${it.title}\n${it.text.slice(0, 1200)}\n</source>`),
+        ...st.map((it) => `<source${o.own ? '' : ` url="${it.url ?? ''}"`} date="${new Date(it.publishedAt).toISOString().slice(0, 16)}">\n${it.title}\n${it.text.slice(0, kind === 'top' ? 3000 : 1200)}\n</source>`),
         '</story>',
       ].join('\n')),
     ].filter((x) => x !== '').join('\n');
@@ -547,25 +617,52 @@ export function createChannels(deps: ChannelsDeps) {
     if (!draft.sections.some((sec) => sec.items.length)) throw new Error('Редактор вернул пустой выпуск');
     // the proofreader: another model checks every field against the materials — what they do not say goes, what
     // contradicts them is fixed; the editor's wording stays
-    const materials = stories.map((st, i) => `<story n="${i + 1}">\n${st.map((it) => `${it.title}\n${it.text.slice(0, 1200)}`).join('\n---\n')}\n</story>`).join('\n');
-    const checked = await deps.llm([
-      'Ты — корректор и фактчекер Telegram-канала. Сверь выпуск (JSON) с материалами, по которым он написан.',
-      '- Каждый факт — дата, время, место, цена, «бесплатно», имена, цифры, метки — должен прямо следовать из материалов. Противоречит — исправь по материалам; нет в материалах — убери (пустая строка или убрать метку).',
+    const materials = stories.map((st, i) => `<story n="${i + 1}">\n${st.map((it) => `${it.title}\n${it.text.slice(0, kind === 'top' ? 3000 : 1200)}`).join('\n---\n')}\n</story>`).join('\n');
+    // the proofreader returns fixes, not a rewritten issue: rewriting, a model drops sections and the channel's footer
+    const numbered = { title: draft.title, lead: draft.lead, sections: draft.sections.map((sec, si) => ({ section: si, title: sec.title, items: sec.items.map((it, ii) => ({ item: ii, ...it })) })) };
+    const fixes = await deps.llm([
+      'Ты — корректор и фактчекер Telegram-канала. Сверь каждый пункт выпуска с материалами, по которым он написан.',
+      '- Каждый факт — дата, время, место, цена, «бесплатно», имена, цифры, метки — должен прямо следовать из материалов. Противоречит — исправь по материалам; нет в материалах — убери (пустая строка; для меток — список без неё).',
       '- Убери выдуманные украшения и советы, которых нет в материалах («места разлетаются», «бронируйте заранее» и т. п.).',
       '- Заголовок пункта и метки не должны обещать то, чего нет (например, «бесплатно», если вход платный).',
-      '- Сохрани язык, стиль, эмодзи, структуру и порядок; не добавляй новых пунктов. Если всё верно — верни выпуск без изменений.',
-      'Ответ — только JSON той же структуры.',
+      '- Сохраняй язык и стиль; правь только то, что неверно. Пункт целиком выдуман или не о том — удали его.',
+      'Заголовок и вступление выпуска проверь так же.',
+      'Ответ — только JSON: {"fixes": [{"section": 0, "item": 1, "field": "title|text|when|where|price|tags|places", "value": "новое значение (для tags и places — массив)"}, {"field": "lead|issueTitle", "value": "…"}], "drop": [{"section": 0, "item": 2}]}. Всё верно — {"fixes": [], "drop": []}.',
       '',
-      `<issue>\n${JSON.stringify(draft)}\n</issue>`,
+      `<issue>\n${JSON.stringify(numbered)}\n</issue>`,
       '',
       `<materials>\n${materials}\n</materials>`,
-    ].join('\n'), { json: true, role: 'smart', title: 'channel-factcheck' }).then(parseIssue).catch((err) => {
+    ].join('\n'), { json: true, role: 'smart', title: 'channel-factcheck' }).then((r) => parseJsonFromLlm(r) as { fixes?: unknown[]; drop?: unknown[] }).catch((err) => {
       console.warn('channel factcheck', err instanceof Error ? err.message : err);
-      return draft; // the editor's issue is still an issue
+      return { fixes: [], drop: [] }; // the editor's issue is still an issue
     });
-    const issue = checked.sections.some((sec) => sec.items.length) ? checked : draft;
+    const issue = await addPlaces(d, applyFixes(draft, fixes), stories, kind);
     // nothing leads out of the channel: links, addresses and other channels' names go from every field
     return o.own ? mapIssue(issue, (t) => stripLinks(t, d.username)) : issue;
+  }
+
+  // Several venues of one story (an open-house weekend, a route, a chain's offer) go into a folded list with map links.
+  // A separate small step: an editor busy with the whole issue skips the list even when the places are named.
+  async function addPlaces(d: ChannelDesk, issue: Issue, stories: ChannelItem[][], kind: ChannelSlotKind): Promise<Issue> {
+    const wanted = issue.sections.flatMap((sec) => sec.items).filter((it) => it.places.length < 2 && it.story && stories[it.story - 1]);
+    if (!wanted.length) return issue;
+    const ns = [...new Set(wanted.map((it) => it.story!))];
+    const found = await deps.llm([
+      'Для каждого сюжета перечисли конкретные места, которые прямо названы в его материалах: здания, заведения, площадки, магазины, точки маршрута.',
+      'Только если их два и больше; не придумывай и не добавляй неназванные. «where» — как искать место на картах: название и город (город — из материалов или географии канала).',
+      `География канала: ${d.area || d.about.slice(0, 200)}. Язык подписи — ${d.language}.`,
+      'Ответ — только JSON: {"<номер сюжета>": {"title": "подпись свёрнутого списка с эмодзи, например «📍 Ver los 12 edificios en el mapa»", "places": [{"name": "…", "where": "…"}]}}. Нет мест — {}.',
+      '',
+      ...ns.map((n) => `<story n="${n}">\n${stories[n - 1].map((it) => `${it.title}\n${it.text.slice(0, kind === 'top' ? 3000 : 1500)}`).join('\n---\n')}\n</story>`),
+    ].join('\n'), { json: true, role: 'fast', title: 'channel-places' }).then((r) => parseJsonFromLlm(r) as Record<string, { title?: unknown; places?: unknown[] }>).catch(() => ({} as Record<string, { title?: unknown; places?: unknown[] }>));
+    return {
+      ...issue,
+      sections: issue.sections.map((sec) => ({ ...sec, items: sec.items.map((it) => {
+        const f = it.places.length < 2 && it.story ? found[String(it.story)] : undefined;
+        const places = (Array.isArray(f?.places) ? f!.places : []).map((p: any) => ({ name: str(p?.name), where: str(p?.where) || str(p?.name) })).filter((p) => p.name).slice(0, 25);
+        return places.length >= 2 ? { ...it, places, placesTitle: str(f?.title) || it.placesTitle } : it;
+      }) })),
+    };
   }
 
   // The cover: a meta-prompt turns the issue into a Muse Image prompt (scene → setting → light → framing → style →
@@ -603,7 +700,7 @@ export function createChannels(deps: ChannelsDeps) {
     if (!storyIds.length) throw new Error('Нет свежих подходящих материалов для поста');
     // every source's telling of each story: the editor writes one story from all of them
     const stories = storyIds.map((sid) => (raw.prepare(`SELECT i.*, s.title AS source_title FROM channel_items i JOIN channel_sources s ON s.id = i.source_id
-      WHERE COALESCE(i.story_id, i.id) = ? ORDER BY i.score DESC, i.id LIMIT 4`).all(sid) as Row[]).map(toItem)).filter((x) => x.length);
+      WHERE COALESCE(i.story_id, i.id) = ? ORDER BY i.score DESC, i.id LIMIT ?`).all(sid, kind === 'top' ? 6 : 4) as Row[]).map(toItem)).filter((x) => x.length);
     const items = stories.flat();
     const own = d.links === 'none';
     const rubrics = categories.map((c) => channelCategoryName(d.categories, c)).filter(Boolean);
@@ -612,7 +709,7 @@ export function createChannels(deps: ChannelsDeps) {
     const text = renderIssue(issue, { own, username: d.username });
     if (!text.trim()) throw new Error('Редактор вернул пустой пост');
     // the cover: drawn for this issue; without it — a source photo only when the channel links its sources
-    const image = (d.cover ? await drawCover(d, issue).catch((err) => (console.warn('channel cover', err instanceof Error ? err.message : err), null)) : null)
+    const image = (d.cover && kind !== 'alert' ? await drawCover(d, issue).catch((err) => (console.warn('channel cover', err instanceof Error ? err.message : err), null)) : null)
       ?? (own ? null : items.find((it) => it.image)?.image ?? null);
     const id = Number(raw.prepare('INSERT INTO channel_posts(desk_id, kind, text, image, item_ids, slot_key, scheduled_at, issue, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(d.id, kind, text, image, JSON.stringify(items.map((i) => i.id)), opts.slotKey ?? null, opts.scheduledAt ?? null, JSON.stringify(issue), now()).lastInsertRowid);
@@ -685,6 +782,7 @@ export function createChannels(deps: ChannelsDeps) {
         // slots: today's time has come, not done yet, and not more than an hour late
         const today = new Date(t);
         for (const slot of d.slots) {
+          if (slot.days?.length && !slot.days.includes(today.getDay())) continue;
           const key = `${dayKey(today)} ${slot.time}`;
           const at = slotTime(key);
           if (t < at || t - at > LATE_SLOT_MS) continue;
@@ -756,9 +854,9 @@ export function createChannels(deps: ChannelsDeps) {
     },
     saveDesk(d: ChannelDesk): ChannelDesk[] {
       raw.prepare(`UPDATE channel_desks SET enabled = ?, account_id = ?, language = ?, about = ?, editor_prompt = ?, slots = ?, autopublish = ?, threshold = ?,
-        area = ?, links = ?, categories = ?, audiences = ?, cover = ?, cover_style = ? WHERE id = ?`).run(d.enabled ? 1 : 0, d.accountId, d.language, d.about, d.editorPrompt, JSON.stringify(d.slots),
+        area = ?, links = ?, categories = ?, audiences = ?, cover = ?, cover_style = ?, alerts = ? WHERE id = ?`).run(d.enabled ? 1 : 0, d.accountId, d.language, d.about, d.editorPrompt, JSON.stringify(d.slots),
         d.autopublish ? 1 : 0, d.threshold, d.area ?? '', d.links === 'sources' ? 'sources' : 'none', JSON.stringify(d.categories ?? DEFAULT_CHANNEL_CATEGORIES),
-        JSON.stringify(d.audiences ?? DEFAULT_CHANNEL_AUDIENCES), d.cover === false ? 0 : 1, d.coverStyle ?? '', d.id);
+        JSON.stringify(d.audiences ?? DEFAULT_CHANNEL_AUDIENCES), d.cover === false ? 0 : 1, d.coverStyle ?? '', d.alerts ? 1 : 0, d.id);
       return listDesks();
     },
     removeDesk(id: number): ChannelDesk[] {
@@ -864,6 +962,7 @@ export function createChannels(deps: ChannelsDeps) {
       for (let day = fromDays; day <= toDays; day++) {
         const date = new Date(base.getFullYear(), base.getMonth(), base.getDate() + day);
         for (const slot of d.slots) {
+          if (slot.days?.length && !slot.days.includes(date.getDay())) continue;
           const key = `${dayKey(date)} ${slot.time}`;
           const at = slotTime(key);
           const run = raw.prepare('SELECT post_id FROM channel_slot_runs WHERE desk_id = ? AND slot_key = ?').get(d.id, key) as Row | undefined;
@@ -904,6 +1003,71 @@ export function createChannels(deps: ChannelsDeps) {
           (SELECT COALESCE(story_id, id) FROM channel_items WHERE id IN (${p.itemIds.map(() => '?').join(',')}))`).run(...p.itemIds);
       }
       return post(id);
+    },
+    async cloneForCity(fromDeskId: number, accountId: number, city: string, target: { link: string } | { title: string; description: string; username?: string }) {
+      const from = desk(fromDeskId);
+      if (!city.trim()) throw new Error('Укажите город');
+      const plan = parseJsonFromLlm(await deps.llm([
+        `Есть Telegram-канал городских новостей. Сделай такой же для города: ${city}. Перепиши его настройки под этот город, сохранив смысл, формат и тон.`,
+        'Язык постов — главный язык жителей этого города (как у исходного канала — язык жителей своего города). Тексты about, area, coverStyle и подсказки — по-английски, editorPrompt — на языке постов.',
+        'feeds — RSS-ленты местных СМИ, мэрии, транспорта, метеослужбы и афиш этого города, которые ты точно знаешь; pages — страницы новостей мэрии и городских служб без RSS. Не выдумывай адреса: всё будет проверено, неработающее отбросится.',
+        'queries — 6–10 запросов для Google Новостей (kind "gnews") и поиска (kind "search") по образцу исходных, но для этого города и его пригородов.',
+        'Ответ — только JSON: {"language": "…", "about": "…", "area": "…", "editorPrompt": "…", "coverStyle": "…", "queries": [{"kind": "gnews|search", "title": "…", "target": "…"}], "feeds": [{"title": "…", "url": "…"}], "pages": [{"title": "…", "url": "…"}]}',
+        '',
+        `<source_channel language="${from.language}">`,
+        `about: ${from.about}`,
+        `area: ${from.area}`,
+        `editorPrompt: ${from.editorPrompt}`,
+        `coverStyle: ${from.coverStyle}`,
+        `queries: ${JSON.stringify(listSources(from.id).filter((x) => x.kind === 'gnews' || x.kind === 'search').map((x) => ({ kind: x.kind, title: x.title, target: x.target })))}`,
+        '</source_channel>',
+      ].join('\n'), { json: true, role: 'smart', title: 'channel-clone' })) as Record<string, any>;
+      const chat = 'link' in target ? await deps.engine.resolveChat(accountId, target.link.trim()) : await deps.engine.createChannel(accountId, target);
+      if (chat.kind !== 'channel') throw new Error('Нужен канал: помощник публикует посты в канал');
+      const d = addDesk(accountId, chat);
+      // the channel's own @name in the editor's rules instead of the source channel's
+      const editorPrompt = String(plan.editorPrompt || from.editorPrompt).replaceAll(`@${from.username ?? '\u0000'}`, chat.username ? `@${chat.username}` : '');
+      raw.prepare(`UPDATE channel_desks SET language = ?, about = ?, area = ?, editor_prompt = ?, cover_style = ?, slots = ?, threshold = ?, links = ?,
+        categories = ?, audiences = ?, cover = ?, alerts = ?, autopublish = 0 WHERE id = ?`).run(
+        String(plan.language || from.language), String(plan.about || ''), String(plan.area || city), editorPrompt, String(plan.coverStyle || from.coverStyle),
+        JSON.stringify(from.slots), from.threshold, from.links, JSON.stringify(from.categories), JSON.stringify(from.audiences), from.cover ? 1 : 0, from.alerts ? 1 : 0, d.id);
+      // proposed sources are kept only when they answer: a feed with items, a page with text
+      const rejected: string[] = [];
+      const add = (kind: ChannelSource['kind'], title: string, target: string) =>
+        raw.prepare('INSERT INTO channel_sources(desk_id, kind, title, target, enabled, interval_min, created_at) VALUES(?, ?, ?, ?, 1, ?, ?)')
+          .run(d.id, kind, title || target, target, CHANNEL_SOURCE_KINDS[kind].interval, now());
+      for (const q of Array.isArray(plan.queries) ? plan.queries : []) {
+        if ((q?.kind === 'gnews' || q?.kind === 'search') && String(q.target ?? '').trim()) add(q.kind, String(q.title ?? ''), String(q.target).trim());
+      }
+      await Promise.all([
+        ...(Array.isArray(plan.feeds) ? plan.feeds : []).map(async (f: any) => {
+          const url = String(f?.url ?? '');
+          try {
+            if (!parseFeed((await fetchText(url)).body).length) throw new Error('пустая лента');
+            add('rss', String(f?.title ?? ''), url);
+          } catch {
+            rejected.push(url);
+          }
+        }),
+        ...(Array.isArray(plan.pages) ? plan.pages : []).map(async (pg: any) => {
+          const url = String(pg?.url ?? '');
+          try {
+            if (htmlText((await fetchText(url)).body).length < 500) throw new Error('пустая страница');
+            add('web', String(pg?.title ?? ''), url);
+          } catch {
+            rejected.push(url);
+          }
+        }),
+      ]);
+      return { desk: desk(d.id), sources: listSources(d.id).length, rejected };
+    },
+    async setAvatar(deskId: number, path: string) {
+      const d = desk(deskId);
+      const dir = join(deps.dataDir, 'channels', String(d.id));
+      mkdirSync(dir, { recursive: true });
+      const dest = join(dir, `avatar-${now()}${extname(path) || '.png'}`);
+      copyFileSync(path, dest);
+      await deps.engine.setChatPhoto(d.accountId, d.chatId, dest);
     },
     async redrawCover(id: number): Promise<ChannelPost> {
       const row = raw.prepare('SELECT issue, desk_id, status FROM channel_posts WHERE id = ?').get(id) as Row | undefined;

@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
-import { createChannels, parseIssue, renderIssue, stripLinks } from '../src/main/channels';
+import { applyFixes, createChannels, parseIssue, renderIssue, stripLinks } from '../src/main/channels';
+import { markdownToBlocks } from '../src/main/telegram/markdown';
 import { parseFeed } from '../src/main/channels/feeds';
 import { FakeEngine, makeMsg } from './fakes';
 
@@ -48,13 +49,19 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
     llm: async (prompt, { title }) => {
       prompts.push(prompt);
       // a search page → concrete items; a JSON array with text around it, as models write it
-      if (title === 'channel-factcheck') return /<issue>\n([\s\S]*?)\n<\/issue>/.exec(prompt)?.[1] ?? '';
+      if (title === 'channel-factcheck') return '{"fixes": [], "drop": []}';
       if (title === 'channel-cover-prompt') return 'A poster of the city day';
+      if (title === 'channel-clone') return JSON.stringify({
+        language: 'español', about: 'Málaga for locals', area: 'Málaga and its metropolitan area', editorPrompt: 'Escribe como un vecino de Málaga. 📲 Síguenos: @city_demo',
+        coverStyle: 'sunny', queries: [{ kind: 'gnews', title: 'Ayuntamiento', target: '"Ayuntamiento de Málaga"' }, { kind: 'rss', title: 'bad', target: 'x' }],
+        feeds: [{ title: 'Diario Málaga', url: 'https://news.example/feed' }, { title: 'Inventada', url: 'https://nope.example/rss' }], pages: [],
+      });
+      if (title === 'channel-places') return /La EMT/.test(prompt) ? '{"1": {"title": "📍 Ver las 2 paradas", "places": [{"name": "Plaza Nueva", "where": "Plaza Nueva, Sevilla"}, {"name": "Prado de San Sebastián", "where": "Prado de San Sebastián, Sevilla"}]}}' : '{}';
       if (title === 'channel-extract') return 'Aquí tienes:\n```json\n[{"title": "2x1 en horchata en Triana", "text": "Solo este fin de semana", "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"}]\n```';
       // the editor writes the issue as data; a link slipped into a field must not survive
       return JSON.stringify({
         title: 'Sevilla hoy · miércoles 21', lead: 'Lo que importa hoy.',
-        sections: [{ title: '📰 La ciudad', items: [{ emoji: '🚌', title: 'La EMT amplía el servicio', text: 'Tres líneas nocturnas nuevas. [Fuente](https://news.example/emt)', when: 'desde el lunes', where: 'Plaza Nueva, Sevilla', price: '', tags: ['🆓 gratis'] }] }],
+        sections: [{ title: '📰 La ciudad', items: [{ story: 1, emoji: '🚌', title: 'La EMT amplía el servicio', text: 'Tres líneas nocturnas nuevas. [Fuente](https://news.example/emt)', when: 'desde el lunes', where: 'Plaza Nueva, Sevilla', price: '', tags: ['🆓 gratis'] }] }],
         footer: '📲 Síguenos: @city_demo · vía @other_channel',
       });
     },
@@ -63,7 +70,8 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
       /fútbol/i.test(it.title) ? { p: 0.2, local: 0.9, kind: 'news', category: 'events.sport', audiences: [] }
         : /Madrid/.test(it.title) ? { p: 0.9, local: 0.1, kind: 'news', category: 'city.transport', audiences: [] }
           : /oferta|2x1/i.test(it.title) ? { p: 0.9, local: 0.9, kind: 'deal', category: 'deals.food', audiences: ['evening', 'weekend'] }
-            : { p: 0.8, local: 0.9, kind: 'news', category: 'city.transport', audiences: [] }))),
+            : /huelga/i.test(it.title) ? { p: 0.9, local: 0.9, kind: 'news', category: 'city.transport', audiences: [], urgent: 0.95 }
+              : { p: 0.8, local: 0.9, kind: 'news', category: 'city.transport', audiences: [] }))),
     // one direction per topic: the same story told in other words lands on the same vector
     embed: async (text) => {
       const topic = /EMT|autob[uú]s/i.test(text) ? 0 : /horchata/i.test(text) ? 1 : /Madrid/.test(text) ? 2 : 3 + (text.length % 5);
@@ -82,6 +90,25 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
 }
 
 describe('issue layout', () => {
+  it('several places of one story fold into a list, each on the map; a lone-emoji tag is dropped', () => {
+    const issue = parseIssue(JSON.stringify({
+      title: 'T', lead: '', footer: 'F',
+      sections: [{ title: 'S', items: [{ emoji: '🏛️', title: 'Open House', text: 'Edificios abiertos.', tags: ['🆓', '🆓 gratis'],
+        places: [{ name: 'Finca Roja', where: 'Finca Roja, Valencia' }, { name: 'Parque Gulliver' }], placesTitle: '📍 Ver los 2 edificios' }] }],
+    }));
+    expect(issue.sections[0].items[0].tags).toEqual(['🆓 gratis']);
+    const text = renderIssue(issue, { own: true, username: null });
+    expect(text).toContain([
+      '<details><summary>📍 Ver los 2 edificios</summary>', '',
+      '- [Finca Roja](https://www.google.com/maps/search/?api=1&query=Finca%20Roja%2C%20Valencia)',
+      '- [Parque Gulliver](https://www.google.com/maps/search/?api=1&query=Parque%20Gulliver)', '', '</details>',
+    ].join('\n'));
+    const blocks = markdownToBlocks(text);
+    const details = blocks.find((b) => b._ === 'inputPageBlockDetails') as { blocks: { _: string }[]; is_open: boolean };
+    expect(details.is_open).toBe(false);
+    expect(details.blocks[0]._).toBe('inputPageBlockList');
+  });
+
   it('title, lead as a quote, sections divided, items with tags and a when · where (map) · price line', () => {
     const issue = parseIssue(JSON.stringify({
       title: 'Valencia Hoy · 21 oct', lead: 'Un finde lleno de planes.',
@@ -98,11 +125,31 @@ describe('issue layout', () => {
     expect(issue.sections).toHaveLength(2);
     expect(renderIssue(issue, { own: true, username: 'x' })).toBe([
       '## Valencia Hoy · 21 oct', '', '> Un finde lleno de planes.', '', '---', '', '### 📰 La ciudad', '',
-      '**🏗️ Benimaclet tendrá 1.345 viviendas**', 'El pleno lo aprueba el viernes.', '📍 Benimaclet', '', '---', '', '### 🎭 Agenda', '',
-      '**🎶 Tardeo remember** · 🆓 gratis · 🌙 tarde', 'Éxitos de los 90.',
-      '🗓 sáb 24, 17:00 · 📍 [Recinto Ágora, Torrent](https://www.google.com/maps/search/?api=1&query=Recinto%20%C3%81gora%2C%20Torrent) · 💶 gratis con invitación',
+      '#### 🏗️ Benimaclet tendrá 1.345 viviendas', '', 'El pleno lo aprueba el viernes.', '*📍 Benimaclet*', '', '---', '', '### 🎭 Agenda', '',
+      '#### 🎶 Tardeo remember', '', 'Éxitos de los 90.',
+      '*🆓 gratis · 🌙 tarde · 🗓 sáb 24, 17:00 · 📍 [Recinto Ágora, Torrent](https://www.google.com/maps/search/?api=1&query=Recinto%20%C3%81gora%2C%20Torrent) · 💶 gratis con invitación*',
       '', '---', '', '📲 Síguenos',
     ].join('\n'));
+  });
+});
+
+describe('proofreading', () => {
+  it('fixes are applied to the editor\'s issue; an item can be dropped; a section is never lost by rewriting', () => {
+    const issue = parseIssue(JSON.stringify({
+      title: 'T', lead: '', footer: '📲 Síguenos',
+      sections: [
+        { title: 'A', items: [{ title: 'Festival', text: 'Conciertos gratis.', price: 'gratis', tags: ['🆓 gratis'] }, { title: 'Inventado', text: 'x' }] },
+        { title: 'B', items: [{ title: 'Mercado', text: 'Sábado.' }] },
+      ],
+    }));
+    const fixed = applyFixes(issue, {
+      fixes: [{ section: 0, item: 0, field: 'price', value: 'visitas guiadas gratis' }, { section: 0, item: 0, field: 'tags', value: [] }, { section: 9, item: 0, field: 'text', value: 'nope' }, { section: 1, item: 0, field: 'emoji', value: 'x' }],
+      drop: [{ section: 0, item: 1 }],
+    });
+    expect(applyFixes(issue, { fixes: [{ field: 'lead', value: 'Sin adornos.' }] }).lead).toBe('Sin adornos.');
+    expect(fixed.sections.map((s) => s.items.map((i) => i.title))).toEqual([['Festival'], ['Mercado']]);
+    expect(fixed.sections[0].items[0]).toMatchObject({ price: 'visitas guiadas gratis', tags: [] });
+    expect(fixed.footer).toBe('📲 Síguenos');
   });
 });
 
@@ -202,7 +249,7 @@ describe('channel assistant', () => {
   });
 
   it('the same story from several sources is one story: Jev scores it once, the feed shows its sources, a post tells it once', async () => {
-    const { channels, engine, acc, scored, prompts } = setup();
+    const { channels, engine, acc, scored, prompts, editor } = setup();
     const d = await channels.createDesk(acc.id, 't.me/city_demo');
     channels.saveDesk({ ...d, area: 'Sevilla y su área metropolitana', links: 'none' });
     channels.saveSource({ deskId: d.id, kind: 'rss', title: 'News', target: 'https://news.example/feed', enabled: true, intervalMin: 30 });
@@ -227,17 +274,18 @@ describe('channel assistant', () => {
     expect(stats.sources.find((s) => s.title === 'Noticias City')).toMatchObject({ items: 2, first: 1, duplicates: 1 });
 
     const p = await channels.compose(d.id, 'digest');
-    const prompt = prompts.at(-2)!; // the editor's; the last one is the proofreader's
-    expect(prompts.at(-1)).toContain('фактчекер');
-    expect(prompts.at(-1)).toContain('<materials>');
+    const prompt = editor();
+    const checker = prompts.find((x) => x.includes('фактчекер'))!;
+    expect(checker).toContain('<materials>');
     expect(prompt).toContain('собственные материалы редакции');
     expect(prompt).toContain('География канала: Sevilla');
     expect(prompt.match(/<story /g)).toHaveLength(1);
     expect(prompt.match(/<source /g)).toHaveLength(2);
     expect(prompt).not.toContain('url=');
     expect(p.text.replace(/\]\(https:\/\/www\.google\.com\/maps\/search\/[^)]+\)/g, '')).not.toMatch(/https?:|\]\(|other_channel/); // only map links remain
-    expect(p.text).toContain('📍 [Plaza Nueva, Sevilla](https://www.google.com/maps/search/?api=1&query=Plaza%20Nueva%2C%20Sevilla)');
+    expect(p.text).toContain('📍 [Plaza Nueva, Sevilla](https://www.google.com/maps/search/?api=1&query=Plaza%20Nueva%2C%20Sevilla)*');
     expect(channels.stories(d.id, 'used', 50)[0].items).toHaveLength(2); // both tellings are used
+    expect(p.text).toContain('<details><summary>📍 Ver las 2 paradas</summary>'); // the places step filled the list the editor skipped
   });
 
   it('a close neighbour is the same story only if Jev says so', async () => {
@@ -298,6 +346,55 @@ describe('channel assistant', () => {
     // a draft scheduled by hand for later
     const q = await channels.compose(d.id, 'top', undefined, {}).catch(() => null);
     expect(q).toBeNull(); // nothing fresh left for it
+  });
+
+  it('an urgent story goes out at once as a short post without a cover — not at night, a few a day', async () => {
+    let t = new Date(2026, 9, 21, 8, 0).getTime();
+    const { channels, engine, acc, editor } = setup({ now: () => t });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, alerts: true, autopublish: true, slots: [] });
+    channels.saveSource({ deskId: d.id, kind: 'telegram', title: 'Noticias City', target: '@noticias_city', enabled: true, intervalMin: 15 });
+    const [src] = channels.sources(d.id);
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 1, 'Huelga de metro mañana: la línea 3 no circulará de 7:00 a 10:00, habrá autobuses de sustitución', { date: t })]);
+    await channels.runSource(src.id);
+    expect(engine.posted).toHaveLength(1);
+    const alert = channels.posts(d.id, 5)[0];
+    expect(alert).toMatchObject({ kind: 'alert', status: 'published', image: null });
+    expect(editor()).toContain('срочное сообщение');
+    // at night it waits
+    t = new Date(2026, 9, 21, 23, 30).getTime();
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 2, 'Huelga de autobuses nocturnos esta noche: sin servicio en tres líneas hasta las 6:00 de la mañana', { date: t })]);
+    await channels.runSource(src.id);
+    expect(engine.posted).toHaveLength(1);
+  });
+
+  it('a slot with days runs only on them, in the calendar and on the clock', async () => {
+    let t = new Date(2026, 9, 21, 18, 59).getTime(); // a Wednesday
+    const { channels, engine, acc } = setup({ now: () => t });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, autopublish: true, slots: [{ time: '19:00', kind: 'deals', days: [4] }] }); // Thursdays
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    await channels.runSource(channels.sources(d.id)[0].id);
+    expect(channels.calendar(d.id, 0, 6).map((e) => new Date(e.at).getDay())).toEqual([4]);
+    t += 2 * 60_000;
+    await channels.tick();
+    expect(engine.posted).toHaveLength(0); // Wednesday: no
+    t = new Date(2026, 9, 22, 19, 1).getTime();
+    await channels.tick();
+    expect(engine.posted).toHaveLength(1); // Thursday: yes
+  });
+
+  it('the same desk for another city: structure copied, texts rewritten, only feeds that answer are kept', async () => {
+    const { channels, engine, acc } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, alerts: true, slots: [{ time: '19:00', kind: 'deals', days: [4], audiences: ['weekend'] }] });
+    channels.saveSource({ deskId: d.id, kind: 'gnews', title: 'Ayuntamiento', target: '"Ayuntamiento de Sevilla"', enabled: true, intervalMin: 60 });
+    engine.resolveMap.set('t.me/malaga_demo', { chatId: -1009000000077, title: 'Málaga hoy', username: 'malaga_demo', kind: 'channel', memberCount: 0, description: null, isMember: true, isAdmin: true });
+    const r = await channels.cloneForCity(d.id, acc.id, 'Málaga', { link: 't.me/malaga_demo' });
+    expect(r.desk).toMatchObject({ title: 'Málaga hoy', area: 'Málaga and its metropolitan area', alerts: true, autopublish: false, slots: [{ time: '19:00', kind: 'deals', days: [4], audiences: ['weekend'] }] });
+    expect(r.desk.editorPrompt).toContain('@malaga_demo'); // the new channel's own name, not the source's
+    expect(channels.sources(r.desk.id).map((x) => `${x.kind}:${x.title}`)).toEqual(['gnews:Ayuntamiento', 'rss:Diario Málaga']);
+    expect(r.rejected).toEqual(['https://nope.example/rss']);
   });
 
   it('a slot made of chosen rubrics takes only their stories', async () => {

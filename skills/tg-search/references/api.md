@@ -180,7 +180,11 @@ export interface Api {
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;
     unpublish(id: number): Promise<ChannelPost>;
-    redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again // a published post deleted from the channel; its stories return to work
+    redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again
+    setAvatar(deskId: number, path?: string): Promise<void>;
+    // The same desk for another city: its structure copied, the texts and the search queries rewritten for the city, local
+    // feeds and official news pages proposed and kept only when they answer. `target` — an existing channel or a new one.
+    cloneForCity(fromDeskId: number, accountId: number, city: string, target: { link: string } | { title: string; description: string; username?: string }): Promise<{ desk: ChannelDesk; sources: number; rejected: string[] }>; // the channel's picture; no path — the system file dialog // a published post deleted from the channel; its stories return to work
   };
   assistants: {
     status(): Promise<AiAssistantsStatus>;

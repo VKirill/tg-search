@@ -552,7 +552,7 @@ const mockScenarios: HelperScenarioDef[] = BUILTIN_HELPER_SCENARIOS.map((x) => (
 const mockDesks: ChannelDesk[] = [{
   id: 1, chatId: -1009000000001, title: 'Sevilla al día', username: 'city_demo', accountId: 1, enabled: true, language: 'español',
   about: 'Noticias, ofertas y eventos de Sevilla para residentes', editorPrompt: '', autopublish: false, threshold: 0.6,
-  area: 'Sevilla y su área metropolitana', links: 'none', categories: DEFAULT_CHANNEL_CATEGORIES, audiences: DEFAULT_CHANNEL_AUDIENCES, cover: true, coverStyle: '',
+  area: 'Sevilla y su área metropolitana', links: 'none', categories: DEFAULT_CHANNEL_CATEGORIES, audiences: DEFAULT_CHANNEL_AUDIENCES, alerts: false, cover: true, coverStyle: '',
   slots: [{ time: '09:00', kind: 'digest' }, { time: '19:00', kind: 'deals' }], createdAt: Date.now() - 86400_000,
 }];
 const mockChannelSources: ChannelSource[] = [
@@ -2081,6 +2081,12 @@ export function createMockApi(): Api {
         const p = mockChannelPosts.find((x) => x.id === id)!;
         Object.assign(p, { status: 'published', publishedAt: Date.now(), messageId: 101 });
         return p;
+      },
+      async setAvatar() {},
+      async cloneForCity(_from, accountId, city) {
+        const d: ChannelDesk = { ...mockDesks[0], id: Date.now(), chatId: -Date.now(), title: `${city} hoy`, username: null, accountId, area: city, autopublish: false };
+        mockDesks.push(d);
+        return { desk: d, sources: 9, rejected: [] };
       },
       async redrawCover(id) {
         return mockChannelPosts.find((x) => x.id === id)!;

@@ -48,8 +48,24 @@ export function parseJsonFromLlm(raw: string): unknown {
   const [open, close] = arr >= 0 && (obj < 0 || arr < obj) ? ['[', ']'] : ['{', '}'];
   const start = s.indexOf(open);
   const end = s.lastIndexOf(close);
-  if (start >= 0 && end > start) s = s.slice(start, end + 1);
-  return JSON.parse(s);
+  if (start < 0 || end <= start) return JSON.parse(s);
+  try {
+    return JSON.parse(s.slice(start, end + 1));
+  } catch (err) {
+    // something after the value (a second object, a remark): the first balanced value, strings respected
+    let depth = 0;
+    let inStr = false;
+    for (let i = start; i < s.length; i++) {
+      const c = s[i];
+      if (inStr) {
+        if (c === '\\') i++;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === '{' || c === '[') depth++;
+      else if ((c === '}' || c === ']') && --depth === 0) return JSON.parse(s.slice(start, i + 1));
+    }
+    throw err;
+  }
 }
 
 function requireApiKey(settings: Settings): string {

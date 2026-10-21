@@ -553,6 +553,11 @@ export class TdlEngine implements TelegramEngine {
     await this.invoke(slot, { _: 'leaveChat', chat_id: chatId });
   }
 
+  async setChatPhoto(accountId: number, chatId: number, path: string): Promise<void> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, { _: 'setChatPhoto', chat_id: chatId, photo: { _: 'inputChatPhotoStatic', photo: { _: 'inputFileLocal', path } } });
+  }
+
   async createChannel(accountId: number, opts: { title: string; description: string; username?: string; photo?: string }): Promise<TgChat> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const username = opts.username?.trim().replace(/^@/, '');

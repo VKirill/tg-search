@@ -89,6 +89,7 @@ export interface TelegramEngine {
 
   sendToChat(accountId: number, chatId: number, text: string): Promise<TgMessage>; // plain post, e.g. broadcasts
   // A new channel owned by the account; a public link if `username` is given (checked first), a picture if `photo`
+  setChatPhoto(accountId: number, chatId: number, path: string): Promise<void>; // the account must be allowed to change the chat's info
   createChannel(accountId: number, opts: { title: string; description: string; username?: string; photo?: string }): Promise<TgChat>;
   // Voice notes: OGG/Opus file; waveform is optional. Download returns a local file path.
   sendVoice(accountId: number, chatId: number, filePath: string, durationSec: number, replyToMessageId?: number): Promise<TgMessage>;

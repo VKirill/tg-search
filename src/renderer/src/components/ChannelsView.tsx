@@ -48,6 +48,7 @@ export function ChannelsView() {
   const [link, setLink] = useState('');
   const [creating, setCreating] = useState(false);
   const [fresh, setFresh] = useState({ title: '', description: '', username: '' });
+  const [clone, setClone] = useState({ city: '', link: '', title: '', username: '' });
   const fail = useCallback((e: unknown) => toast(e instanceof Error ? e.message : String(e)), [toast]);
 
   useEffect(() => {
@@ -79,6 +80,25 @@ export function ChannelsView() {
       setDesks(await api.channels.desks());
       setPick(d.id);
       setFresh({ title: '', description: '', username: '' });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setCreating(false);
+    }
+  };
+  const cloneDesk = async () => {
+    const account = accounts[0];
+    if (!account || !pick) return;
+    setCreating(true);
+    try {
+      const target = clone.link.trim()
+        ? { link: clone.link.trim() }
+        : { title: clone.title.trim() || `${clone.city} hoy`, description: '', username: clone.username.trim() || undefined };
+      const r = await api.channels.cloneForCity(pick, account.id, clone.city.trim(), target);
+      setDesks(await api.channels.desks());
+      setPick(r.desk.id);
+      setClone({ city: '', link: '', title: '', username: '' });
+      toast(`Канал готов: источников ${r.sources}${r.rejected.length ? `, не ответили и не добавлены: ${r.rejected.length}` : ''}. Проверьте настройки и включите публикацию.`);
     } catch (e) {
       fail(e);
     } finally {
@@ -123,6 +143,23 @@ export function ChannelsView() {
               <p className="field-hint">Канал создаётся от аккаунта {accounts[0]?.username ? `@${accounts[0].username}` : ''} — он станет владельцем.</p>
             </div>
           </details>
+          {desk && (
+            <details className="groups-common">
+              <summary>Такой же канал для другого города</summary>
+              <div className="ai-engine__form">
+                <p className="field-hint">По образцу «{desk.title}»: рубрики, аудитории, расписание, оформление и правила — те же; описание, география, язык, правила редактора и запросы — под новый город; местные ленты и страницы мэрии подбираются и проверяются.</p>
+                <input className="text-input" value={clone.city} placeholder="Город, например Barcelona" onChange={(e) => setClone({ ...clone, city: e.target.value })} />
+                <input className="text-input" value={clone.link} placeholder="Готовый канал: t.me/… (или оставьте пустым)" onChange={(e) => setClone({ ...clone, link: e.target.value })} />
+                {!clone.link.trim() && (
+                  <>
+                    <input className="text-input" value={clone.title} placeholder="Название нового канала" onChange={(e) => setClone({ ...clone, title: e.target.value })} />
+                    <input className="text-input" value={clone.username} placeholder="Публичная ссылка нового канала, латиницей" onChange={(e) => setClone({ ...clone, username: e.target.value })} />
+                  </>
+                )}
+                <button type="button" className="btn btn--sm btn--primary" disabled={!accounts.length || !clone.city.trim() || creating} onClick={cloneDesk}>{creating ? 'Собираю…' : 'Создать по образцу'}</button>
+              </div>
+            </details>
+          )}
         </aside>
         {desk ? (
           <DeskEditor
@@ -216,6 +253,7 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
           <label><input type="checkbox" checked={d.enabled} onChange={(e) => patch({ enabled: e.target.checked })} /> работает</label>
           <label><input type="checkbox" checked={d.autopublish} onChange={(e) => patch({ autopublish: e.target.checked })} /> публиковать сам, без одобрения</label>
           <label><input type="checkbox" checked={d.cover} onChange={(e) => patch({ cover: e.target.checked })} /> обложка к каждому посту</label>
+          <label title="Сбои транспорта, предупреждения о погоде, перекрытия, отключения — сразу, вне расписания; до 4 в день, не ночью"><input type="checkbox" checked={d.alerts} onChange={(e) => patch({ alerts: e.target.checked })} /> срочные посты сразу</label>
         </div>
         <div className="groups-inline">
           <label>Аккаунт
@@ -264,8 +302,9 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
             <div key={i} className="groups-inline">
               <input className="text-input" type="time" value={s.time} onChange={(e) => patch({ slots: d.slots.map((x, j) => (j === i ? { ...x, time: e.target.value } : x)) })} />
               <select value={s.kind} onChange={(e) => patch({ slots: d.slots.map((x, j) => (j === i ? { ...x, kind: e.target.value as ChannelSlotKind } : x)) })}>
-                {Object.entries(CHANNEL_SLOT_KINDS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                {Object.entries(CHANNEL_SLOT_KINDS).filter(([k]) => k !== 'alert').map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
+              <DaysPicker value={s.days ?? []} onChange={(v) => patch({ slots: d.slots.map((x, j) => (j === i ? { ...x, days: v } : x)) })} />
               <RubricPicker categories={d.categories} value={s.categories ?? []} onChange={(v) => patch({ slots: d.slots.map((x, j) => (j === i ? { ...x, categories: v } : x)) })} />
               <AudiencePicker audiences={d.audiences} value={s.audiences ?? []} onChange={(v) => patch({ slots: d.slots.map((x, j) => (j === i ? { ...x, audiences: v } : x)) })} />
               <button type="button" className="btn btn--sm btn--ghost" onClick={() => patch({ slots: d.slots.filter((_, j) => j !== i) })}>×</button>
@@ -281,6 +320,7 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
           <button type="button" className="btn btn--sm" disabled={dirty || !!busy} title="После смены описания, географии или рубрик" onClick={() => busyRun('rescore', async () => toast(`Пересортировано материалов: ${await api.channels.rescore(d.id)}`))}>
             {busy === 'rescore' ? 'Сортирую…' : 'Пересортировать свежие'}
           </button>
+          <button type="button" className="btn btn--sm" onClick={() => api.channels.setAvatar(d.id).then(() => toast('Аватар канала обновлён'), fail)}>Сменить аватар…</button>
           <button type="button" className="btn btn--sm btn--ghost" onClick={() => confirm(`Отключить канал «${d.title}»? Источники, материалы и посты будут удалены.`) && api.channels.removeDesk(d.id).then(onRemoved, fail)}>Отключить канал</button>
         </div>
       </section>
@@ -309,7 +349,7 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
       <section className="settings-card">
         <h2 className="section-title">Посты</h2>
         <div className="channel-row">
-          {Object.entries(CHANNEL_SLOT_KINDS).map(([k, label]) => (
+          {Object.entries(CHANNEL_SLOT_KINDS).filter(([k]) => k !== 'alert').map(([k, label]) => (
             <button key={k} type="button" className="btn btn--sm" disabled={!!busy} onClick={() => compose(k as ChannelSlotKind)}>{busy === 'compose' ? 'Пишу…' : label}</button>
           ))}
         </div>
@@ -443,6 +483,21 @@ function Calendar({ entries, busy, onPrepare }: { entries: ChannelCalendarEntry[
         ))}
       </div>
     </section>
+  );
+}
+
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+const WEEK_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+// Days of the week a slot runs on; none chosen — every day
+function DaysPicker({ value, onChange }: { value: number[]; onChange: (v: number[]) => void }) {
+  return (
+    <span className="channel-days" title="Дни недели; ни один не выбран — каждый день">
+      {WEEK.map((day) => (
+        <button key={day} type="button" className={`channel-days__day${value.includes(day) ? ' channel-days__day--on' : ''}`}
+          onClick={() => onChange(value.includes(day) ? value.filter((x) => x !== day) : [...value, day])}>{WEEK_NAMES[day]}</button>
+      ))}
+    </span>
   );
 }
 
