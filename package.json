@@ -13,6 +13,7 @@
     "dist": "electron-vite build && electron-builder --mac dmg"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "prebuilt-tdlib": "^0.1008067.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -36,6 +37,8 @@
     "es5-ext": false,
     "utf-8-validate": false,
     "fsevents@2.3.3": true,
-    "tdl@8.1.0": true
+    "tdl@8.1.0": true,
+    "onnxruntime-node@1.30.0": true,
+    "protobufjs@7.6.6": true
   }
 }
