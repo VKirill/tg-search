@@ -101,6 +101,9 @@ app.whenReady().then(async () => {
     emit,
     openExternal: (url) => shell.openExternal(url),
     payments: new YooKassaProvider(getSettings),
+    revealInFolder: async (path) => {
+      shell.showItemInFolder(path);
+    },
   });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {

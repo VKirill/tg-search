@@ -34,6 +34,7 @@ import type { Lead } from '../shared/types';
 import type { ExecutorRegistry } from './executors/types';
 import type { PaymentProvider } from './payments/types';
 import { createOrders, stubExecutorRegistry } from './pipeline/orders';
+import { createDossier } from './dossier';
 
 export interface AppDeps {
   db: Db;
@@ -49,7 +50,7 @@ export interface AppDeps {
   openExternal: (url: string) => Promise<void>;
   executors?: ExecutorRegistry;
   payments?: PaymentProvider;
-  dossier?: { onOrder?(order: import('../shared/types').Order): void | Promise<void> };
+  revealInFolder?: (path: string) => Promise<void>;
 }
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
@@ -58,14 +59,22 @@ export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, openExternal, speech, dataDir } = deps;
   const manager = deps.manager ?? stubManagerAi();
   const crmAi = deps.crmAi ?? stubCrmAi();
+  const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
   const crm = createCrm({ db, crmAi, emit: deps.emit });
   const emit = (e: AppEvent) => {
     deps.emit(e);
-    if (e.type === 'message:new') crm.onMessage(e.message);
-    if (e.type === 'lead:update') crm.onLeadUpdate(e.lead);
+    if (e.type === 'message:new') {
+      crm.onMessage(e.message);
+      dossier.onMessage(e.message);
+    }
+    if (e.type === 'lead:update') {
+      crm.onLeadUpdate(e.lead);
+      dossier.onLeadUpdate(e.lead);
+    }
+    if (e.type === 'order:update') dossier.onOrder(e.order);
   };
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer };
+  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer, dossier };
   const payments = deps.payments ?? {
     create: async () => {
       throw new Error('Платежи не настроены');
@@ -74,12 +83,13 @@ export function createApp(deps: AppDeps): AppHandlers {
       throw new Error('Платежи не настроены');
     },
   };
+  // The dossier gets order changes from the 'order:update' route above; passing it here too would log them twice
   const orders = createOrders({
     ...pipeline,
+    dossier: undefined,
     dataDir,
     payments,
     executors: deps.executors ?? stubExecutorRegistry(),
-    dossier: deps.dossier,
   });
   const autopilot = createAutopilot(pipeline);
   const managerAgent = createManagerAgent({ ...pipeline, manager, crm, orders });
@@ -156,6 +166,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       managerAgent.stop();
       autopilot.stop();
       crm.stop();
+      dossier.stop();
       await engine.close();
     },
 
@@ -383,8 +394,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
     },
     dossier: {
-      path: notYet('dossier worker'),
-      open: notYet('dossier worker'),
+      path: async (leadId) => dossier.path(leadId),
+      open: async (leadId) => (deps.revealInFolder ?? (async () => {}))(dossier.path(leadId)),
     },
     stats: {
       report: async (period) => buildReport(db, period),
