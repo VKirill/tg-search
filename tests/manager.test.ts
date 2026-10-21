@@ -275,4 +275,15 @@ describe('app private message', () => {
     expect(manager.replyCalls).toBeGreaterThan(0);
     await app.stop();
   });
+
+  it('after a restart, a dialog whose last word is the client\'s gets answered', async () => {
+    const { db, engine, manager, lead } = setupManager();
+    db.addMessage({ leadId: lead.id, accountId: null, direction: 'in', where: 'dm', kind: 'text', text: 'а 15 реши',
+      tgChatId: 500, tgMessageId: 11, date: Date.now(), auto: false });
+    const app = createApp({ db, engine, ai: new FakeAi(), manager, emit: () => {}, openExternal: async () => {}, ...testAppDeps() });
+    await app.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(manager.replyCalls).toBeGreaterThan(0);
+    await app.stop();
+  });
 });

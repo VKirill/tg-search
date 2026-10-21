@@ -466,6 +466,27 @@ export function createApp(deps: AppDeps): AppHandlers {
         orders.run(o.id).catch((err) => console.error('resume order', o.id, err));
       }
       realtime.start();
+      // a reply waits in memory (the pause before answering, the agent's turn): after a restart, private dialogs whose
+      // last word is the client's get answered — unless the work is already running and will report by itself
+      const busy = new Set([
+        ...db.listOrders().filter((o) => o.status === 'in_progress' || o.status === 'paid').map((o) => o.leadId),
+        ...(db.raw.prepare("SELECT DISTINCT lead_id FROM agent_tasks WHERE status IN ('queued', 'running')").all() as { lead_id: number }[]).map((r) => r.lead_id),
+      ]);
+      // …and that the agent's session has not read yet (a message it saw and chose to leave unanswered stays so)
+      const hasSessions = !!db.raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'opencode_sessions'").get();
+      const unanswered = db.raw.prepare(`SELECT m.lead_id AS id FROM messages m
+        JOIN (SELECT lead_id, MAX(id) AS mid FROM messages GROUP BY lead_id) last ON m.id = last.mid
+        ${hasSessions ? "LEFT JOIN opencode_sessions s ON s.key = 'lead:' || m.lead_id" : ''}
+        WHERE m.direction = 'in' AND m."where" = 'dm' AND m.date > ?${hasSessions ? ' AND COALESCE(s.synced_message_id, 0) < m.id' : ''}`)
+        .all(Date.now() - 24 * 3600_000) as { id: number }[];
+      for (const { id } of unanswered.filter((r) => !busy.has(r.id))) {
+        try {
+          managerAgent.onIncoming(id); // checks itself: auto-replies on or «свои люди», not handed over
+        } catch (err) {
+          console.error('resume dialog', id, err);
+        }
+      }
+      if (unanswered.length) console.log(`resume: ${unanswered.length} dialog(s) waiting for an answer`);
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
