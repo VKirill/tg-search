@@ -226,6 +226,7 @@ export function createOperator(deps: OperatorDeps): Operator {
         agentName,
         role: agentRole(agentDef.model),
         binding: { ctx, tools, agentName, agent: agentDef },
+        canRetry: () => !turnState.replyUsed && !turnState.handoff, // the client saw nothing yet: the next model may try
         prompt: (synced) => {
           const all = lead.id ? deps.db.listMessages(lead.id) : [];
           // the session already holds its own replies; new are the client's messages and the owner's manual ones

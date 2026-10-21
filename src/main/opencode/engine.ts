@@ -13,12 +13,15 @@ import { recordUsage } from '../usage';
 import { createBridge, type SessionBinding, type ToolCatalogEntry } from './bridge';
 import { TOOL_PREFIX, writeOpencodeConfig, type AgentConfig, type ProviderConfig } from './config';
 import { importFromUserOpencode, mergeProviders, providersFromSettings } from './importProviders';
-import { pickModel, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
+import { pickModel, rankModels, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
 import { createOpencodeRuntime } from './runtime';
 import { createOpencodeServer, type OpencodeStatus } from './server';
 import { createSessions, ONESHOT_AGENT, type ModelRef, type TurnResult } from './session';
 
 export const UPDATE_CHECK_MS = 24 * 3600_000;
+const MAX_ATTEMPTS = 4; // models tried for one job before giving up
+// a model that failed rests: a rate limit (free models: ~20 a minute, a daily cap) longer than a one-off error
+const cooldownMs = (error: string) => (/429|rate|limit|quota|exhaust|too many/i.test(error) ? 30 * 60_000 : 10 * 60_000);
 
 // Our agent (manager, researcher…) → the OpenCode agent id
 export const ocAgentId = (name: string) => `tgs-${name}`;
@@ -141,25 +144,48 @@ export function createAiEngine(deps: {
     } catch {
       helpers = [];
     }
-    return { main: s.aiMainModel, helpers };
+    return { main: s.aiMainModel, helpers, useFree: s.aiUseFree !== '0' };
+  }
+
+  const cooling = new Map<string, number>(); // model ref → resting until
+  const routeOpts = () => ({ useFree: choice().useFree, cooling: (ref: string) => (cooling.get(ref) ?? 0) > Date.now() });
+  const refOf = (m: ModelRef) => `${m.providerID}/${m.id}`;
+  function failed(m: ModelRef, error: string) {
+    cooling.set(refOf(m), Date.now() + cooldownMs(error));
+    console.warn(`model ${refOf(m)} failed, trying the next one: ${error.slice(0, 200)}`);
   }
 
   function model(role: ModelRole, need: { tools?: boolean; vision?: boolean } = {}): ModelRef {
-    return pickModel(catalog, choice(), role, need);
+    return pickModel(catalog, choice(), role, need, routeOpts());
+  }
+
+  // the models to try for a job, best first; at least the one pickModel would give (or its error)
+  function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }): ModelRef[] {
+    const list = rankModels(catalog, choice(), role, need, routeOpts()).slice(0, MAX_ATTEMPTS);
+    return list.length ? list : [model(role, need)];
   }
 
   const gateway: LlmGateway = {
     async complete(req) {
       // no silent fallback to a provider's API: until OpenCode is up, model requests fail with the reason
       if (server.status().state !== 'ready') throw new Error(`ИИ-движок OpenCode не запущен: ${server.status().message ?? server.status().state}`);
-      const m = model(req.role, { vision: !!req.images?.length });
-      const text = await sessions.oneShot({ model: m, text: gatewayPrompt(req), files: req.images, title: req.title });
-      recordUsage({ kind: 'llm', model: `${m.providerID}/${m.id}` });
-      return text;
+      let lastError: unknown;
+      for (const m of candidates(req.role, { vision: !!req.images?.length })) {
+        try {
+          const text = await sessions.oneShot({ model: m, text: gatewayPrompt(req), files: req.images, title: req.title });
+          recordUsage({ kind: 'llm', model: refOf(m) });
+          return text;
+        } catch (err) {
+          lastError = err;
+          failed(m, err instanceof Error ? err.message : String(err));
+        }
+      }
+      throw lastError;
     },
   };
 
-  // An agent turn in the dialog's persistent session (dry runs get a throwaway one)
+  // An agent turn in the dialog's persistent session (dry runs get a throwaway one). A failed model hands the turn to
+  // the next candidate in the same session, unless the turn already did something visible (canRetry).
   async function agentTurn(opts: {
     key: string | null; // 'lead:<id>' / 'task:<id>'; null — throwaway session
     agentName: string;
@@ -169,8 +195,10 @@ export function createAiEngine(deps: {
     binding: SessionBinding;
     timeoutMs?: number;
     parentKey?: string;
-  }): Promise<TurnResult> {
-    const m = model(opts.role, { tools: true, vision: !!opts.files?.length });
+    requireText?: boolean; // the turn's text is the result (subagents): an empty one counts as a failure
+    canRetry?: () => boolean;
+  }): Promise<TurnResult & { model: string }> {
+    const models = candidates(opts.role, { tools: true, vision: !!opts.files?.length });
     const row = opts.key
       ? deps.db.raw.prepare('SELECT session_id, synced_message_id FROM opencode_sessions WHERE key = ?').get(opts.key) as { session_id: string; synced_message_id: number } | undefined
       : undefined;
@@ -179,17 +207,26 @@ export function createAiEngine(deps: {
       const parent = opts.parentKey
         ? (deps.db.raw.prepare('SELECT session_id FROM opencode_sessions WHERE key = ?').get(opts.parentKey) as { session_id: string } | undefined)?.session_id
         : undefined;
-      sessionID = await sessions.create({ agent: ocAgentId(opts.agentName), model: m, title: opts.key ?? 'sandbox', parentID: parent });
+      sessionID = await sessions.create({ agent: ocAgentId(opts.agentName), model: models[0], title: opts.key ?? 'sandbox', parentID: parent });
       if (opts.key) deps.db.raw.prepare('INSERT OR REPLACE INTO opencode_sessions(key, session_id, created_at) VALUES(?, ?, ?)').run(opts.key, sessionID, Date.now());
-    } else {
-      await sessions.setModel(sessionID, m); // the owner may have switched models since the last turn
     }
     const { text, lastMessageId } = opts.prompt(row?.synced_message_id ?? 0);
     try {
-      const result = await sessions.runTurn(sessionID, { text, files: opts.files }, opts.binding, opts.timeoutMs);
-      if (opts.key) deps.db.raw.prepare('UPDATE opencode_sessions SET synced_message_id = ? WHERE key = ?').run(lastMessageId, opts.key);
-      recordUsage({ kind: 'llm', model: `${m.providerID}/${m.id}`, costUsd: result.costUsd });
-      return result;
+      let result: TurnResult = { outcome: 'failed', text: '', error: 'нет модели', costUsd: 0 };
+      for (const [i, m] of models.entries()) {
+        if (i > 0 || row) await sessions.setModel(sessionID, m); // the owner may have switched models since the last turn
+        result = await sessions.runTurn(sessionID, { text, files: opts.files }, opts.binding, opts.timeoutMs);
+        recordUsage({ kind: 'llm', model: refOf(m), costUsd: result.costUsd });
+        const ok = result.outcome === 'succeeded' && (!opts.requireText || !!result.text.trim());
+        if (ok) {
+          if (opts.key) deps.db.raw.prepare('UPDATE opencode_sessions SET synced_message_id = ? WHERE key = ?').run(lastMessageId, opts.key);
+          return { ...result, model: refOf(m) };
+        }
+        if (result.outcome === 'interrupted') break;
+        failed(m, result.error ?? (result.outcome === 'succeeded' ? 'пустой ответ' : result.outcome));
+        if (opts.canRetry && !opts.canRetry()) break;
+      }
+      return { ...result, model: '' };
     } finally {
       if (!opts.key) void sessions.remove(sessionID);
     }

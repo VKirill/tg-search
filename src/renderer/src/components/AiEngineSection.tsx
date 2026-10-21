@@ -12,7 +12,7 @@ const STATE: Record<AiStatus['state'], string> = {
   error: 'ошибка',
 };
 
-const price = (m: AiModel) => (m.costIn || m.costOut ? `$${m.costIn} / $${m.costOut}` : 'подписка');
+const price = (m: AiModel) => (m.free ? 'бесплатно' : m.costIn || m.costOut ? `$${m.costIn} / $${m.costOut}` : 'подписка');
 // catalog providers imported from OpenCode carry only their id
 const KNOWN: Record<string, string> = { openrouter: 'OpenRouter', deepseek: 'DeepSeek', 'zai-coding-plan': 'Z.ai (GLM)', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' };
 const plural = (n: number, one: string, few: string, many: string) =>
@@ -68,7 +68,11 @@ export function AiEngineSection() {
     const map = new Map<string, AiModel[]>();
     for (const m of view?.models ?? []) map.set(m.providerID, [...(map.get(m.providerID) ?? []), m]);
     return [...map.entries()]
-      .map(([id, models]) => ({ id, name: providerName(id), models, chosen: models.filter((m) => chosen.has(m.ref)).length }))
+      // free models first inside a provider
+      .map(([id, models]) => ({
+        id, name: providerName(id), models: [...models].sort((a, b) => Number(b.free) - Number(a.free)),
+        chosen: models.filter((m) => chosen.has(m.ref)).length, free: models.filter((m) => m.free).length,
+      }))
       .sort((a, b) => Number(b.chosen > 0) - Number(a.chosen > 0) || a.models.length - b.models.length);
   }, [view, providerName]);
 
@@ -79,7 +83,8 @@ export function AiEngineSection() {
   const q = filter.trim().toLowerCase();
   const matches = (m: AiModel) => !q || `${m.ref} ${m.name}`.toLowerCase().includes(q);
 
-  const setChoice = (main: string, helpers: string[]) => api.ai.setModels({ main, helpers }).then(setView, fail);
+  const setChoice = (main: string, helpers: string[], useFree?: boolean) => api.ai.setModels({ main, helpers, useFree }).then(setView, fail);
+  const freeCount = view?.models.filter((m) => m.free).length ?? 0;
   const toggleGroup = (id: string) => setOpen((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id);
@@ -161,6 +166,19 @@ export function AiEngineSection() {
           Приложение само выбирает, кому что поручить и насколько думать: картинки — моделям со зрением, сложные задачи (решения, Директ) —
           самой сильной из отмеченных с высоким уровнем рассуждения, простые — самой дешёвой.
         </p>
+        {freeCount > 0 && (
+          <label className="ai-free">
+            <input type="checkbox" checked={!!view?.useFree} onChange={(e) => view && setChoice(view.main, view.helpers, e.target.checked)} />
+            <span>
+              <b>★ Бесплатные модели OpenRouter — первыми, без отметок</b>
+              <span className="field-hint">
+                {freeCount} {plural(freeCount, 'модель', 'модели', 'моделей')}. Для поручений и вспомогательной работы сначала пробуются они: для сложных задач — крупные
+                с рассуждением, для простых — быстрые. Упёрлась в лимит или ошиблась — задачу берёт следующая модель, а сбойная отдыхает. Переписку с клиентом
+                ведёт основная модель. Бесплатные модели могут сохранять запросы у себя — не включайте, если переписка конфиденциальна.
+              </span>
+            </span>
+          </label>
+        )}
         <input className="text-input" value={filter} placeholder="Поиск модели: gemini, claude, deepseek…" onChange={(e) => setFilter(e.target.value)} />
         <div className="ai-groups">
           {groups.map((g) => {
@@ -173,24 +191,27 @@ export function AiEngineSection() {
                   <span className="ai-group__chevron">›</span>
                   <span className="ai-group__name">{g.name}</span>
                   <span className="crm-muted">{q ? `найдено ${list.length}` : modelsLabel(g.models.length)}</span>
+                  {g.free > 0 && <span className="tag tag--free">★ {g.free} бесплатно</span>}
                   {g.chosen > 0 && <span className="tag tag--category">отмечено {g.chosen}</span>}
                 </button>
                 {expanded && (
                   <ul className="ai-models">
                     {list.slice(0, 300).map((m) => {
                       const isMain = m.ref === view?.main;
-                      const checked = isMain || !!view?.helpers.includes(m.ref);
+                      const auto = m.free && !!view?.useFree;
+                      const checked = isMain || auto || !!view?.helpers.includes(m.ref);
                       return (
                         <li key={m.ref}>
                           <label className={checked ? 'ai-model--on' : ''}>
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={isMain}
+                              disabled={isMain || auto}
                               onChange={(e) => view && setChoice(view.main, e.target.checked ? [...view.helpers, m.ref] : view.helpers.filter((h) => h !== m.ref))}
                             />
                             <span className="ai-models__name">{shortName(m, g.name)}</span>
                             {isMain && <span className="tag tag--category">основная</span>}
+                            {auto && <span className="tag tag--free" title="Используется автоматически">★ авто</span>}
                             <ModelBadges m={m} />
                           </label>
                         </li>
@@ -254,7 +275,7 @@ function ModelBadges({ m }: { m: AiModel }) {
       {m.variants.length > 0 && <span className="tag" title={`Уровни рассуждения: ${m.variants.join(', ')}`}>рассуждение ×{m.variants.length}</span>}
       {!m.tools && <span className="tag tag--warn">без инструментов</span>}
       {m.context > 0 && <span className="tag" title="Контекст, токенов">{contextLabel(m.context)}</span>}
-      <span className="ai-badges__price" title="$ за 1М токенов: вход / выход">{price(m)}</span>
+      <span className={`ai-badges__price${m.free ? ' ai-badges__price--free' : ''}`} title="$ за 1М токенов: вход / выход">{price(m)}</span>
     </span>
   );
 }

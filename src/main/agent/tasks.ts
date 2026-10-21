@@ -1,5 +1,6 @@
 // Background tasks: the primary agent hands work to subagents (researcher, copywriter, directologist…) and answers the
-// client at once; up to MAX_PARALLEL tasks run side by side and each result goes to the client by itself.
+// client at once; up to MAX_PARALLEL tasks run side by side. A finished result goes back to the primary agent, which
+// checks it and sends it to the client (or asks for one redo).
 // The queue lives in the database, so tasks survive a restart.
 import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +21,8 @@ export interface AgentTask {
   error: string | null;
   createdAt: number;
   finishedAt: number | null;
+  deliveredAt: number | null; // sent to the client, or replaced by a redo
+  redoOf: number | null; // the task this one redoes
 }
 
 export interface TaskFile {
@@ -31,7 +34,7 @@ type Row = Record<string, any>;
 
 const toTask = (r: Row): AgentTask => ({
   id: r.id, leadId: r.lead_id, agent: r.agent, task: r.task, status: r.status, result: r.result, error: r.error,
-  createdAt: r.created_at, finishedAt: r.finished_at,
+  createdAt: r.created_at, finishedAt: r.finished_at, deliveredAt: r.delivered_at ?? null, redoOf: r.redo_of ?? null,
 });
 
 const MIME: Record<string, string> = {
@@ -46,7 +49,10 @@ export function taskDir(dataDir: string, leadId: number, taskId: number): string
 }
 
 export interface TaskQueue {
-  enqueue(leadId: number, agent: string, task: string): AgentTask;
+  enqueue(leadId: number, agent: string, task: string, redoOf?: number): AgentTask;
+  get(id: number): AgentTask | null;
+  files(task: AgentTask): TaskFile[]; // what the subagent wrote to the task folder
+  markDelivered(id: number): void;
   open(leadId: number): AgentTask[]; // queued or running — the agent must not start the same work twice
   resume(): void;
 }
@@ -73,22 +79,30 @@ export function createAgentTasks(deps: {
     finished_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS agent_tasks_status ON agent_tasks(status, id);`);
+  for (const col of ['delivered_at INTEGER', 'redo_of INTEGER']) {
+    try {
+      db.raw.exec(`ALTER TABLE agent_tasks ADD COLUMN ${col}`);
+    } catch {
+      /* already there */
+    }
+  }
   const limit = deps.maxParallel ?? MAX_PARALLEL;
   let running = 0;
   const get = (id: number) => toTask(db.raw.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(id) as Row);
-  const set = (id: number, patch: Partial<Record<'status' | 'result' | 'error' | 'finished_at', unknown>>) => {
+  const set = (id: number, patch: Partial<Record<'status' | 'result' | 'error' | 'finished_at' | 'delivered_at', unknown>>) => {
     for (const [k, v] of Object.entries(patch)) db.raw.prepare(`UPDATE agent_tasks SET ${k} = ? WHERE id = ?`).run(v as never, id);
   };
+
+  const filesIn = (dir: string): TaskFile[] => readdirSync(dir)
+    .filter((n) => statSync(join(dir, n)).isFile())
+    .map((n) => ({ path: join(dir, n), mime: MIME[n.split('.').pop()!.toLowerCase()] ?? 'application/octet-stream' }));
 
   async function execute(task: AgentTask) {
     const dir = taskDir(deps.dataDir, task.leadId, task.id);
     try {
       const text = (await deps.run(task, dir)).trim();
-      const files = readdirSync(dir)
-        .filter((n) => statSync(join(dir, n)).isFile())
-        .map((n) => ({ path: join(dir, n), mime: MIME[n.split('.').pop()!.toLowerCase()] ?? 'application/octet-stream' }));
       set(task.id, { status: 'done', result: text, finished_at: Date.now() });
-      await deps.deliver(get(task.id), text, files);
+      await deps.deliver(get(task.id), text, filesIn(dir));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       set(task.id, { status: 'failed', error, finished_at: Date.now() });
@@ -110,12 +124,20 @@ export function createAgentTasks(deps: {
   }
 
   return {
-    enqueue(leadId, agent, task) {
-      const res = db.raw.prepare('INSERT INTO agent_tasks(lead_id, agent, task, created_at) VALUES(?, ?, ?, ?)')
-        .run(leadId, agent, task, Date.now());
+    enqueue(leadId, agent, task, redoOf) {
+      const res = db.raw.prepare('INSERT INTO agent_tasks(lead_id, agent, task, created_at, redo_of) VALUES(?, ?, ?, ?, ?)')
+        .run(leadId, agent, task, Date.now(), redoOf ?? null);
       const created = get(Number(res.lastInsertRowid));
       pump();
       return created;
+    },
+    get(id) {
+      const row = db.raw.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(id) as Row | undefined;
+      return row ? toTask(row) : null;
+    },
+    files: (task) => filesIn(taskDir(deps.dataDir, task.leadId, task.id)),
+    markDelivered(id) {
+      set(id, { delivered_at: Date.now() });
     },
     open(leadId) {
       return (db.raw.prepare("SELECT * FROM agent_tasks WHERE lead_id = ? AND status IN ('queued', 'running') ORDER BY id")

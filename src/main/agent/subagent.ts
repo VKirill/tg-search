@@ -46,7 +46,8 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
   if (!input.includeDelegate) {
     tools = tools.filter((t) => t.name !== 'delegate');
   }
-  tools = tools.filter((t) => t.name !== 'assign_task'); // a subagent does the work itself, no chains of hand-offs
+  // a subagent does the work itself, no chains of hand-offs; its result goes back to the primary agent
+  tools = tools.filter((t) => t.name !== 'assign_task' && t.name !== 'send_task_result');
   tools = tools.filter((t) => resolveToolPermission(agent.permission, t.name) !== 'deny');
   if (input.aiEngine && input.aiEngine.status().state === 'ready') {
     const started = Date.now();
@@ -59,6 +60,7 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
       binding: { ctx: { leadId: input.leadId, clientId: input.clientId, dryRun: false, subagent: true }, tools, agentName: input.agentName, agent, stepPrefix: `${input.agentName}:` },
       prompt: () => ({ text: `Контекст:\n${input.context}\n\nЗадача:\n${input.task}`, lastMessageId: 0 }),
       timeoutMs: 15 * 60_000,
+      requireText: true, // the text is the result: an empty one goes to the next model
     });
     if (result.outcome !== 'succeeded') throw new Error(`OpenCode: ${result.error ?? result.outcome}`);
     const steps = listAgentSteps(input.db, input.leadId, 100).filter((s) => s.ts >= started && s.tool.startsWith(`${input.agentName}:`)).reverse();

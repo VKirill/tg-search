@@ -27,13 +27,79 @@ export function parseRef(ref: string): { providerID: string; id: string } | null
 // A role's reasoning level: quick jobs think little, hard ones think more; only levels the model supports
 const EFFORT: Record<ModelRole, string[]> = {
   chat: ['medium', 'low'],
-  fast: ['low', 'minimal', 'medium'],
-  vision: ['medium', 'low'],
-  smart: ['high', 'xhigh', 'medium'],
+  fast: ['low', 'minimal', 'none', 'medium'],
+  vision: ['medium', 'low', 'thinking'],
+  smart: ['high', 'xhigh', 'thinking', 'medium'],
 };
+
+// OpenRouter's free models («…:free» and its free router) cost nothing; zero-priced meta routers (auto, fusion…) do
+export const isFreeModel = (m: { providerID: string; id: string }) =>
+  m.providerID === 'openrouter' && (m.id.endsWith(':free') || m.id === 'openrouter/free');
+
+// Parameters in billions from the id («nemotron-3-ultra-550b-a55b» → 550, «gemma-4-31b-it» → 31); unknown → 0
+export function sizeB(id: string): number {
+  const sizes = [...id.toLowerCase().matchAll(/(?<![a-z\d.])(\d+(?:\.\d+)?)b(?![a-z])/g)].map((m) => Number(m[1]));
+  return sizes.length ? Math.max(...sizes) : 0;
+}
+
+const UNFIT_FREE = /safety|guard|lyria|embed/i;
+const QUICK = /flash|lightning|small|mini|nano|lite/i;
+const THINKS = ['high', 'xhigh', 'max', 'thinking'];
+
+// Free models for a role, best first. Unknown size counts as a big hosted model; the free router goes last.
+function rankFree(free: CatalogModel[], role: ModelRole): CatalogModel[] {
+  const size = (m: CatalogModel) => sizeB(m.id) || 100;
+  const usable = free.filter((m) => !UNFIT_FREE.test(m.id) && m.id !== 'openrouter/free' && size(m) >= 8);
+  const router = free.filter((m) => m.id === 'openrouter/free');
+  let ranked: CatalogModel[];
+  if (role === 'smart') {
+    ranked = usable.filter((m) => size(m) >= 25 && m.variants.some((v) => THINKS.includes(v)))
+      .sort((a, b) => Number(QUICK.test(a.id)) - Number(QUICK.test(b.id)) || size(b) - size(a)); // speed-tuned ones last
+  } else if (role === 'fast') {
+    ranked = [...usable].sort((a, b) => Number(QUICK.test(b.id)) - Number(QUICK.test(a.id)) || size(a) - size(b));
+  } else {
+    ranked = [...usable].sort((a, b) => size(b) - size(a));
+  }
+  return [...ranked, ...(role === 'smart' ? [] : router)];
+}
 
 function variantFor(m: CatalogModel, role: ModelRole): string | undefined {
   return EFFORT[role].find((v) => m.variants.includes(v));
+}
+
+export interface RouteOptions {
+  useFree?: boolean; // OpenRouter's free models go first for helper jobs
+  cooling?: (ref: string) => boolean; // failed recently (rate limit, error): tried last
+}
+
+// Every model that can do the job, in the order to try them. Client chat stays on the main model (the owner's
+// choice); helper jobs try free models first, then the ticked ones — cheapest for quick jobs, strongest for hard ones.
+export function rankModels(
+  catalog: CatalogModel[],
+  choice: { main: string; helpers: string[] },
+  role: ModelRole,
+  need: { tools?: boolean; vision?: boolean } = {},
+  opts: RouteOptions = {},
+): ModelRef[] {
+  const byRef = new Map(catalog.map((m) => [refString(m), m]));
+  const main = byRef.get(choice.main);
+  const wantsVision = need.vision || role === 'vision';
+  const fit = (m: CatalogModel | undefined): m is CatalogModel => !!m && m.enabled && (!need.tools || m.tools) && (!wantsVision || m.vision);
+  const ticked = [main, ...choice.helpers.map((r) => byRef.get(r))].filter(fit);
+  const price = (m: CatalogModel) => m.costIn + m.costOut * 3;
+  let paid: CatalogModel[];
+  if (role === 'chat') paid = [...ticked].sort((a, b) => Number(b === main) - Number(a === main) || price(b) - price(a));
+  else if (role === 'smart') paid = [...ticked].sort((a, b) => price(b) - price(a)); // the strongest is usually the priciest
+  else paid = [...ticked].sort((a, b) => price(a) - price(b)); // quick jobs and vision: the cheapest first
+  const cooling = opts.cooling ?? (() => false);
+  // a few free models that are not resting, so a paid one is always within the attempts
+  const free = opts.useFree && role !== 'chat'
+    ? rankFree(catalog.filter((m) => fit(m) && isFreeModel(m)), role).filter((m) => !cooling(refString(m))).slice(0, role === 'smart' ? 2 : 3)
+    : [];
+  const order = [...new Set([...free, ...paid])];
+  const ready = [...order.filter((m) => !cooling(refString(m))), ...order.filter((m) => cooling(refString(m)))];
+  if (!ready.length && main && (!wantsVision || main.vision)) ready.push(main);
+  return ready.map((m) => ({ providerID: m.providerID, id: m.id, variant: variantFor(m, role) }));
 }
 
 export function pickModel(
@@ -41,23 +107,13 @@ export function pickModel(
   choice: { main: string; helpers: string[] },
   role: ModelRole,
   need: { tools?: boolean; vision?: boolean } = {},
+  opts: RouteOptions = {},
 ): ModelRef {
-  const byRef = new Map(catalog.map((m) => [refString(m), m]));
-  const main = byRef.get(choice.main);
-  const pool = [main, ...choice.helpers.map((r) => byRef.get(r))].filter((m): m is CatalogModel => !!m && m.enabled);
-  const fits = pool.filter((m) => (!need.tools || m.tools) && (!(need.vision || role === 'vision') || m.vision));
-  if (!fits.length) {
-    if (main && (!need.vision || main.vision)) return { providerID: main.providerID, id: main.id, variant: variantFor(main, role) };
-    throw new Error(need.vision || role === 'vision'
-      ? 'Нет модели со зрением: отметьте в настройках ИИ хотя бы одну модель, которая видит картинки'
-      : 'Не выбрана основная модель ИИ — выберите её в настройках');
-  }
-  const price = (m: CatalogModel) => m.costIn + m.costOut * 3;
-  let chosen: CatalogModel;
-  if (role === 'chat') chosen = fits.includes(main!) ? main! : fits[0];
-  else if (role === 'smart') chosen = [...fits].sort((a, b) => price(b) - price(a))[0]; // the strongest is usually the priciest
-  else chosen = [...fits].sort((a, b) => price(a) - price(b))[0]; // fast and vision: the cheapest that fits
-  return { providerID: chosen.providerID, id: chosen.id, variant: variantFor(chosen, role) };
+  const first = rankModels(catalog, choice, role, need, opts)[0];
+  if (first) return first;
+  throw new Error(need.vision || role === 'vision'
+    ? 'Нет модели со зрением: отметьте в настройках ИИ хотя бы одну модель, которая видит картинки'
+    : 'Не выбрана основная модель ИИ — выберите её в настройках');
 }
 
 // GET /api/model → our catalog shape

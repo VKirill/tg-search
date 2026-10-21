@@ -93,6 +93,7 @@ let settings: Settings = {
   aiProviders: '[]',
   aiMainModel: 'zai-coding-plan/glm-5.3-flash',
   aiHelperModels: '["router9/ag/gemini-3.8-flash"]',
+  aiUseFree: '1',
 };
 
 const accounts: Account[] = [
@@ -531,10 +532,11 @@ const mockAiProviders: AiProvider[] = [
   { id: 'deepseek', name: 'DeepSeek', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
   { id: 'zai-coding-plan', name: 'Z.ai (GLM)', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
 ];
-const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'] };
+const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'], useFree: true };
 function mockAiModels(): AiModelsView {
   const m = (ref: string, name: string, vision: boolean, costIn: number, costOut: number, variants: string[] = []): AiModel => ({
     ref, providerID: ref.split('/')[0], name, vision, tools: true, variants, costIn, costOut, context: 200_000,
+    free: ref.endsWith(':free'),
   });
   return {
     models: [
@@ -543,9 +545,11 @@ function mockAiModels(): AiModelsView {
       m('openlux-claude/claude-sonnet-5-5', 'Claude Sonnet 5.5', true, 3, 15, ['low', 'medium', 'high']),
       m('openlux-claude/claude-opus-5-5', 'Claude Opus 5.5', true, 15, 75, ['low', 'medium', 'high', 'max']),
       m('deepseek/deepseek-flash', 'DeepSeek Flash', false, 0.1, 0.4),
+      m('openrouter/google/gemma-4-31b-it:free', 'Google: Gemma 4 31B (free)', true, 0, 0, ['none', 'thinking']),
     ],
     main: mockAiChoice.main,
     helpers: mockAiChoice.helpers,
+    useFree: mockAiChoice.useFree,
   };
 }
 
@@ -1952,9 +1956,10 @@ export function createMockApi(): Api {
       async models() {
         return mockAiModels();
       },
-      async setModels({ main, helpers }) {
+      async setModels({ main, helpers, useFree }) {
         mockAiChoice.main = main;
         mockAiChoice.helpers = helpers;
+        if (useFree !== undefined) mockAiChoice.useFree = useFree;
         return mockAiModels();
       },
       async providers() {

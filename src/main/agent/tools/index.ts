@@ -9,7 +9,7 @@ import { createSendAssetTool } from './asset';
 import { createWebTools } from './web';
 import { createRunTaskTool } from './runTask';
 import { createOfferAddonTool } from './upsell';
-import { createAssignTaskTool, createMakeXlsxTool } from './tasks';
+import { createAssignTaskTool, createMakeXlsxTool, createSendTaskResultTool } from './tasks';
 import { createSkillsTool } from './skills';
 
 export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
@@ -23,6 +23,7 @@ export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
     createRunTaskTool(deps),
     createOfferAddonTool(deps),
     createAssignTaskTool(deps),
+    createSendTaskResultTool(deps),
     createMakeXlsxTool(deps),
     ...createWebTools(deps),
   ];

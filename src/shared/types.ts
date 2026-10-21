@@ -226,6 +226,7 @@ export interface Settings {
   aiProviders: string;
   aiMainModel: string;
   aiHelperModels: string;
+  aiUseFree: string; // '1' — OpenRouter's free models go first for helper jobs
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
@@ -401,6 +402,7 @@ export interface AiModel {
   costIn: number; // USD per 1M tokens
   costOut: number;
   context: number;
+  free: boolean; // OpenRouter's free model
 }
 
 export interface AiProvider {
@@ -416,6 +418,7 @@ export interface AiModelsView {
   models: AiModel[]; // of the configured providers
   main: string;
   helpers: string[];
+  useFree: boolean; // free models are used automatically, without ticking
 }
 
 // «Свои люди»: their tasks are free (training the agent on real work); optional daily message from the agent
@@ -817,7 +820,7 @@ export interface Api {
   ai: {
     status(): Promise<AiStatus>;
     models(): Promise<AiModelsView>;
-    setModels(choice: { main: string; helpers: string[] }): Promise<AiModelsView>;
+    setModels(choice: { main: string; helpers: string[]; useFree?: boolean }): Promise<AiModelsView>;
     providers(): Promise<AiProvider[]>;
     // an OpenAI-compatible endpoint (key optional when updating) or a catalog provider's key
     saveProvider(p: { id: string; name: string; kind: AiProvider['kind']; baseURL?: string; apiKey?: string; models?: string[] }): Promise<AiProvider[]>;

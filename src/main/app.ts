@@ -1,5 +1,5 @@
 // Application service: implements the IPC Api over db, Telegram engine and AI.
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import type { Db } from './db';
 import type { TelegramEngine } from './telegram/types';
@@ -50,13 +50,14 @@ import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
 import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
-import { createAgentTasks } from './agent/tasks';
+import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
 import { sendMediaMessage } from './pipeline/outreach';
 import { fileToDataUri } from './executors/images';
-import { createAiEngine } from './opencode/engine';
+import { agentRole, createAiEngine } from './opencode/engine';
 import type { ToolCatalogEntry } from './opencode/bridge';
 import { TOOL_PREFIX } from './opencode/config';
+import { isFreeModel } from './opencode/models';
 import { buildAgentTools, freshTurnState } from './agent/tools';
 import { createDelegateTool } from './agent/tools/delegate';
 import type { ProviderConfig } from './opencode/config';
@@ -267,8 +268,18 @@ export function createApp(deps: AppDeps): AppHandlers {
     emit,
     db,
   });
-  // background subagent tasks: the agent hands work off and keeps talking; results go to the client by themselves
+  // background subagent tasks: the agent hands work off and keeps talking; a finished result goes back to it for a check
   const TASK_INTROS = ['готово, смотри', 'вот, держи', 'сделал, глянь'];
+  const reviewNote = (task: AgentTask, text: string, files: TaskFile[]) => [
+    `Система: поручение #${task.id} («${task.agent}») готово${task.redoOf ? ` — это переделка #${task.redoOf}` : ''}. Клиент результат ещё не видел.`,
+    `Поручение было: ${task.task}`,
+    `Результат:\n<<<\n${text.slice(0, 12_000)}\n>>>`,
+    files.length ? `Файлы: ${files.map((f) => basename(f.path)).join(', ')}` : '',
+    'Проверь: это то, что просил клиент, без явных ошибок и выдумок? Если да — отправь его инструментом send_task_result ' +
+      `(task_id ${task.id}, короткое живое вступление); текст результата не переписывай и не пересказывай.` +
+      (task.redoOf ? ' Это уже переделка — отправь лучшее из двух или передай владельцу (handoff).' : ' Если результат не о том или с ошибкой — ' +
+        `перепоручи через assign_task с redo_of ${task.id} и объясни, что исправить; клиенту пока ничего не пиши.`),
+  ].filter(Boolean).join('\n\n');
   const tasks = createAgentTasks({
     db,
     dataDir,
@@ -277,8 +288,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       const lead = db.getLead(task.leadId);
       const context = db.listMessages(task.leadId).slice(-20)
         .map((m) => `${m.direction === 'in' ? 'Клиент' : 'Мы'}: ${m.text}`).join('\n');
-      // a Gemini subagent sees the client's recent photos themselves, not only their captions
-      const vision = agentDefs.get(task.agent).model === 'gemini';
+      // the analyst and the solver see the client's recent photos themselves, not only their captions
+      const vision = ['vision', 'smart'].includes(agentRole(agentDefs.get(task.agent).model));
       const photos = vision
         ? db.listMessages(task.leadId).filter((m) => m.direction === 'in' && m.mediaPath && /\.(jpe?g|png|webp)$/i.test(m.mediaPath)
           && m.date >= Date.now() - 3 * 86400_000).slice(-4)
@@ -292,8 +303,13 @@ export function createApp(deps: AppDeps): AppHandlers {
       return text;
     },
     deliver: async (task, text, files) => {
+      await managerAgent.checkin(task.leadId, reviewNote(task, text, files)).catch((err) => console.error('task review', err));
+      const now = tasks.get(task.id);
+      if (now?.deliveredAt) return; // sent or sent for a redo
+      // the agent did not take it (auto-replies off, handed off, the model failed): straight to the client as before
       const intro = TASK_INTROS[task.id % TASK_INTROS.length];
       await sendMediaMessage(pipeline, task.leadId, text ? `${intro}\n\n${text}` : intro, files, true);
+      tasks.markDelivered(task.id);
     },
     fail: async (task, error) => {
       const lead = db.updateLead(task.leadId, { handoff: true, handoffReason: `Поручение «${task.agent}» не выполнено: ${error}` });
@@ -318,14 +334,15 @@ export function createApp(deps: AppDeps): AppHandlers {
     id: p.id, name: p.name, kind: p.kind, baseURL: p.baseURL ?? null, hasKey: !!p.apiKey, models: p.models?.length ?? 0,
   });
   const aiModelsView = (): AiModelsView => {
-    const choice = aiEngine?.choice() ?? { main: getSettings().aiMainModel, helpers: [] };
+    const choice = aiEngine?.choice() ?? { main: getSettings().aiMainModel, helpers: [], useFree: getSettings().aiUseFree !== '0' };
     return {
       models: (aiEngine?.catalog() ?? []).map((m) => ({
         ref: `${m.providerID}/${m.id}`, providerID: m.providerID, name: m.name, vision: m.vision, tools: m.tools,
-        variants: m.variants, costIn: m.costIn, costOut: m.costOut, context: m.context,
+        variants: m.variants, costIn: m.costIn, costOut: m.costOut, context: m.context, free: isFreeModel(m),
       })),
       main: choice.main,
       helpers: choice.helpers,
+      useFree: choice.useFree,
     };
   };
   const operator = managerAgent.getOperator();
@@ -742,8 +759,11 @@ export function createApp(deps: AppDeps): AppHandlers {
     ai: {
       status: async () => aiEngine?.status() ?? { state: 'stopped', version: null, latest: null, url: null, message: 'ИИ-движок не подключён', checkedAt: null },
       models: async () => aiModelsView(),
-      setModels: async ({ main, helpers }) => {
-        db.setSettings({ aiMainModel: main, aiHelperModels: JSON.stringify(helpers.filter((h) => h !== main)) });
+      setModels: async ({ main, helpers, useFree }) => {
+        db.setSettings({
+          aiMainModel: main, aiHelperModels: JSON.stringify(helpers.filter((h) => h !== main)),
+          ...(useFree === undefined ? {} : { aiUseFree: useFree ? '1' : '0' }),
+        });
         return aiModelsView();
       },
       providers: async () => aiProviders().map(providerView),

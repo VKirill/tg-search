@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Db } from '../src/main/db';
 import { createAgentTasks, type AgentTask } from '../src/main/agent/tasks';
-import { createAssignTaskTool, createMakeXlsxTool } from '../src/main/agent/tools/tasks';
+import { createAssignTaskTool, createMakeXlsxTool, createSendTaskResultTool } from '../src/main/agent/tools/tasks';
 import { freshTurnState } from '../src/main/agent/tools';
 import { createTrusted } from '../src/main/trusted';
 import { DEFAULT_MANAGER } from '../src/shared/types';
@@ -99,6 +99,43 @@ describe('background tasks', () => {
     expect(await tool.run({ agent: 'researcher', task: 'x' }, { leadId: lead.id, clientId: 1, dryRun: false })).toMatch(/подписки/);
     createTrusted({ db, engine: new FakeEngine(), emit: () => {}, checkin: async () => {} }).save({ username: 'tester_friend' });
     expect(await tool.run({ agent: 'researcher', task: 'x' }, { leadId: lead.id, clientId: 1, dryRun: false })).toMatch(/Поручение #1/);
+  });
+
+  it('a finished result waits for the primary agent: it sends it as is under its intro, or asks for one free redo', async () => {
+    const { db, dataDir, lead } = setup();
+    const acc = db.upsertAccountByPhone('+79990001122');
+    db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 50, pauseSec: 0 });
+    db.updateProject(lead.projectId, { accountIds: [acc.id] });
+    const reviews: number[] = [];
+    const queue = createAgentTasks({
+      db, dataDir, emit: () => {}, run: async (t) => `## Решение ${t.id}\n**Ответ: 3**`,
+      deliver: async (t) => void reviews.push(t.id), fail: async () => {},
+    });
+    const engine = new FakeEngine();
+    const turnState = freshTurnState();
+    const host = { db, engine, emit: () => {}, getSettings: () => db.getSettings(), turnState, getTasks: () => queue };
+    const ctx = { leadId: lead.id, clientId: null, dryRun: false };
+    createTrusted({ db, engine, emit: () => {}, checkin: async () => {} }).save({ username: 'tester_friend' });
+    const assign = createAssignTaskTool(host as never);
+    const send = createSendTaskResultTool(host as never);
+
+    expect(await assign.run({ agent: 'solver', task: 'задача' }, ctx)).toMatch(/на проверку/);
+    await tick();
+    await tick();
+    expect(reviews).toEqual([1]);
+    expect(engine.sent).toEqual([]); // nothing reaches the client before the check
+
+    // a miss: one free redo, the original never goes out
+    expect(await assign.run({ agent: 'solver', task: 'пересчитай', redo_of: 1 }, ctx)).toMatch(/#2 переделывает #1/);
+    await tick();
+    await tick();
+    expect(await assign.run({ agent: 'solver', task: 'ещё раз', redo_of: 2 }, ctx)).toMatch(/уже переделывали/);
+    expect(await send.run({ task_id: 1, intro: 'вот' }, ctx)).toMatch(/уже отправлено/);
+
+    expect(await send.run({ task_id: 2, intro: 'готово, смотри' }, ctx)).toMatch(/отправлен/);
+    expect(engine.sent.map((m) => m.text)).toEqual(['готово, смотри\n\n## Решение 2\n**Ответ: 3**']);
+    expect(turnState.replyUsed).toBe(true);
+    expect(await send.run({ task_id: 2, intro: 'ещё' }, ctx)).toMatch(/уже отправлено/);
   });
 
   it('make_xlsx writes a real workbook into the task folder', async () => {

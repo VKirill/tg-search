@@ -3311,3 +3311,35 @@ button.chip:hover {
 .page-view--settings .page-view__head {
   max-width: 760px;
 }
+
+.tag--free {
+  background: rgba(245, 197, 66, 0.14);
+  color: #f5c542;
+}
+
+.ai-badges__price--free {
+  color: #f5c542;
+}
+
+.ai-free {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 var(--space-3);
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(245, 197, 66, 0.05);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ai-free input {
+  width: auto;
+  margin: 3px 0 0;
+}
+
+.ai-free .field-hint {
+  display: block;
+  margin: 4px 0 0;
+}
