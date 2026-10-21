@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChatMessage, Lead, Project, Source } from '../../../shared/types';
+import type { AgentStep, ChatMessage, Lead, Project, Source } from '../../../shared/types';
 import { formatLeadDate, formatShortTime } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { useToast } from './Toast';
 import { IconExternal } from './Icons';
 import { AudioPlayer } from './AudioPlayer';
+import { AgentTraceSteps, stepsForAutoTurn } from './AgentTraceSteps';
+
+function traceMsgFromHash(): number | null {
+  if (typeof location === 'undefined') return null;
+  const m = location.hash.match(/traceMsg=(\d+)/);
+  return m ? Number(m[1]) : null;
+}
 
 type ChatPanelProps = {
   lead: Lead | null;
@@ -25,6 +32,8 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
   const [recSec, setRecSec] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [collapsedTranscript, setCollapsedTranscript] = useState<Set<number>>(new Set());
+  const [agentTrace, setAgentTrace] = useState<AgentStep[]>([]);
+  const [shotTraceMsg] = useState(() => traceMsgFromHash());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -50,6 +59,23 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
     });
     return off;
   }, [lead?.id]);
+
+  useEffect(() => {
+    if (!lead) {
+      setAgentTrace([]);
+      return;
+    }
+    getApi()
+      .agent.trace(lead.id, 100)
+      .then(setAgentTrace)
+      .catch((e) => toast(e instanceof Error ? e.message : String(e)));
+    const off = getApi().onEvent((e) => {
+      if (e.type === 'agent:step' && e.step.leadId === lead.id) {
+        setAgentTrace((prev) => (prev.some((s) => s.id === e.step.id) ? prev : [...prev, e.step]));
+      }
+    });
+    return off;
+  }, [lead?.id, toast]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -236,6 +262,8 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
           </div>
         </div>
         {messages.map((m, idx) => {
+          const prev = messages.slice(0, idx).filter((x) => x.kind !== 'note').pop();
+          const prevDate = prev?.date ?? lead.date - 1;
           if (idx === 0 && m.kind === 'text' && m.direction === 'in' && m.text === lead.text) return null;
           if (m.kind === 'note') {
             return (
@@ -270,11 +298,18 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
               </div>
             );
           }
+          const turnSteps = m.auto && m.direction === 'out' ? stepsForAutoTurn(agentTrace, m.date, prevDate) : [];
           return (
             <div key={m.id} className={`bubble bubble--${m.direction === 'in' ? 'in' : 'out'}`}>
               {autoLabel && <div className="bubble__auto">{autoLabel}</div>}
               {m.text}
               <div className="lead-card__date" style={{ marginTop: 4 }}>{formatShortTime(m.date)}</div>
+              {turnSteps.length > 0 && (
+                <AgentTraceSteps
+                  steps={turnSteps}
+                  defaultOpen={shotTraceMsg === m.id}
+                />
+              )}
             </div>
           );
         })}

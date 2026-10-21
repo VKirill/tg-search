@@ -76,6 +76,66 @@ export function SettingsView() {
           <div className="field"><label>Модель</label><input value={s.llmModel} onChange={(e) => setS({ ...s, llmModel: e.target.value })} /></div>
         </section>
         <section>
+          <h2 className="section-title">Оператор (ведёт диалоги)</h2>
+          <p className="field-hint">Модель с вызовом инструментов: ответы клиентам, память, заказы, подписки. У каждого провайдера свой ключ — переключайте, чтобы сравнить.</p>
+          <div className="field">
+            <label>Провайдер</label>
+            <div className="segmented no-drag">
+              {(
+                [
+                  ['glm', 'GLM 5.3 Flash'],
+                  ['deepseek', 'DeepSeek V4.1 Flash'],
+                  ['custom', 'Свой адрес'],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} type="button" className={s.operatorProvider === id ? 'button--active' : ''} onClick={() => setS({ ...s, operatorProvider: id })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {s.operatorProvider === 'glm' && (
+            <div className="field">
+              <label>Ключ Z.ai (GLM)</label>
+              <input type="password" autoComplete="off" value={s.glmApiKey} onChange={(e) => setS({ ...s, glmApiKey: e.target.value })} />
+            </div>
+          )}
+          {s.operatorProvider === 'deepseek' && (
+            <div className="field">
+              <label>Ключ DeepSeek</label>
+              <input type="password" autoComplete="off" value={s.deepseekApiKey} onChange={(e) => setS({ ...s, deepseekApiKey: e.target.value })} />
+            </div>
+          )}
+          {s.operatorProvider === 'custom' && (
+            <>
+              <div className="field">
+                <label>Base URL (OpenAI-совместимый)</label>
+                <input value={s.operatorBaseUrl} onChange={(e) => setS({ ...s, operatorBaseUrl: e.target.value })} placeholder="https://openrouter.ai/api/v1" />
+              </div>
+              <div className="field">
+                <label>API key</label>
+                <input type="password" autoComplete="off" value={s.operatorApiKey} onChange={(e) => setS({ ...s, operatorApiKey: e.target.value })} />
+              </div>
+            </>
+          )}
+          <div className="field">
+            <label>Модель {s.operatorProvider !== 'custom' && <span className="crm-muted">(пусто — по умолчанию провайдера)</span>}</label>
+            <input
+              value={s.operatorModel}
+              onChange={(e) => setS({ ...s, operatorModel: e.target.value })}
+              placeholder={s.operatorProvider === 'glm' ? 'glm-5.3-flash' : s.operatorProvider === 'deepseek' ? 'deepseek-flash' : 'model id'}
+            />
+          </div>
+        </section>
+        <section>
+          <h2 className="section-title">Поиск в интернете (Tavily)</h2>
+          <p className="field-hint">Для исполнителя «ассистент»: поиск и исследования по поручениям подписчиков.</p>
+          <div className="field">
+            <label>API key</label>
+            <input type="password" autoComplete="off" value={s.tavilyApiKey} onChange={(e) => setS({ ...s, tavilyApiKey: e.target.value })} />
+          </div>
+        </section>
+        <section>
           <h2 className="section-title">Оплата (ЮKassa)</h2>
           <p className="field-hint">Сейчас тестовый магазин — после проверки подключите рабочий.</p>
           <div className="field"><label>Shop ID</label><input value={s.yookassaShopId} onChange={(e) => setS({ ...s, yookassaShopId: e.target.value })} /></div>

@@ -1,10 +1,39 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Anamnesis, ClientCard, DealStage, Lead, Order, OrderFile, Service } from '../../../shared/types';
+import type { Anamnesis, Client, ClientCard, DealStage, Lead, Order, OrderFile, Service } from '../../../shared/types';
 import { DEAL_STAGES, dealStageLabel, formatPriceRange, formatRub, orderStatusLabel } from '../utils/format';
 import { isImageMime, mediaDisplayUrl } from '../utils/media';
 import { renderMarkdown } from '../utils/markdown';
 import { getApi } from '../hooks/useApi';
 import { useToast } from './Toast';
+import { CrmAgentTab } from './crm/CrmAgentTab';
+import { CrmFilesTab } from './crm/CrmFilesTab';
+import { CrmMemoryTab } from './crm/CrmMemoryTab';
+import { CrmMoneyTab } from './crm/CrmMoneyTab';
+
+export type CrmTab = 'card' | 'memory' | 'files' | 'money' | 'agent';
+
+const CRM_TABS: { id: CrmTab; label: string }[] = [
+  { id: 'card', label: 'Карточка' },
+  { id: 'memory', label: 'Память' },
+  { id: 'files', label: 'Файлы' },
+  { id: 'money', label: 'Деньги' },
+  { id: 'agent', label: 'Агент' },
+];
+
+function initialCrmTab(): CrmTab {
+  if (typeof location === 'undefined') return 'card';
+  const m = location.hash.match(/crm=(\w+)/);
+  const tab = m?.[1] as CrmTab | undefined;
+  if (tab && CRM_TABS.some((t) => t.id === tab)) return tab;
+  const shot = location.hash.match(/shot=([^&]+)/)?.[1];
+  const fromShot: Record<string, CrmTab> = {
+    'client-memory': 'memory',
+    'client-files': 'files',
+    'client-money': 'money',
+  };
+  if (shot && fromShot[shot]) return fromShot[shot];
+  return 'card';
+}
 
 type CrmPanelProps = {
   lead: Lead | null;
@@ -23,23 +52,28 @@ export function CrmPanel({ lead, collapsed, onToggleCollapse }: CrmPanelProps) {
   const [dossierPath, setDossierPath] = useState<string | null>(null);
   const [newServiceId, setNewServiceId] = useState<number | ''>('');
   const [newBrief, setNewBrief] = useState('');
+  const [tab, setTab] = useState<CrmTab>(initialCrmTab);
+  const [client, setClient] = useState<Client | null>(null);
 
   const load = useCallback(async () => {
     if (!lead) {
       setCard(null);
+      setClient(null);
       return;
     }
     try {
-      const [c, ord, svc, folder] = await Promise.all([
+      const [c, ord, svc, folder, cl] = await Promise.all([
         getApi().crm.get(lead.id),
         getApi().orders.list(lead.id),
         getApi().services.list(),
         getApi().dossier.path(lead.id),
+        getApi().clients.byLead(lead.id),
       ]);
       setCard(c);
       setOrders(ord);
       setServices(svc.filter((s) => s.enabled));
       setDossierPath(folder);
+      setClient(cl);
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
     }
@@ -48,6 +82,12 @@ export function CrmPanel({ lead, collapsed, onToggleCollapse }: CrmPanelProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const m = location.hash.match(/crm=(\w+)/);
+    const next = m?.[1] as CrmTab | undefined;
+    if (next && CRM_TABS.some((t) => t.id === next)) setTab(next);
+  }, [lead?.id]);
 
   useEffect(() => {
     if (!lead) return;
@@ -109,7 +149,7 @@ export function CrmPanel({ lead, collapsed, onToggleCollapse }: CrmPanelProps) {
     <>
       <aside className="crm-panel">
         <div className="crm-panel__head">
-          <span>Карточка клиента</span>
+          <span>Клиент</span>
           <div className="crm-panel__head-actions">
             {dossierPath && (
               <button
@@ -124,7 +164,30 @@ export function CrmPanel({ lead, collapsed, onToggleCollapse }: CrmPanelProps) {
             <button type="button" className="btn btn--ghost btn--sm no-drag" onClick={onToggleCollapse} aria-label="Свернуть">›</button>
           </div>
         </div>
+        <div className="crm-panel__tabs no-drag" role="tablist">
+          {CRM_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`crm-panel__tab${tab === t.id ? ' crm-panel__tab--active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <div className="crm-panel__body scroll-list">
+          {tab !== 'card' && !client && (
+            <p className="crm-muted">Клиент ещё не привязан к лиду — память и подписки появятся после первого контакта.</p>
+          )}
+          {tab === 'memory' && client && <CrmMemoryTab clientId={client.id} toast={toast} />}
+          {tab === 'files' && client && <CrmFilesTab clientId={client.id} lead={lead} toast={toast} />}
+          {tab === 'money' && client && <CrmMoneyTab clientId={client.id} toast={toast} />}
+          {tab === 'agent' && <CrmAgentTab leadId={lead.id} toast={toast} />}
+          {tab === 'card' && (
+            <>
           <div className="field">
             <label>Этап</label>
             <select
@@ -242,6 +305,8 @@ export function CrmPanel({ lead, collapsed, onToggleCollapse }: CrmPanelProps) {
           >
             {refreshing ? 'Обновляю…' : 'Обновить из переписки'}
           </button>
+            </>
+          )}
         </div>
       </aside>
       {briefOpen && card.brief && (
@@ -365,6 +430,7 @@ function OrdersSection({
                 <div className="order-price-set">
                   <input
                     type="number"
+                    className="text-input"
                     placeholder={`${svc.priceMin}–${svc.priceMax}`}
                     value={priceDraft[o.id] ?? (o.price != null ? String(o.price) : '')}
                     onChange={(e) => setPriceDraft((p) => ({ ...p, [o.id]: e.target.value }))}
