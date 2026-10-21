@@ -6,6 +6,7 @@ import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
 import { afterSend, canSend, limiterErrorMessage } from './limiter';
 import { markdownToFormatted } from '../telegram/markdown';
+import { isTrustedLead } from '../trusted';
 import { maybeStartChainAfterFirstSend } from './sequence';
 
 export interface OutreachDeps {
@@ -14,6 +15,11 @@ export interface OutreachDeps {
   ai: LeadAi;
   speech?: SpeechService;
   emit: (e: AppEvent) => void;
+}
+
+// The lead wrote to us first (or is a trusted contact): our message is a reply, not a cold first message
+export function isReplyTo(db: Db, lead: Lead): boolean {
+  return isTrustedLead(db, lead) || db.listMessages(lead.id).some((m) => m.direction === 'in');
 }
 
 function pickSendingAccount(
@@ -29,8 +35,9 @@ function pickSendingAccount(
     return 0;
   });
   let lastFail: { reason: 'daily' | 'pause'; waitMs?: number } = { reason: 'daily' };
+  const reply = isReplyTo(db, lead);
   for (const a of ordered) {
-    const r = canSend(a, now);
+    const r = canSend(a, now, reply);
     if (r.ok) return { accountId: a.id };
     lastFail = r;
   }
@@ -128,7 +135,7 @@ export async function sendMessage(
   const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
   if (lead.sequenceStep === 0) maybeStartChainAfterFirstSend(deps.db, leadId, now);
   const account = deps.db.getAccount(accountId);
-  const patched = deps.db.updateAccount(accountId, afterSend(account, now));
+  const patched = deps.db.updateAccount(accountId, afterSend(account, now, isReplyTo(deps.db, lead)));
 
   deps.emit({ type: 'message:new', message });
   deps.emit({ type: 'lead:update', lead: updatedLead });
@@ -189,7 +196,7 @@ export async function sendMediaMessage(
     tgChatId: first!.chatId, tgMessageId: first!.messageId, date: first!.date, auto,
   });
   const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
-  const patched = deps.db.updateAccount(accountId, afterSend(deps.db.getAccount(accountId), now));
+  const patched = deps.db.updateAccount(accountId, afterSend(deps.db.getAccount(accountId), now, isReplyTo(deps.db, lead)));
   deps.emit({ type: 'message:new', message });
   deps.emit({ type: 'lead:update', lead: updatedLead });
   deps.emit({ type: 'account:update', account: patched });
@@ -238,7 +245,7 @@ export async function sendVoiceMessage(
   const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
   if (lead.sequenceStep === 0) maybeStartChainAfterFirstSend(deps.db, leadId, now);
   const account = deps.db.getAccount(accountId);
-  const patched = deps.db.updateAccount(accountId, afterSend(account, now));
+  const patched = deps.db.updateAccount(accountId, afterSend(account, now, isReplyTo(deps.db, lead)));
 
   deps.emit({ type: 'message:new', message });
   deps.emit({ type: 'lead:update', lead: updatedLead });

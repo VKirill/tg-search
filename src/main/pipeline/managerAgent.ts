@@ -4,7 +4,7 @@ import type { ChatMessage, ClientCard, Lead, Project } from '../../shared/types'
 import type { ManagerAi } from '../ai/types';
 import type { Db } from '../db';
 import type { TelegramEngine } from '../telegram/types';
-import { sendMessage, sendVoiceMessage, type OutreachDeps } from './outreach';
+import { sendMessage, sendVoiceMessage, type OutreachDeps, isReplyTo } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
@@ -239,7 +239,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
       const accountId = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
       if (accountId != null) {
         const account = deps.db.getAccount(accountId);
-        const gate = canSend(account, now);
+        const gate = canSend(account, now, isReplyTo(deps.db, lead));
         if (!gate.ok) {
           const waitMs = gate.reason === 'pause' ? gate.waitMs ?? project.manager.replyDelaySec * 1000 : 60_000;
           const timer = setTimeout(() => {

@@ -17,8 +17,10 @@ export function effectiveSentToday(account: Account, now: number): number {
   return account.sentDay === today ? account.sentToday : 0;
 }
 
-export function canSend(account: Account, now: number): CanSendResult {
-  if (effectiveSentToday(account, now) >= account.dailyLimit) {
+// The daily cap guards first messages to strangers (what Telegram bans for); a reply to someone who wrote first, or to
+// a trusted contact, only keeps the pause between messages
+export function canSend(account: Account, now: number, reply = false): CanSendResult {
+  if (!reply && effectiveSentToday(account, now) >= account.dailyLimit) {
     return { ok: false, reason: 'daily' };
   }
   if (account.lastSentAt != null) {
@@ -28,7 +30,8 @@ export function canSend(account: Account, now: number): CanSendResult {
   return { ok: true };
 }
 
-export function afterSend(account: Account, now: number): Partial<Account> {
+export function afterSend(account: Account, now: number, reply = false): Partial<Account> {
+  if (reply) return { lastSentAt: now };
   const today = todayLocal(now);
   const sentToday = account.sentDay === today ? account.sentToday + 1 : 1;
   return { sentToday, sentDay: today, lastSentAt: now };

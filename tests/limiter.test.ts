@@ -61,3 +61,18 @@ describe('limiter', () => {
     expect(patch2.sentDay).toBe(todayLocal(day2));
   });
 });
+
+describe('replies and the daily cap', () => {
+  it('a reply ignores the daily cap and does not spend it, but keeps the pause', async () => {
+    const { canSend, afterSend } = await import('../src/main/pipeline/limiter');
+    const now = Date.now();
+    const today = new Date(now);
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const acc = { dailyLimit: 10, sentToday: 10, sentDay: day, pauseSec: 60, lastSentAt: now - 120_000 } as never;
+    expect(canSend(acc, now)).toEqual({ ok: false, reason: 'daily' });
+    expect(canSend(acc, now, true)).toEqual({ ok: true });
+    expect(afterSend(acc, now, true)).toEqual({ lastSentAt: now });
+    const justSent = { ...(acc as object), lastSentAt: now - 10_000 } as never;
+    expect(canSend(justSent, now, true)).toMatchObject({ ok: false, reason: 'pause' });
+  });
+});
