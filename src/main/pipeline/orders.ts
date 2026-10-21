@@ -249,7 +249,7 @@ export function createOrders(deps: OrdersDeps) {
 
     let order = activeOrderForLead(leadId);
     if (!order || order.serviceId !== intent.serviceId) {
-      order = deps.db.createOrder(leadId, intent.serviceId, intent.brief);
+      order = attachRecentMedia(deps.db.createOrder(leadId, intent.serviceId, intent.brief));
       emitOrder(order);
     } else {
       order = patchOrder(order.id, { brief: intent.brief });
@@ -302,6 +302,22 @@ export function createOrders(deps: OrdersDeps) {
     const addition = lastClientText.trim() || result.reply.trim();
     if (!addition) return;
     await startRevision(delivered.id, addition);
+  }
+
+  // Photos and files the client sent before the order existed (usually with the request itself) become its inputs
+  function attachRecentMedia(order: Order): Order {
+    const since = Date.now() - 24 * 3600_000;
+    const media = deps.db.listMessages(order.leadId)
+      .filter((m) => m.direction === 'in' && m.mediaPath && m.kind !== 'voice' && m.date >= since && existsSync(m.mediaPath));
+    if (!media.length) return order;
+    const dir = workDir(deps.dataDir, order.leadId, order.id);
+    const files: OrderFile[] = media.map((m) => {
+      const name = basename(m.mediaPath!);
+      const dest = join(dir, name);
+      copyFileSync(m.mediaPath!, dest);
+      return { path: dest, role: 'input', name, mime: /\.(jpe?g|png|webp)$/i.test(name) ? 'image/jpeg' : 'application/octet-stream' };
+    });
+    return patchOrder(order.id, { files: [...order.files, ...files] });
   }
 
   async function ingestPrivateMedia(leadId: number, accountId: number, msg: TgMessage): Promise<void> {
@@ -369,6 +385,7 @@ export function createOrders(deps: OrdersDeps) {
     deliver,
     applyManagerIntent,
     ingestPrivateMedia,
+    attachRecentMedia,
     handlePostManagerReply,
     startPoller,
     stopPoller,

@@ -1,5 +1,6 @@
 import type { ManagerOrderIntent } from '../../../shared/types';
 import type { AgentTool } from '../types';
+import { isFreeLead } from '../../trusted';
 import type { ToolHostDeps } from './deps';
 
 function priceInRange(min: number, max: number, price: number): boolean {
@@ -123,6 +124,32 @@ export function createOrderTools(deps: ToolHostDeps): AgentTool[] {
     },
   };
 
+  // «Свои люди»: an order goes to work without payment; the executor delivers the result to the client itself
+  const startWork: AgentTool = {
+    name: 'start_work',
+    description: 'Запустить заказ своего человека в работу без оплаты (только для блока free_client). Результат придёт клиенту сам.',
+    parameters: {
+      type: 'object',
+      properties: { orderId: { type: 'number' } },
+      required: ['orderId'],
+    },
+    async run(args, ctx) {
+      const orderId = Number(args.orderId);
+      let order;
+      try {
+        order = deps.db.getOrder(orderId);
+      } catch {
+        return 'Заказ не найден';
+      }
+      if (order.leadId !== ctx.leadId) return 'Заказ принадлежит другому лиду';
+      if (!isFreeLead(deps.db, deps.db.getLead(ctx.leadId))) return 'Бесплатно — только для своих людей; платным клиентам выставь счёт (request_payment)';
+      if (ctx.dryRun) return `[dryRun] Запустили бы заказ #${orderId}`;
+      if (!deps.orders) return 'Заказы не подключены';
+      void deps.orders.requestPayment(orderId).catch((e) => console.error('start_work', e));
+      return `Заказ #${orderId} в работе: исполнитель пришлёт результат клиенту сам. Скажи клиенту, что взял в работу и примерно когда будет.`;
+    },
+  };
+
   const orderStatus: AgentTool = {
     name: 'order_status',
     description: 'Статус заказа и краткие детали.',
@@ -144,5 +171,5 @@ export function createOrderTools(deps: ToolHostDeps): AgentTool[] {
     },
   };
 
-  return [createOrUpdate, preview, requestPayment, orderStatus];
+  return [createOrUpdate, preview, requestPayment, orderStatus, startWork];
 }

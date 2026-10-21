@@ -152,24 +152,47 @@ describe('marketplace_card', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('mentions WB rules in content prompt', async () => {
-    const spy = vi.spyOn(llm, 'chatCompletion').mockResolvedValue(
-      JSON.stringify({
-        title: 'T',
-        description: 'D',
-        characteristics: [],
-        keywords: [],
-        slideCount: 1,
-        slidePrompts: ['slide'],
-      }),
+    const spy = vi.spyOn(shared, 'visionChat').mockResolvedValue(
+      JSON.stringify({ title: 'T', description: 'D', characteristics: [], keywords: [], slides: [{ headline: 'Кровать', callouts: [], scene: 'front' }] }),
     );
     vi.spyOn(images, 'generateImages').mockResolvedValue([]);
 
     const ex = createMarketplaceCardExecutor(baseSettings);
     await ex.preview(sampleInput({ service: sampleService({ kind: 'marketplace_card' }) }));
 
-    const system = spy.mock.calls[0][1][0].content;
+    const system = spy.mock.calls[0][1][0].content as string;
     expect(system).toMatch(/Wildberries|WB|QR/i);
     expect(system).toMatch(/цен/i);
+  });
+
+  it('tells the product photo from the example, makes the requested slides 3:4 with Russian text, no placeholders', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'card-'));
+    const product = join(dir, 'bed.jpg');
+    const example = join(dir, 'example.jpg');
+    await writeFile(product, 'x');
+    await writeFile(example, 'y');
+    vi.spyOn(shared, 'visionChat').mockResolvedValue(JSON.stringify({
+      productPhotos: [0], referencePhotos: [1], style: 'bold green background, white headline',
+      title: 'Кровать двуспальная', description: 'D', characteristics: ['Цвет: тёмно-серый', 'Размер: [уточнить у продавца]'], keywords: ['кровать'],
+      missing: ['размер спального места'],
+      slides: Array.from({ length: 5 }, (_, i) => ({ headline: `Слайд ${i + 1}`, callouts: ['Мягкое изголовье'], scene: `angle ${i}` })),
+    }));
+    const gen = vi.spyOn(images, 'generateImages').mockResolvedValue([]);
+    const ex = createMarketplaceCardExecutor(baseSettings);
+    const out = await ex.run(sampleInput({
+      service: sampleService({ kind: 'marketplace_card' }),
+      workDir: dir,
+      inputs: [{ path: product, role: 'input', name: 'bed.jpg', mime: 'image/jpeg' }, { path: example, role: 'input', name: 'example.jpg', mime: 'image/jpeg' }],
+    }));
+    expect(gen).toHaveBeenCalledTimes(5);
+    const call = gen.mock.calls[0][2];
+    expect(call.aspectRatio).toBe('3:4');
+    expect(call.referencePaths).toEqual([product, example]);
+    expect(call.prompt).toMatch(/exactly the one in the first reference image/);
+    expect(call.prompt).toMatch(/«Слайд 1»/);
+    expect(call.prompt).toMatch(/never invent dimensions/);
+    expect(out.text).not.toMatch(/уточнить у продавца/);
+    expect(out.text).toMatch(/пришлите:\*\* размер спального места/);
   });
 });
 

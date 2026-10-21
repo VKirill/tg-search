@@ -49,6 +49,7 @@ import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
 import { createExecutors } from './executors/registry';
+import { captionImage } from './memory/caption';
 import { createSkillsStore } from './skills';
 
 export interface AppDeps {
@@ -283,6 +284,11 @@ export function createApp(deps: AppDeps): AppHandlers {
               const downloaded = await engine.downloadFile(accountId, fileId);
               const ext = msg.photo ? '.jpg' : '';
               mediaPath = storeMediaCopy(dataDir, downloaded, `in-${msg.chatId}-${msg.messageId}${ext}`);
+            }
+            // the agent reads text only: a photo becomes its description (product, example design, document…)
+            if (msg.photo && mediaPath) {
+              const { caption } = await captionImage(getSettings(), mediaPath).catch(() => ({ caption: '' }));
+              text = `${text.trim() ? `${text.trim()}\n` : ''}[фото: ${caption || 'без описания'}]`;
             }
             if (!text.trim() && msg.photo) text = '[фото]';
             if (!text.trim() && msg.document) text = `[файл: ${msg.document.name}]`;

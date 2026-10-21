@@ -10,12 +10,14 @@ const RETRY_DELAYS_MS = [500, 2000];
 
 export function textToImageModel(imageModel: string): string {
   const m = imageModel.trim() || 'fal-ai/nano-banana-2/edit';
+  if (m.startsWith('meta/muse-image')) return 'meta/muse-image/text-to-image';
   if (m.endsWith('/edit')) return m.replace(/\/edit$/, '');
   return m;
 }
 
 export function editImageModel(imageModel: string): string {
   const m = imageModel.trim() || 'fal-ai/nano-banana-2/edit';
+  if (m.startsWith('meta/muse-image')) return 'meta/muse-image/edit';
   if (m.endsWith('/edit')) return m;
   return `${m.replace(/\/$/, '')}/edit`;
 }
@@ -161,6 +163,7 @@ export async function generateImages(
     count?: number;
     namePrefix: string;
     role: 'output' | 'preview';
+    aspectRatio?: string; // e.g. '3:4' — marketplace cards are vertical
   },
 ): Promise<OrderFile[]> {
   const settings = getSettings();
@@ -175,6 +178,7 @@ export async function generateImages(
     output_format: 'png',
   };
   if (image_urls?.length) body.image_urls = image_urls;
+  if (opts.aspectRatio) body.aspect_ratio = opts.aspectRatio;
 
   const raw = await falRunImageJob(settings, model, body, workDir, opts.namePrefix);
   recordUsage({ kind: 'image', model, units: raw.length });
