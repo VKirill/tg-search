@@ -147,7 +147,7 @@ export function createOrders(deps: OrdersDeps) {
     const settings = deps.db.getSettings();
     const returnUrl = settings.yookassaReturnUrl.trim() || 'https://t.me';
     const description = `${service.name} — заказ #${order.id}`;
-    const { id, url } = await deps.payments.create(orderId, order.price, description, returnUrl);
+    const { id, url } = await deps.payments.create(`order-${orderId}-${order.price}`, order.price, description, returnUrl);
     const updated = patchOrder(orderId, {
       paymentId: id,
       paymentUrl: url,

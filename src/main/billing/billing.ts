@@ -253,7 +253,7 @@ export function createBilling(deps: BillingDeps): BillingApi {
     description: string,
     returnUrl: string,
   ): Promise<{ id: string; url: string }> {
-    return deps.payments.create(ledgerId, amountRub, description, returnUrl);
+    return deps.payments.create(`payment-${ledgerId}`, amountRub, description, returnUrl);
   }
 
   async function sendPaymentLink(clientId: number, text: string): Promise<void> {
@@ -265,6 +265,10 @@ export function createBilling(deps: BillingDeps): BillingApi {
   async function subscribe(clientId: number, planId: number): Promise<Subscription> {
     const plan = getPlan(planId);
     if (!plan.enabled) throw new Error('Тариф недоступен');
+    // One live subscription per client: a repeated offer (the agent may say it twice) must not send a second invoice.
+    // Pending: the link was already sent; active/past_due: renewals come from the scheduler.
+    const live = currentSubscription(clientId);
+    if (live) return live;
     const ts = now();
     const subRun = raw
       .prepare(

@@ -41,7 +41,7 @@ export class YooKassaProvider implements PaymentProvider {
   }
 
   async create(
-    orderId: number,
+    idempotenceKey: string,
     amountRub: number,
     description: string,
     returnUrl: string,
@@ -53,14 +53,14 @@ export class YooKassaProvider implements PaymentProvider {
       headers: {
         Authorization: basicAuth(shopId, secretKey),
         'Content-Type': 'application/json',
-        'Idempotence-Key': `order-${orderId}-${amountRub}`,
+        'Idempotence-Key': idempotenceKey,
       },
       body: JSON.stringify({
         amount: { value: formatRub(amountRub), currency: 'RUB' },
         capture: true,
         confirmation: { type: 'redirect', return_url: returnUrl },
         description: desc,
-        metadata: { orderId: String(orderId) },
+        metadata: { key: idempotenceKey },
       }),
     });
     if (!res.ok) throw new Error(await readError(res));

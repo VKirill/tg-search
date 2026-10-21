@@ -16,7 +16,8 @@ class FakePayments implements PaymentProvider {
   statuses = new Map<string, PaymentStatus>();
   createCalls: { ledgerId: number; amount: number }[] = [];
 
-  async create(ledgerId: number, amountRub: number, _description: string, _returnUrl: string) {
+  async create(key: string, amountRub: number, _description: string, _returnUrl: string) {
+    const ledgerId = Number(key.split('-').pop());
     this.createCalls.push({ ledgerId, amount: amountRub });
     const id = `pay-${ledgerId}`;
     this.statuses.set(id, 'pending');
@@ -128,6 +129,17 @@ describe('billing', () => {
     const st = billing.status(clientId);
     expect(st.subscription?.status).toBe('pending');
     expect(st.unpaid).toHaveLength(1);
+  });
+
+  it('a repeated subscribe does not create a second invoice', async () => {
+    const { db, clientId } = setup();
+    const billing = billingFor(db);
+    const plan = billing.listPlans()[0];
+    const first = await billing.subscribe(clientId, plan.id);
+    const again = await billing.subscribe(clientId, plan.id); // the agent offers it once more
+    expect(again.id).toBe(first.id);
+    expect(payments.createCalls).toHaveLength(1);
+    expect(sent.filter((s) => s.includes('https://pay.test/'))).toHaveLength(1);
   });
 
   it('paid subscription becomes active with one-month period', async () => {

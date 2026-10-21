@@ -15,7 +15,8 @@ class FakePayments implements PaymentProvider {
   createCalls: { orderId: number; amount: number }[] = [];
   statuses = new Map<string, PaymentStatus>();
 
-  async create(orderId: number, amountRub: number, _description: string, _returnUrl: string): Promise<{ id: string; url: string }> {
+  async create(key: string, amountRub: number, _description: string, _returnUrl: string): Promise<{ id: string; url: string }> {
+    const orderId = Number(key.split('-')[1]);
     this.createCalls.push({ orderId, amount: amountRub });
     const id = `pay-${orderId}`;
     this.statuses.set(id, 'pending');

@@ -38,7 +38,7 @@ describe('YooKassaProvider', () => {
 
   it('requires credentials', async () => {
     const p = new YooKassaProvider(() => ({ ...settings(), yookassaShopId: '', yookassaSecretKey: '' }));
-    await expect(p.create(1, 100, 'test', 'https://t.me')).rejects.toThrow('Укажите shopId');
+    await expect(p.create('order-1-100', 100, 'test', 'https://t.me')).rejects.toThrow('Укажите shopId');
   });
 
   it('creates payment with idempotence key', async () => {
@@ -49,13 +49,13 @@ describe('YooKassaProvider', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
     const p = new YooKassaProvider(settings);
-    const r = await p.create(5, 500, 'Описание', 'https://t.me/back');
+    const r = await p.create('order-5-500', 500, 'Описание', 'https://t.me/back');
     expect(r).toEqual({ id: 'pay-1', url: 'https://yoomoney.ru/checkout' });
     const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
     expect(init?.headers).toMatchObject({ 'Idempotence-Key': 'order-5-500' });
     const body = JSON.parse(String(init?.body));
     expect(body.amount).toEqual({ value: '500.00', currency: 'RUB' });
-    expect(body.metadata.orderId).toBe('5');
+    expect(body.metadata.key).toBe('order-5-500');
   });
 
   it('maps HTTP errors to Russian message', async () => {
