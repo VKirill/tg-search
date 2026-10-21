@@ -1971,10 +1971,14 @@ export function createMockApi(): Api {
         mockHelperChats.splice(0, mockHelperChats.length, ...list);
         return mockHelperChats;
       },
+      async test(chat, text) {
+        const score = /реши|задач|\?/i.test(text) ? 0.86 : 0.08;
+        return { score, answer: score >= (chat.threshold ?? 0.5), reason: `Jev: ${Math.round(score * 100)}% при пороге ${Math.round((chat.threshold ?? 0.5) * 100)}%` };
+      },
       async requests() {
         return [
-          { id: 2, chatId: -1001234567890, messageId: 41, accountId: 1, userId: 9, userName: 'Аня', text: '', photos: ['/tmp/p.jpg'], tasks: ['1', '2', '3'], selection: 'all', status: 'done', error: null, createdAt: Date.now() - 600_000, updatedAt: Date.now() - 300_000 },
-          { id: 1, chatId: -1001234567890, messageId: 40, accountId: 1, userId: 8, userName: 'Петя', text: 'всем привет', photos: [], tasks: [], selection: null, status: 'ignored', error: null, createdAt: Date.now() - 900_000, updatedAt: Date.now() - 900_000 },
+          { id: 2, chatId: -1001234567890, messageId: 41, accountId: 1, userId: 9, userName: 'Аня', text: '', photos: ['/tmp/p.jpg'], tasks: ['1', '2', '3'], selection: 'all', status: 'done', error: null, createdAt: Date.now() - 600_000, updatedAt: Date.now() - 300_000, score: 0.93, agent: 'solver', answer: '## Задача 1\n> Найдите x: 2x + 3 = 11\n\n1. Переносим 3: $2x = 8$\n2. Делим на 2: $x = 4$\n\n**Ответ: 4**' },
+          { id: 1, chatId: -1001234567890, messageId: 40, accountId: 1, userId: 8, userName: 'Петя', text: 'всем привет', photos: [], tasks: [], selection: null, status: 'ignored', error: null, createdAt: Date.now() - 900_000, updatedAt: Date.now() - 900_000, score: 0.04, agent: null, answer: null },
         ] as HelperRequest[];
       },
     },

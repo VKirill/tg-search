@@ -4,7 +4,7 @@
 // chatter; the answer goes as a reply to the author. Requests live in the database, so a restart picks them up.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AppEvent, HelperChat, HelperRequest, HelperScenario, Settings } from '../../shared/types';
+import { HELPER_DEFAULT_TEXTS, HELPER_SCENARIOS, type AppEvent, type HelperChat, type HelperRequest, type HelperScenario, type Settings } from '../../shared/types';
 import type { Db } from '../db';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { afterSend, canSend } from '../pipeline/limiter';
@@ -12,20 +12,22 @@ import { trustedFor } from '../trusted';
 
 export const TASK_THRESHOLD = 0.5;
 export const scenarioOf = (chat: HelperChat): HelperScenario => chat.scenario ?? 'tasks';
+export const helperAgent = (chat: HelperChat): string => chat.agent?.trim() || HELPER_SCENARIOS[scenarioOf(chat)].agent;
 
-// What the helper says, by scenario
-const TEXTS: Record<HelperScenario, { ack: string; fail: string; limit: (cap: number) => string }> = {
-  tasks: {
-    ack: '🔥 взял задачу, решаю — минутку',
-    fail: 'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом',
-    limit: (cap) => `на сегодня бесплатные решения закончились (${cap} в день) — завтра продолжим 🙂`,
-  },
-  questions: {
-    ack: '🔥 смотрю, сейчас отвечу',
-    fail: 'не получилось ответить 😕 попробуй переформулировать вопрос',
-    limit: (cap) => `на сегодня бесплатные ответы закончились (${cap} в день) — завтра продолжим 🙂`,
-  },
-};
+// What the helper says: the group's own phrase or the scenario's
+export function helperText(chat: HelperChat, key: 'ack' | 'fail' | 'limit', cap = 0): string {
+  const own = chat.texts?.[key]?.trim();
+  return (own || HELPER_DEFAULT_TEXTS[scenarioOf(chat)][key]).replaceAll('{cap}', String(cap));
+}
+
+// Filters before Jev: keywords and «only replies to the helper / mentions of the account»; null — passes
+export function filterReason(chat: HelperChat, text: string, opts: { replyToOurs: boolean; mention: boolean }): string | null {
+  const words = (chat.keywords ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (words.length && !words.some((w) => text.toLowerCase().includes(w))) return 'нет ключевых слов';
+  if (chat.repliesOnly && !opts.replyToOurs && !opts.mention) return 'не ответ помощнику и не упоминание';
+  return null;
+}
+
 const ASK_TTL_MS = 3 * 3600_000; // a «какую решить?» question waits this long for the answer
 const MAX_PARALLEL = 3;
 const POLL_TASKS_MAX = 9; // poll options: the tasks plus «Все»
@@ -60,7 +62,7 @@ type Row = Record<string, any>;
 const toRequest = (r: Row): HelperRequest => ({
   id: r.id, chatId: r.chat_id, messageId: r.message_id, accountId: r.account_id, userId: r.user_id, userName: r.user_name,
   text: r.text, photos: JSON.parse(r.photos), tasks: JSON.parse(r.tasks), selection: r.selection, status: r.status,
-  error: r.error, createdAt: r.created_at, updatedAt: r.updated_at,
+  error: r.error, createdAt: r.created_at, updatedAt: r.updated_at, score: r.score ?? null, answer: r.answer ?? null, agent: r.agent ?? null,
 });
 
 export function createGroupHelper(deps: GroupHelperDeps) {
@@ -86,10 +88,18 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   } catch {
     /* already there */
   }
-  try {
-    db.raw.exec('ALTER TABLE helper_requests ADD COLUMN ack_id INTEGER'); // «🔥 взял задачу» — removed when the answer comes
-  } catch {
-    /* already there */
+  for (const col of [
+    'ack_id INTEGER', // «🔥 взял задачу» — removed when the answer comes
+    'answer_id INTEGER', // our answer: replies to it count as replies to the helper
+    'score REAL', // Jev's probability that it needs an answer
+    'answer TEXT', // what was answered
+    'agent TEXT',
+  ]) {
+    try {
+      db.raw.exec(`ALTER TABLE helper_requests ADD COLUMN ${col}`);
+    } catch {
+      /* already there */
+    }
   }
 
   const chats = (): HelperChat[] => {
@@ -130,7 +140,6 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   const waiting: number[] = [];
   const chatOf = (chatId: number) => chats().find((c) => c.chatId === chatId);
   const asGroup = (chatId: number) => chatOf(chatId)?.asGroup !== false;
-  const textsOf = (chatId: number) => TEXTS[scenarioOf(chatOf(chatId) ?? ({} as HelperChat))];
 
   function enqueue(id: number) {
     set(id, { status: 'queued' });
@@ -138,7 +147,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     // instead, deleted when the solution comes
     const r = get(id);
     if (asGroup(r.chat_id) && !r.ack_id) {
-      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, textsOf(r.chat_id).ack))
+      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, helperText(chatOf(r.chat_id) ?? ({} as HelperChat), 'ack')))
         .then((m) => set(id, { ack_id: m.messageId }))
         .catch((err) => console.warn('group helper ack', err instanceof Error ? err.message : err));
     }
@@ -159,21 +168,21 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   async function solveRequest(id: number) {
     const r = get(id);
     if (!r || r.status === 'done') return;
-    set(id, { status: 'solving' });
     const chat = chatOf(r.chat_id);
     if (!chat) return;
+    set(id, { status: 'solving', agent: helperAgent(chat) });
     try {
       const dir = join(deps.dataDir, 'group', String(r.chat_id), String(r.message_id));
       const text = await deps.answer(chat, { key: `group:${r.chat_id}:${r.message_id}`, task: taskText(chat, r), photos: JSON.parse(r.photos), dir });
       if (!text.trim()) throw new Error('пустое решение');
-      await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, text));
-      set(id, { status: 'done', error: null });
+      const sent = await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, text));
+      set(id, { status: 'done', error: null, answer: text, answer_id: sent.messageId });
       await dropAck(id);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`group helper: request ${id} failed`, error);
       set(id, { status: 'failed', error });
-      await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, textsOf(r.chat_id).fail)).catch(() => {});
+      await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, helperText(chat, 'fail'))).catch(() => {});
       await dropAck(id);
     }
   }
@@ -234,6 +243,11 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     }
 
     if (!msg.photo && msg.text.trim().length < 8) return; // «спасибо», «ок»
+    // the group's filters come before Jev: no model is asked about what the owner excluded
+    const ours = msg.replyToMessageId != null && !!db.raw.prepare(`SELECT 1 FROM helper_requests WHERE chat_id = ?
+      AND ? IN (answer_id, question_id, ack_id)`).get(msg.chatId, msg.replyToMessageId);
+    const me = db.getAccount(accountId).username;
+    if (filterReason(chat, msg.text, { replyToOurs: ours, mention: !!me && msg.text.toLowerCase().includes(`@${me.toLowerCase()}`) })) return;
     let photos: string[] = [];
     let picture = '';
     let tasks: string[] = [];
@@ -247,12 +261,12 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       ({ caption: picture, tasks } = await deps.describePhoto(path).catch(() => ({ caption: '', tasks: [] as string[] })));
     }
     // Jev decides whether this is a request at all — the agent is not woken for chatter
-    const p = await deps.isRequest(chat, msg.text, picture).catch(() => 0);
+    const p = chat.jevCheck === false ? 1 : await deps.isRequest(chat, msg.text, picture).catch(() => 0);
     const insert = (status: HelperRequest['status'], selection: string | null = null) => Number(db.raw.prepare(`INSERT INTO helper_requests
-      (chat_id, message_id, account_id, user_id, user_name, text, photos, tasks, picture, selection, status, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(msg.chatId, msg.messageId, accountId, userId, msg.senderName ?? msg.senderUsername ?? '',
-      msg.text, JSON.stringify(photos), JSON.stringify(tasks), picture, selection, status, now, now).lastInsertRowid);
-    if (p < TASK_THRESHOLD) {
+      (chat_id, message_id, account_id, user_id, user_name, text, photos, tasks, picture, selection, status, score, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(msg.chatId, msg.messageId, accountId, userId, msg.senderName ?? msg.senderUsername ?? '',
+      msg.text, JSON.stringify(photos), JSON.stringify(tasks), picture, selection, status, p, now, now).lastInsertRowid);
+    if (p < (chat.threshold ?? TASK_THRESHOLD)) {
       insert('ignored');
       return;
     }
@@ -265,7 +279,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
         .get(msg.chatId, userId, now - 12 * 3600_000);
       const id = insert('limit');
       if (!already) {
-        await sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId, TEXTS[scenarioOf(chat)].limit(cap)))
+        await sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId, helperText(chat, 'limit', cap)))
           .catch((err) => set(id, { error: String(err) }));
       }
       return;
@@ -326,7 +340,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
           console.warn('group helper send-as', chat.title, err instanceof Error ? err.message : err);
           return false;
         });
-        if (asGroup && !ok) console.warn(`group helper: «${chat.title}» does not offer sending on behalf of the group to this account`);
+        // an anonymous admin posts as the group anyway; otherwise the account needs that admin right
+        if (asGroup && !ok) console.warn(`group helper: «${chat.title}» — «send as group» is not offered; answers go as the group only if the account is an anonymous admin there`);
       }
       pollTimer = setInterval(() => void checkPolls().catch((err) => console.error('group helper polls', err)), POLL_CHECK_MS);
       deps.engine.onChatMessage((accountId, msg) => {
@@ -352,8 +367,23 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       for (const c of list.filter((x) => x.enabled)) void deps.engine.sendAsGroup(c.accountId, c.chatId, c.asGroup !== false).catch(() => {});
       return chats();
     },
-    requests(limit = 50): HelperRequest[] {
-      return (db.raw.prepare('SELECT * FROM helper_requests ORDER BY id DESC LIMIT ?').all(limit) as Row[]).map(toRequest);
+    requests(limit = 50, chatId?: number): HelperRequest[] {
+      const rows = chatId == null
+        ? db.raw.prepare('SELECT * FROM helper_requests ORDER BY id DESC LIMIT ?').all(limit)
+        : db.raw.prepare('SELECT * FROM helper_requests WHERE chat_id = ? ORDER BY id DESC LIMIT ?').all(chatId, limit);
+      return (rows as Row[]).map(toRequest);
+    },
+    // The sandbox: what the group's filters and Jev say about a message, without answering it
+    async test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }> {
+      const filtered = filterReason(chat, text, { replyToOurs: false, mention: false });
+      if (filtered && !chat.repliesOnly) return { score: 0, answer: false, reason: filtered };
+      const score = chat.jevCheck === false ? 1 : await deps.isRequest(chat, text, '');
+      const threshold = chat.threshold ?? TASK_THRESHOLD;
+      return {
+        score, answer: score >= threshold,
+        reason: chat.jevCheck === false ? 'проверка Jev выключена' : `Jev: ${Math.round(score * 100)}% при пороге ${Math.round(threshold * 100)}%` +
+          (chat.repliesOnly ? ' (в группе отвечает только на ответы помощнику и упоминания)' : ''),
+      };
     },
     onMessage, // for tests
     checkPolls, // for tests

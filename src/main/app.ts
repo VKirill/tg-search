@@ -52,7 +52,8 @@ import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
-import { createGroupHelper, scenarioOf } from './groupHelper';
+import { createGroupHelper, helperAgent, scenarioOf } from './groupHelper';
+import { HELPER_DEFAULT_JEV, type HelperChat } from '../shared/types';
 import { postSystemOne } from './ai/jev';
 import { llmGateway } from './ai/gateway';
 import { parseJsonFromLlm } from './ai/llm';
@@ -335,20 +336,9 @@ export function createApp(deps: AppDeps): AppHandlers {
       const tasks = scenarioOf(chat) === 'tasks';
       if (!getSettings().jevApiKey.trim()) return tasks && picture ? 0.6 : 0; // no Jev: only a photo in a tasks group counts
       const data = await postSystemOne(getSettings, {
-        state: { message: message.slice(0, 1500), picture: picture.slice(0, 800), group: (chat.about ?? '').slice(0, 800) },
-        questions: {
-          request: {
-            type: 'noul',
-            instructions: tasks
-              ? 'This is a message in a Telegram group where an assistant solves tasks for members; `group` describes the group, ' +
-                '`picture` an attached photo, if any. Is the author asking to solve, check or explain a task (homework, exercise, ' +
-                'test question, problem) — including just sending a photo of a task? Chatting, thanks, ads and off-topic messages are not.'
-              : 'This is a message in a Telegram group with an assistant that answers members\' questions; `group` describes what ' +
-                'the group is about, `picture` an attached photo, if any. Is the author asking a question or for help or advice that ' +
-                'the assistant should answer, on the group\'s topic? Greetings, thanks, chatter, ads and messages addressed to a ' +
-                'particular other member are not.',
-          },
-        },
+        state: { message: message.slice(0, 1500), picture: picture.slice(0, 800), group: [chat.about, chat.instructions].filter(Boolean).join('\n').slice(0, 1200) },
+        // the group's own question, or the scenario's
+        questions: { request: { type: 'noul', instructions: chat.jevPrompt?.trim() || HELPER_DEFAULT_JEV[scenarioOf(chat)] } },
       });
       return (data.answers?.request as { noul?: number } | undefined)?.noul ?? 0;
     },
@@ -365,9 +355,17 @@ export function createApp(deps: AppDeps): AppHandlers {
     },
     async answer(chat, { key, task, photos, dir }) {
       const images = await Promise.all(photos.map((p) => fileToDataUri(p)));
+      // the group's skills go with the job: their instructions are part of the context
+      const skillText = (chat.skills ?? []).map((name) => {
+        try {
+          return `<skill name="${name}">\n${skills.loadSkillBody(name)}\n</skill>`;
+        } catch {
+          return '';
+        }
+      }).filter(Boolean).join('\n\n');
       const { text } = await runSubagentTurn({
-        agentName: scenarioOf(chat) === 'tasks' ? 'solver' : 'consultant', task, leadId: 0, clientId: null, images,
-        context: `Группа в Telegram «${chat.title}»: ответ увидят все участники.`,
+        agentName: helperAgent(chat), task, leadId: 0, clientId: null, images,
+        context: [`Группа в Telegram «${chat.title}»: ответ увидят все участники.`, skillText].filter(Boolean).join('\n\n'),
         host: { ...makeHostForLead(0), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit, aiEngine, sessionKey: key,
       });
       return renderFigures(text, { images: photos, dir: join(dir, 'figures') });
@@ -841,13 +839,24 @@ export function createApp(deps: AppDeps): AppHandlers {
     helper: {
       chats: async () => groupHelper.chats(),
       addChat: async (accountId, link) => {
-        const chat = await engine.resolveChat(accountId, link.trim());
-        if (chat.kind === 'private' || chat.kind === 'channel') throw new Error('Нужна группа: помощник отвечает на сообщения участников');
+        const found = await engine.resolveChat(accountId, link.trim());
+        if (found.kind === 'private') throw new Error('Нужна группа или канал');
+        // a channel: the helper works in its discussion group, where readers comment
+        let chat = found;
+        let channel: HelperChat['channel'] = null;
+        if (found.kind === 'channel') {
+          const full = found.linkedChatId === undefined ? await engine.getChat(accountId, found.chatId) : found;
+          if (!full.linkedChatId) throw new Error('У канала нет обсуждения: включите комментарии (группу обсуждения) в настройках канала');
+          chat = await engine.getChat(accountId, full.linkedChatId);
+          channel = { chatId: found.chatId, title: found.title, username: found.username ?? null };
+          if (!chat.isMember) await engine.joinChat(accountId, chat.chatId);
+        }
         const rest = groupHelper.chats().filter((c) => c.chatId !== chat.chatId);
-        return groupHelper.saveChats([...rest, { chatId: chat.chatId, title: chat.title, username: chat.username ?? null, accountId, enabled: true }]);
+        return groupHelper.saveChats([...rest, { chatId: chat.chatId, title: chat.title, username: chat.username ?? null, accountId, enabled: true, channel }]);
       },
       saveChats: async (list) => groupHelper.saveChats(list),
-      requests: async (limit) => groupHelper.requests(limit),
+      requests: async (limit, chatId) => groupHelper.requests(limit, chatId),
+      test: async (chat, text) => groupHelper.test(chat, text),
     },
 
     ai: {

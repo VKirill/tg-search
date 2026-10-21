@@ -12,12 +12,12 @@ const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-function setup(opts: { cap?: string; asGroup?: boolean; scenario?: 'tasks' | 'questions' } = {}) {
+function setup(opts: { cap?: string; asGroup?: boolean; scenario?: 'tasks' | 'questions' | 'custom'; extra?: Record<string, unknown> } = {}) {
   const db = new Db(':memory:');
   const dataDir = mkdtempSync(join(tmpdir(), 'group-helper-'));
   const acc = db.upsertAccountByPhone('+79990001122');
   db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 1, pauseSec: 0 });
-  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'Учебный чат', username: 'study_help_chat', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false, scenario: opts.scenario, about: 'помощь с уроками и вопросы по учёбе' }]), helperDailyPerUser: opts.cap ?? '5' });
+  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'Учебный чат', username: 'study_help_chat', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false, scenario: opts.scenario, about: 'помощь с уроками и вопросы по учёбе', ...opts.extra }]), helperDailyPerUser: opts.cap ?? '5' });
   const engine = new FakeEngine();
   const page = join(dataDir, 'page.jpg');
   writeFileSync(page, 'x');
@@ -143,5 +143,47 @@ describe('homework helper in a group', () => {
     expect(solved[0]).toMatch(/^\[questions\] Вопрос участника группы: а когда в этом году пробный экзамен\?/);
     expect(solved[0]).toContain('О группе: помощь с уроками и вопросы по учёбе');
     expect(solved).toHaveLength(2);
+  });
+
+  it('the group\'s own rules: keywords and threshold come first, Jev can be off, phrases are the group\'s', async () => {
+    const { engine, helper, acc, solved, db } = setup({
+      scenario: 'custom', asGroup: true,
+      extra: { keywords: ['помогите'], threshold: 0.95, texts: { ack: 'принято!' } },
+    });
+    await helper.onMessage(acc.id, makeMsg(CHAT, 1, 'реши задачу про поезд пожалуйста', { senderUserId: 5 })); // no keyword
+    await helper.onMessage(acc.id, makeMsg(CHAT, 2, 'помогите решить задачу про поезд', { senderUserId: 5 })); // 0.9 < 0.95
+    await tick(10);
+    expect(solved).toEqual([]);
+    expect(helper.requests(10).map((r) => [r.status, r.score])).toEqual([['ignored', 0.9]]);
+
+    // Jev off: every message with the keyword is answered, with the group's own «taken» phrase
+    const list = JSON.parse(db.getSettings().helperChats);
+    db.setSettings({ helperChats: JSON.stringify([{ ...list[0], jevCheck: false }]) });
+    await helper.onMessage(acc.id, makeMsg(CHAT, 3, 'помогите, не понимаю тему', { senderUserId: 6 }));
+    await tick(10);
+    expect(engine.sent.map((m) => m.text)).toEqual(['принято!', '## Решение\n**Ответ: 42**']);
+    expect(helper.requests(1)[0]).toMatchObject({ status: 'done', answer: '## Решение\n**Ответ: 42**', agent: 'consultant', score: 1 });
+  });
+
+  it('«only replies to the helper»: a reply to its answer counts, a new message does not', async () => {
+    const { engine, helper, acc, solved, db } = setup({ scenario: 'questions', extra: { repliesOnly: true, jevCheck: false } });
+    await helper.onMessage(acc.id, makeMsg(CHAT, 1, 'а какой учебник по алгебре лучше?', { senderUserId: 5 }));
+    expect(solved).toEqual([]);
+    // the helper answered something earlier: a reply to it is taken
+    db.raw.prepare(`INSERT INTO helper_requests(chat_id, message_id, account_id, user_id, status, answer_id, created_at, updated_at)
+      VALUES(?, 50, ?, 5, 'done', 777, 0, 0)`).run(CHAT, acc.id);
+    await helper.onMessage(acc.id, makeMsg(CHAT, 2, 'а почему именно этот учебник?', { senderUserId: 5, replyToMessageId: 777 }));
+    await tick(10);
+    expect(solved).toHaveLength(1);
+    expect(engine.sent).toHaveLength(1);
+  });
+
+  it('the sandbox says what filters and Jev think, without answering', async () => {
+    const { engine, helper } = setup({ scenario: 'custom', extra: { keywords: ['реши'] } });
+    const chat = helper.chats()[0];
+    expect(await helper.test(chat, 'привет всем')).toMatchObject({ answer: false, reason: 'нет ключевых слов' });
+    expect(await helper.test(chat, 'реши задачу')).toMatchObject({ answer: true, score: 0.9 });
+    expect(await helper.test({ ...chat, threshold: 0.95 }, 'реши задачу')).toMatchObject({ answer: false });
+    expect(engine.sent).toEqual([]);
   });
 });

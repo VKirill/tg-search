@@ -12,6 +12,7 @@ import {
   IconSettings,
   IconSkills,
   IconNews,
+  IconGroups,
   IconSpam,
   IconStats,
   IconSubscriptions,
@@ -22,6 +23,7 @@ import type { Account } from '../../../shared/types';
 export type NavView =
   | 'inbox'
   | 'chats'
+  | 'groups'
   | 'leads'
   | 'funnel'
   | 'projects'
@@ -49,6 +51,7 @@ type NavRailProps = {
 const items: { id: NavView; label: string; Icon: (p: { size?: number }) => React.ReactElement; badge?: boolean }[] = [
   { id: 'inbox', label: 'Входящие', Icon: IconInbox },
   { id: 'chats', label: 'Чаты', Icon: IconChats },
+  { id: 'groups', label: 'Помощник групп', Icon: IconGroups },
   { id: 'leads', label: 'Лиды', Icon: IconLeads },
   { id: 'funnel', label: 'Воронка', Icon: IconFunnel },
   { id: 'projects', label: 'Тематики', Icon: IconTopics },

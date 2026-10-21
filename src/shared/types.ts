@@ -435,34 +435,83 @@ export interface AiProvider {
   models: number;
 }
 
-// The group assistant: in groups the owner connects, the agent answers members' requests by a scenario
-export type HelperScenario = 'tasks' | 'questions';
+// The group assistant: in groups (or channel discussions) the owner connects, the agent answers members by a scenario
+export type HelperScenario = 'tasks' | 'questions' | 'custom';
 
-export const HELPER_SCENARIOS: Record<HelperScenario, { label: string; description: string }> = {
+export const HELPER_SCENARIOS: Record<HelperScenario, { label: string; description: string; agent: string }> = {
   tasks: {
     label: 'Решение задач',
+    agent: 'solver',
     description: 'Участники присылают задания текстом или фото. Jev отделяет просьбы решить от болтовни; если на фото несколько заданий — ' +
       'опрос автору, какие решить (засчитывается только его голос); решатель отвечает пошагово, с проверкой второй моделью, рисунками и графиками.',
   },
   questions: {
     label: 'Ответы на вопросы',
-    description: 'Jev отбирает вопросы по теме группы (из описания ниже), агент-консультант отвечает коротко и по делу, при необходимости ищет в сети; ' +
+    agent: 'consultant',
+    description: 'Jev отбирает вопросы по теме группы, агент-консультант отвечает коротко и по делу, при необходимости ищет в сети; ' +
       'приветствия, благодарности, болтовня и реклама остаются без ответа.',
+  },
+  custom: {
+    label: 'Свой сценарий',
+    agent: 'consultant',
+    description: 'Вы сами решаете, на какие сообщения отвечать (проверка Jev со своим вопросом, только ответы помощнику и упоминания, ' +
+      'ключевые слова), какой агент отвечает, какие умения ему подгружаются и что он пишет.',
+  },
+};
+
+// What Jev is asked about every message, by scenario (the owner can write their own per group). `message` — the text,
+// `picture` — what is on an attached photo, `group` — the group's description.
+export const HELPER_DEFAULT_JEV: Record<HelperScenario, string> = {
+  tasks: 'This is a message in a Telegram group where an assistant solves tasks for members; `group` describes the group, ' +
+    '`picture` an attached photo, if any. Is the author asking to solve, check or explain a task (homework, exercise, ' +
+    'test question, problem) — including just sending a photo of a task? Chatting, thanks, ads and off-topic messages are not.',
+  questions: 'This is a message in a Telegram group with an assistant that answers members\' questions; `group` describes what ' +
+    'the group is about, `picture` an attached photo, if any. Is the author asking a question or for help or advice that ' +
+    'the assistant should answer, on the group\'s topic? Greetings, thanks, chatter, ads and messages addressed to a ' +
+    'particular other member are not.',
+  custom: 'This is a message in a Telegram group with an assistant; `group` describes the group and what the assistant does, ' +
+    '`picture` an attached photo, if any. Should the assistant answer this message? Greetings, thanks, chatter and ads — no.',
+};
+
+export const HELPER_DEFAULT_TEXTS: Record<HelperScenario, { ack: string; fail: string; limit: string }> = {
+  tasks: {
+    ack: '🔥 взял задачу, решаю — минутку',
+    fail: 'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом',
+    limit: 'на сегодня бесплатные решения закончились ({cap} в день) — завтра продолжим 🙂',
+  },
+  questions: {
+    ack: '🔥 смотрю, сейчас отвечу',
+    fail: 'не получилось ответить 😕 попробуй переформулировать вопрос',
+    limit: 'на сегодня бесплатные ответы закончились ({cap} в день) — завтра продолжим 🙂',
+  },
+  custom: {
+    ack: '🔥 смотрю, сейчас отвечу',
+    fail: 'не получилось ответить 😕 попробуй ещё раз чуть позже',
+    limit: 'на сегодня ответы закончились ({cap} в день) — завтра продолжим 🙂',
   },
 };
 
 export interface HelperChat {
-  chatId: number;
+  chatId: number; // the group the helper reads and answers in (for a channel — its discussion group)
   title: string;
   username: string | null;
   accountId: number; // the account that listens and answers
   enabled: boolean;
+  channel?: { chatId: number; title: string; username: string | null } | null; // connected through this channel
   scenario?: HelperScenario; // default «tasks»
   about?: string; // what the group is about — context for Jev and the agent (kept in local settings only)
   instructions?: string; // how to answer: tone, length, what not to do, where to send people
+  agent?: string; // the subagent that answers; default — the scenario's
+  skills?: string[]; // skills whose instructions go with every job
+  jevCheck?: boolean; // ask Jev whether to answer (default true); off — every message that passes the filters
+  jevPrompt?: string; // the question for Jev; '' — the scenario's default
+  threshold?: number; // Jev probability to answer, 0–1 (default 0.5)
+  repliesOnly?: boolean; // only replies to the helper's messages and mentions of the account
+  keywords?: string[]; // only messages with one of these words; empty — any
   askWhich?: boolean; // «tasks»: a page with several tasks gets a poll for its author (default true)
-  dailyCap?: number | null; // free answers per member a day; null — the common setting
+  dailyCap?: number | null; // answers per member a day; null — the common setting
   asGroup?: boolean; // answers on behalf of the group (default) rather than from the account
+  texts?: { ack?: string; fail?: string; limit?: string }; // the helper's own phrases; empty — the scenario's
 }
 
 export interface HelperRequest {
@@ -477,6 +526,9 @@ export interface HelperRequest {
   tasks: string[];
   selection: string | null;
   status: 'ignored' | 'asked' | 'queued' | 'solving' | 'done' | 'failed' | 'limit';
+  score: number | null; // Jev: how likely it needs an answer
+  answer: string | null; // what the helper answered
+  agent: string | null;
   error: string | null;
   createdAt: number;
   updatedAt: number;
@@ -924,7 +976,8 @@ export interface Api {
     chats(): Promise<HelperChat[]>;
     addChat(accountId: number, link: string): Promise<HelperChat[]>;
     saveChats(list: HelperChat[]): Promise<HelperChat[]>;
-    requests(limit: number): Promise<HelperRequest[]>;
+    requests(limit: number, chatId?: number): Promise<HelperRequest[]>;
+    test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }>; // what Jev says about a message
   };
   trusted: {
     list(): Promise<TrustedContact[]>;
