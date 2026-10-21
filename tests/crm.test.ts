@@ -267,7 +267,7 @@ describe('OpenAiManagerAi card context', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
     });
     const ai = new OpenAiManagerAi(settings);
     const project = {
@@ -318,6 +318,7 @@ describe('OpenAiManagerAi card context', () => {
       feedback: null,
       status: 'dialog' as const,
       accountId: null,
+      clientId: null,
       sequenceStep: 0,
       nextStepAt: null,
       handoff: false,
@@ -423,7 +424,7 @@ describe('OpenAiCrmAi parse', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', imagePricePerImage: '0.04', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
     });
     const ai = new OpenAiCrmAi(settings);
     const card: ClientCard = {

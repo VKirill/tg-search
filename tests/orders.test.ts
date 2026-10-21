@@ -43,6 +43,7 @@ function makeExecutors(runFn: Executor['run'], previewFn?: Executor['preview']):
     marketplace_card: base,
     image_gen: base,
     copywriting: base,
+    assistant: base,
   };
 }
 

@@ -79,6 +79,7 @@ function sampleInput(over: Partial<ExecutorInput> = {}): ExecutorInput {
       feedback: null,
       status: 'new',
       accountId: 1,
+      clientId: null,
       sequenceStep: 0,
       nextStepAt: null,
       handoff: false,

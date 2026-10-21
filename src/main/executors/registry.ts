@@ -11,5 +11,13 @@ export function createExecutors(getSettings: () => Settings): ExecutorRegistry {
     marketplace_card: createMarketplaceCardExecutor(getSettings),
     image_gen: createImageGenExecutor(getSettings),
     copywriting: createCopywritingExecutor(getSettings),
+    assistant: notConnected('assistant'), // web search / research executor: agent worker
   };
+}
+
+function notConnected(kind: string) {
+  const fail = async (): Promise<never> => {
+    throw new Error(`Исполнитель «${kind}» ещё не подключён`);
+  };
+  return { estimate: fail, preview: fail, run: fail };
 }

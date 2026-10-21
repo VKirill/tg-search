@@ -360,5 +360,6 @@ export function stubExecutorRegistry(): ExecutorRegistry {
     marketplace_card: stub,
     image_gen: stub,
     copywriting: stub,
+    assistant: stub,
   };
 }

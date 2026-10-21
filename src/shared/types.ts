@@ -145,6 +145,7 @@ export interface Lead {
   feedback: 'up' | 'down' | null;
   status: LeadStatus;
   accountId: number | null; // account that talks to this lead
+  clientId: number | null; // long-term client (null until the author is known)
   sequenceStep: number; // index of the next chain step to send (0 = nothing sent yet)
   nextStepAt: number | null; // unix ms when the next chain step is due; null = chain finished or stopped
   handoff: boolean; // a human handles this dialog: the AI manager stays silent
@@ -204,10 +205,110 @@ export interface Settings {
   // Image generation for executors and previews (fal.ai)
   falKey: string;
   imageModel: string; // fal model id for generation/editing
+  // Operator: the tool-calling agent that talks to clients (cheap model; default DeepSeek V4.1 Flash)
+  operatorBaseUrl: string;
+  operatorApiKey: string;
+  operatorModel: string;
+  tavilyApiKey: string; // web search for the assistant
+}
+
+// Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
+export interface Client {
+  id: number;
+  tgUserId: number | null;
+  name: string;
+  username: string | null;
+  leadIds: number[];
+  createdAt: number;
+  lastSeenAt: number | null;
+}
+
+export type FactKind = 'profile' | 'preference' | 'deal' | 'material' | 'other';
+
+export interface MemoryFact {
+  id: number;
+  clientId: number;
+  kind: FactKind;
+  text: string;
+  source: string | null; // e.g. "message 1234", "order 12", "owner"
+  active: boolean; // superseded facts stay for history
+  createdAt: number;
+}
+
+export interface MemoryEpisode {
+  id: number;
+  clientId: number;
+  fromMs: number;
+  toMs: number;
+  summary: string;
+  messages: number;
+}
+
+export type AssetRole = 'from_client' | 'preview' | 'delivered' | 'working';
+
+export interface Asset {
+  id: number;
+  clientId: number;
+  orderId: number | null;
+  path: string; // under userData
+  mime: string;
+  name: string;
+  role: AssetRole;
+  caption: string; // what is on it, for search and reuse months later
+  tags: string[];
+  createdAt: number;
+}
+
+// Subscriptions («личный ассистент») and the payments ledger
+export interface Plan {
+  id: number;
+  name: string;
+  priceMonth: number; // RUB
+  description: string; // what the client gets; the agent sells from this text
+  tasksPerMonth: number; // errands included per period
+  enabled: boolean;
+}
+
+export type SubscriptionStatus = 'pending' | 'active' | 'past_due' | 'canceled';
+
+export interface Subscription {
+  id: number;
+  clientId: number;
+  planId: number;
+  status: SubscriptionStatus;
+  periodStart: number | null;
+  periodEnd: number | null;
+  tasksUsed: number;
+  createdAt: number;
+}
+
+export interface Payment {
+  id: number;
+  clientId: number;
+  purpose: 'order' | 'subscription';
+  orderId: number | null;
+  subscriptionId: number | null;
+  amount: number; // RUB
+  status: 'pending' | 'succeeded' | 'canceled';
+  providerId: string | null; // ЮKassa payment id
+  url: string | null;
+  createdAt: number;
+  paidAt: number | null;
+}
+
+// One action of the operator agent, shown to the owner under the dialog
+export interface AgentStep {
+  id: number;
+  leadId: number;
+  ts: number;
+  tool: string;
+  input: string; // JSON, truncated
+  output: string; // truncated
+  ok: boolean;
 }
 
 // «Исполнители»: services the AI manager sells and performs itself end to end.
-export type ServiceKind = 'homework' | 'marketplace_card' | 'image_gen' | 'copywriting';
+export type ServiceKind = 'homework' | 'marketplace_card' | 'image_gen' | 'copywriting' | 'assistant'; // assistant: web search, research, errands
 
 export interface Service {
   id: number;
@@ -394,6 +495,9 @@ export type AppEvent =
   | { type: 'broadcast:update'; broadcast: Broadcast }
   | { type: 'crm:update'; card: ClientCard }
   | { type: 'order:update'; order: Order }
+  | { type: 'memory:update'; clientId: number }
+  | { type: 'billing:update'; clientId: number }
+  | { type: 'agent:step'; step: AgentStep }
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
@@ -496,6 +600,32 @@ export interface Api {
     update(id: number, patch: Partial<BroadcastInput> & { enabled?: boolean }): Promise<Broadcast>;
     remove(id: number): Promise<void>;
     runNow(id: number): Promise<{ posted: number; skipped: number; errors: number }>;
+  };
+  clients: {
+    list(search?: string): Promise<Client[]>;
+    get(clientId: number): Promise<Client>;
+    byLead(leadId: number): Promise<Client | null>;
+  };
+  memory: {
+    facts(clientId: number): Promise<MemoryFact[]>;
+    addFact(clientId: number, kind: FactKind, text: string): Promise<MemoryFact>;
+    removeFact(factId: number): Promise<void>; // marks inactive
+    episodes(clientId: number): Promise<MemoryEpisode[]>;
+    assets(clientId: number, query?: string): Promise<Asset[]>;
+    sendAsset(leadId: number, assetId: number): Promise<void>; // re-send a stored file to the client
+  };
+  billing: {
+    plans(): Promise<Plan[]>;
+    savePlan(plan: Omit<Plan, 'id'> & { id?: number }): Promise<Plan>;
+    removePlan(planId: number): Promise<void>;
+    subscriptions(clientId?: number): Promise<Subscription[]>;
+    subscribe(clientId: number, planId: number): Promise<Subscription>; // creates it and sends the first invoice
+    cancelSubscription(subscriptionId: number): Promise<Subscription>;
+    payments(clientId?: number): Promise<Payment[]>;
+    checkPayment(paymentId: number): Promise<Payment>; // asks ЮKassa now
+  };
+  agent: {
+    trace(leadId: number, limit?: number): Promise<AgentStep[]>;
   };
   services: {
     list(): Promise<Service[]>;

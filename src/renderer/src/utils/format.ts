@@ -154,6 +154,7 @@ export function serviceKindLabel(kind: ServiceKind): string {
     marketplace_card: 'Карточка МП',
     image_gen: 'Нейрофото',
     copywriting: 'Тексты',
+    assistant: 'Ассистент',
   };
   return map[kind] ?? kind;
 }

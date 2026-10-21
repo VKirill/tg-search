@@ -173,7 +173,7 @@ function toLead(r: Row): Lead {
     id: r.id, projectId: r.project_id, sourceId: r.source_id, tgChatId: r.tg_chat_id, tgMessageId: r.tg_message_id,
     authorUserId: r.author_user_id, authorName: r.author_name, authorUsername: r.author_username, text: r.text,
     date: r.date, link: r.link, score: r.score, label: r.label, reason: r.reason, feedback: r.feedback,
-    status: r.status, accountId: r.account_id, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
+    status: r.status, accountId: r.account_id, clientId: r.client_id ?? null, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
     handoff: !!r.handoff, handoffReason: r.handoff_reason, createdAt: r.created_at,
   };
 }
@@ -230,6 +230,10 @@ export const SETTINGS_DEFAULTS: Settings = {
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
   imageModel: 'fal-ai/nano-banana-2/edit',
+  operatorBaseUrl: 'https://api.deepseek.com',
+  operatorApiKey: '',
+  operatorModel: 'deepseek-flash',
+  tavilyApiKey: '',
 };
 
 // Starter services; price ranges from Russian freelance market data (Kwork, student exchanges), 2026-10
@@ -293,6 +297,7 @@ export class Db {
         ALTER TABLE messages ADD COLUMN duration_sec REAL;`);
     }
     const leadCols = this.all('PRAGMA table_info(leads)').map((c) => c.name);
+    if (!leadCols.includes('client_id')) this.raw.exec('ALTER TABLE leads ADD COLUMN client_id INTEGER');
     if (!leadCols.includes('sequence_step')) {
       this.raw.exec(`ALTER TABLE leads ADD COLUMN sequence_step INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE leads ADD COLUMN next_step_at INTEGER;
@@ -463,7 +468,7 @@ export class Db {
     return toLead(r);
   }
   // Returns the new lead, or undefined when this message is already a lead of the project.
-  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
+  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'clientId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
     const res = this.run(
       `INSERT INTO leads(project_id, source_id, tg_chat_id, tg_message_id, author_user_id, author_name, author_username,
        text, date, link, score, label, reason, created_at)

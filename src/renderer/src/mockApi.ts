@@ -61,7 +61,7 @@ let settings: Settings = {
   auxApiKey: '',
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
-  imageModel: 'fal-ai/nano-banana-2/edit',
+  imageModel: 'fal-ai/nano-banana-2/edit', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
 };
 
 const accounts: Account[] = [
@@ -251,6 +251,7 @@ const leads: Lead[] = [
     feedback: 'up',
     status: 'dialog',
     accountId: 1,
+    clientId: null,
     sequenceStep: 1,
     nextStepAt: null,
     handoff: false,
@@ -275,6 +276,7 @@ const leads: Lead[] = [
     feedback: null,
     status: 'replied',
     accountId: 1,
+    clientId: null,
     sequenceStep: 2,
     nextStepAt: now + 18 * 3600_000,
     handoff: false,
@@ -299,6 +301,7 @@ const leads: Lead[] = [
     feedback: null,
     status: 'new',
     accountId: null,
+    clientId: null,
     sequenceStep: 0,
     nextStepAt: now + 2 * 3600_000,
     handoff: false,
@@ -323,6 +326,7 @@ const leads: Lead[] = [
     feedback: 'up',
     status: 'dialog',
     accountId: 1,
+    clientId: null,
     sequenceStep: 3,
     nextStepAt: null,
     handoff: true,
@@ -347,6 +351,7 @@ const leads: Lead[] = [
     feedback: 'down',
     status: 'hidden',
     accountId: null,
+    clientId: null,
     sequenceStep: 0,
     nextStepAt: null,
     handoff: false,
@@ -371,6 +376,7 @@ const leads: Lead[] = [
     feedback: null,
     status: 'new',
     accountId: null,
+    clientId: null,
     sequenceStep: 0,
     nextStepAt: null,
     handoff: false,
@@ -1150,6 +1156,62 @@ export function createMockApi(): Api {
         await delay(1500);
         emit({ type: 'job', projectId: 0, stage: 'Готово', done: true });
         return { posted: 2, skipped: 1, errors: 0 };
+      },
+    },
+    clients: {
+      async list() {
+        return [];
+      },
+      async get(id) {
+        return { id, tgUserId: null, name: 'Клиент', username: null, leadIds: [], createdAt: now, lastSeenAt: null };
+      },
+      async byLead() {
+        return null;
+      },
+    },
+    memory: {
+      async facts() {
+        return [];
+      },
+      async addFact(clientId, kind, text) {
+        return { id: nid(), clientId, kind, text, source: 'owner', active: true, createdAt: Date.now() };
+      },
+      async removeFact() {},
+      async episodes() {
+        return [];
+      },
+      async assets() {
+        return [];
+      },
+      async sendAsset() {},
+    },
+    billing: {
+      async plans() {
+        return [];
+      },
+      async savePlan(plan) {
+        return { ...plan, id: plan.id ?? nid() };
+      },
+      async removePlan() {},
+      async subscriptions() {
+        return [];
+      },
+      async subscribe() {
+        throw new Error('Подписки в демо-режиме не оформляются');
+      },
+      async cancelSubscription() {
+        throw new Error('Подписки в демо-режиме не изменяются');
+      },
+      async payments() {
+        return [];
+      },
+      async checkPayment() {
+        throw new Error('Платежи в демо-режиме не проверяются');
+      },
+    },
+    agent: {
+      async trace() {
+        return [];
       },
     },
     services: {
