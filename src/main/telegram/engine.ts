@@ -28,7 +28,7 @@ import {
   mapUserToMe,
   senderIdsFromMessage,
 } from './mappers';
-import { markdownToFormatted } from './markdown';
+import { hasRichMarkup, markdownToBlocks, markdownToFormatted } from './markdown';
 import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from './types';
 
 const API_SETTINGS_ERROR = 'Укажите api_id и api_hash Telegram в настройках';
@@ -62,6 +62,8 @@ interface AccountSlot {
   // Send results that arrived before waitForSend registered (keyed by temporary message id).
   earlySends: Map<number, { message?: message; error?: error }>;
   noPostSearch?: boolean; // Telegram answered PREMIUM_ACCOUNT_REQUIRED: global post search is off for this account
+  // Rich Messages from a user account need Telegram Premium (without it: RICH_MESSAGE_UNSUPPORTED); rechecked hourly
+  rich?: { allowed: boolean; checkedAt: number };
 }
 
 function parseFloodWaitSeconds(message: string): number {
@@ -922,12 +924,43 @@ export class TdlEngine implements TelegramEngine {
     });
   }
 
+  private async canSendRich(slot: AccountSlot): Promise<boolean> {
+    if (!slot.rich || Date.now() - slot.rich.checkedAt > 3600_000) {
+      const me = await this.invoke(slot, { _: 'getMe' }).catch(() => null);
+      slot.rich = { allowed: !!me?.is_premium, checkedAt: Date.now() };
+    }
+    return slot.rich.allowed;
+  }
+
   private async sendText(
     slot: AccountSlot,
     chatId: number,
     text: string,
     replyToMessageId?: number,
   ): Promise<TgMessage> {
+    // Structured replies (lists, headings, tables, bold…) go as a Telegram Rich Message; plain text stays a plain message
+    if (hasRichMarkup(text) && (await this.canSendRich(slot))) {
+      try {
+        return await this.sendContent(
+          slot,
+          chatId,
+          {
+            _: 'inputMessageRichMessage',
+            message: {
+              _: 'inputRichMessage',
+              source: { _: 'richMessageSourceBlocks', blocks: markdownToBlocks(text) as never },
+              is_rtl: false,
+              detect_automatic_blocks: true,
+            },
+            clear_draft: false,
+          },
+          replyToMessageId,
+        );
+      } catch (err) {
+        console.error('rich message refused, sending formatted text', err);
+        if (/RICH_MESSAGE_UNSUPPORTED|PREMIUM/i.test(String(err))) slot.rich = { allowed: false, checkedAt: Date.now() };
+      }
+    }
     return this.sendContent(
       slot,
       chatId,

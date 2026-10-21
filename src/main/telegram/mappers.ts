@@ -95,8 +95,31 @@ export function buildPublicMessageLink(username: string | null, messageId: numbe
   return `https://t.me/${username}/${publicId}`;
 }
 
+// Plain text of a Rich Message: block texts one per line, list items with «- » (for history, search and the agent)
+export function richMessageText(node: unknown): string {
+  const lines: string[] = [];
+  const walk = (n: unknown, line: string[]): void => {
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, line));
+    if (!n || typeof n !== 'object') return;
+    const o = n as Record<string, unknown>;
+    if (o._ === 'richTextPlain' && typeof o.text === 'string') {
+      line.push(o.text);
+      return;
+    }
+    const isBlock = typeof o._ === 'string' && (o._.startsWith('pageBlock') || o._ === 'pageBlockListItem');
+    if (!isBlock) return Object.values(o).forEach((v) => walk(v, line));
+    const own: string[] = [];
+    for (const v of Object.values(o)) walk(v, own);
+    const text = own.join('').trim();
+    if (text) lines.push(o._ === 'pageBlockListItem' ? `- ${text}` : text);
+  };
+  walk(node, []);
+  return [...new Set(lines)].join('\n'); // nested blocks repeat their children's text once
+}
+
 export function extractMessageText(content: MessageContent): string {
   if (content._ === 'messageText') return content.text.text;
+  if (content._ === 'messageRichMessage') return richMessageText(content.message.blocks);
   if ('caption' in content && content.caption && typeof content.caption === 'object' && 'text' in content.caption) {
     return content.caption.text;
   }
