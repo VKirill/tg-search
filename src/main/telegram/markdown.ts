@@ -14,6 +14,7 @@ export function markdownToFormatted(input: string): formattedText {
   // headings and <summary> become bold lines, <details> wrappers go, $$ formulas become code
   const src = input
     .replace(/^#{1,6}\s+(.+)$/gm, '**$1**')
+    .replace(/^\s*!\[([^\]]*)\]\([^)]+\)\s*$/gm, (_, c: string) => `[${c || 'рисунок'}]`) // plain text can't hold pictures
     .replace(/<summary>([\s\S]*?)<\/summary>[ \t]*\n?/gi, (_, t: string) => `**${t.trim()}**\n`)
     .replace(/^[ \t]*<\/?details[^>]*>[ \t]*\n/gim, '')
     .replace(/<\/?details[^>]*>/gi, '')
@@ -43,7 +44,7 @@ export function markdownToFormatted(input: string): formattedText {
 
 // Worth a Rich Message: Markdown structure beyond a plain sentence
 export function hasRichMarkup(text: string): boolean {
-  return /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>|^\|.+\||\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]]+\]\(https?:|<details|\$\$|\|\|[^|\n]+\|\||^---$/m.test(text);
+  return /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^>|^\|.+\||\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]]+\]\(https?:|<details|^\s*!\[[^\]]*\]\(|\$\$|\|\|[^|\n]+\|\||^---$/m.test(text);
 }
 
 // Rich Message blocks from Markdown — the source TDLib accepts from user accounts (Markdown/HTML sources are for bots)
@@ -73,6 +74,14 @@ export function inlineRich(src: string): RichText {
 const paragraph = (text: string): Block => ({ _: 'inputPageBlockParagraph', text: inlineRich(text) });
 const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
 
+const IMAGE_LINE = /^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/;
+const photoBlock = (path: string, caption: string): Block => ({
+  _: 'inputPageBlockPhoto',
+  photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: path.replace(/^file:\/\//, '') } },
+  caption: { _: 'pageBlockCaption', text: inlineRich(caption), credit: plain('') },
+  has_spoiler: false,
+});
+
 export function markdownToBlocks(md: string): Block[] {
   const lines = md.replace(/\r/g, '').split('\n');
   const blocks: Block[] = [];
@@ -86,9 +95,21 @@ export function markdownToBlocks(md: string): Block[] {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     const item = /^\s*(?:([-*+])|(\d+)[.)])\s+(?:\[([ xX])\]\s+)?(.+)$/.exec(line);
     const details = /^\s*<details(\s+open)?\s*>/i.exec(line);
+    const image = IMAGE_LINE.exec(line);
     const math = /^\s*\$\$(.*)$/.exec(line);
     if (!line.trim()) flush();
-    else if (details) {
+    else if (image) {
+      // ![caption](/local/file.png) — a photo; several lines in a row — a collage side by side
+      flush();
+      const photos: Block[] = [];
+      for (; i < lines.length; i++) {
+        const im = IMAGE_LINE.exec(lines[i]);
+        if (!im) break;
+        photos.push(photoBlock(im[2], im[1]));
+      }
+      i--;
+      blocks.push(photos.length === 1 ? photos[0] : { _: 'inputPageBlockCollage', blocks: photos, caption: { _: 'pageBlockCaption', text: plain(''), credit: plain('') } });
+    } else if (details) {
       // <details><summary>Почему так</summary> … </details> — a collapsible block, closed unless <details open>
       flush();
       const body = [line.slice(details[0].length)];

@@ -58,6 +58,7 @@ import { agentRole, createAiEngine } from './opencode/engine';
 import type { ToolCatalogEntry } from './opencode/bridge';
 import { TOOL_PREFIX } from './opencode/config';
 import { isFreeModel } from './opencode/models';
+import { renderFigures } from './figures';
 import { buildAgentTools, freshTurnState } from './agent/tools';
 import { createDelegateTool } from './agent/tools/delegate';
 import type { ProviderConfig } from './opencode/config';
@@ -300,7 +301,8 @@ export function createApp(deps: AppDeps): AppHandlers {
         host: { ...makeHostForLead(task.leadId), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit,
         aiEngine, sessionKey: `task:${task.id}`,
       });
-      return text;
+      // figure and graph blocks become pictures in the result; a subfolder, so they are not sent again as attachments
+      return renderFigures(text, { images: photos.map((m) => m.mediaPath!), dir: join(dir, 'figures') });
     },
     deliver: async (task, text, files) => {
       await managerAgent.checkin(task.leadId, reviewNote(task, text, files)).catch((err) => console.error('task review', err));

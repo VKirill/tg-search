@@ -1,4 +1,5 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, nativeImage, session, shell } from 'electron';
+import { setFigureHost } from './figures';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { Db } from './db';
@@ -71,6 +72,26 @@ app.whenReady().then(async () => {
 
   const dataDir = app.getPath('userData');
   teeConsoleToFile(dataDir);
+  // graphs and figures in solutions: SVG drawn in a hidden offscreen window, task figures cut out of the client's photo
+  setFigureHost({
+    async svgToPng(svg, width, height) {
+      const w = new BrowserWindow({ show: false, width, height, webPreferences: { offscreen: true } });
+      try {
+        await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<html><body style="margin:0;background:#fff">${svg}</body></html>`)}`);
+        return (await w.webContents.capturePage({ x: 0, y: 0, width, height })).toPNG();
+      } finally {
+        w.destroy();
+      }
+    },
+    async crop(path, [l, t, r, b]) {
+      const img = nativeImage.createFromPath(path);
+      const { width, height } = img.getSize();
+      if (!width) throw new Error(`не открыть картинку ${path}`);
+      const rect = { x: Math.round((width * l) / 100), y: Math.round((height * t) / 100), width: Math.round((width * (r - l)) / 100), height: Math.round((height * (b - t)) / 100) };
+      const out = img.crop(rect);
+      return (rect.width < 600 ? out.resize({ width: 600, quality: 'best' }) : out).toPNG(); // a small figure stays readable
+    },
+  });
   mkdirSync(dataDir, { recursive: true });
   const db = new Db(join(dataDir, 'tg-search.db'));
   // Development defaults from the environment; values saved in Settings take priority.

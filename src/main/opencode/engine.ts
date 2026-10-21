@@ -8,6 +8,7 @@ import type { AgentDefsApi } from '../agent/defs';
 import type { ApprovalsApi } from '../agent/approvals';
 import { resolveToolPermission } from '../agent/permissions';
 import { CHAT_STYLE, HONESTY_RULE, RICH_FORMAT } from '../agent/style';
+import { FIGURES_GUIDE } from '../figures';
 import { gatewayPrompt, setLlmGateway, type LlmGateway } from '../ai/gateway';
 import { recordUsage } from '../usage';
 import { createBridge, type SessionBinding, type ToolCatalogEntry } from './bridge';
@@ -109,7 +110,7 @@ export function createAiEngine(deps: {
         mode: primary ? 'primary' : 'subagent',
         steps: a.steps,
         // every agent's text can reach the client (subagent results are delivered as is), so all of them know the format
-        system: [rules, primary ? CHAT_STYLE : '', RICH_FORMAT, primary ? HONESTY_RULE.replaceAll('{owner}', owner) : '', a.prompt].filter(Boolean).join('\n\n'),
+        system: [rules, primary ? CHAT_STYLE : '', RICH_FORMAT, primary ? '' : FIGURES_GUIDE, primary ? HONESTY_RULE.replaceAll('{owner}', owner) : '', a.prompt].filter(Boolean).join('\n\n'),
         tools: toolNames.filter((t) => resolveToolPermission(a.permission, t) !== 'deny'),
       });
     }

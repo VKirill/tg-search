@@ -2,6 +2,8 @@ import { parseJsonFromLlm } from '../ai/llm';
 import type { Settings } from '../../shared/types';
 import type { Executor, ExecutorInput, ExecutorOutput } from './types';
 import { fileToDataUri } from './images';
+import { FIGURES_GUIDE, renderFigures } from '../figures';
+import { join } from 'node:path';
 import {
   estimatePrice,
   packageTextOutput,
@@ -16,6 +18,7 @@ const SOLUTION_FORMAT = [
   '- Шаги нумерованным списком: одно действие с формулой на шаг. Формулы LaTeX: в строке `$…$`, крупные отдельной строкой `$$…$$`.',
   '- Под каждым шагом свёрнутый блок с правилом, законом или определением, по которому он сделан:\n<details>\n<summary>Почему так</summary>\nПравило — 1–3 предложения.\n</details>',
   '- В конце отдельной строкой **Ответ: …**, затем свёрнутый блок «Проверка» (подстановка или другой способ) и, если уместно, «Где обычно ошибаются».',
+  FIGURES_GUIDE,
 ].join('\n');
 
 function visionParts(text: string, dataUris: string[]): VisionContentPart[] {
@@ -108,6 +111,8 @@ export function createHomeworkExecutor(getSettings: () => Settings): Executor {
         throw new Error(`Нужна проверка человеком: ${verify.summary || 'решения расходятся'}`);
       }
 
+      // the figure and graph blocks become pictures inside the solution (not attachments)
+      solution = await renderFigures(solution, { images: paths, dir: join(input.workDir, 'figures') });
       const packed = await packageTextOutput(input.workDir, solution, 'output');
       return { text: packed.text, files: packed.files };
     },
