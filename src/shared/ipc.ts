@@ -25,6 +25,7 @@ export const API_METHODS: ApiMap = {
   agent: ['trace'],
   agents: ['list', 'save', 'remove', 'rules', 'saveRules'],
   skills: ['list', 'save', 'remove', 'approve', 'removeLesson'],
+  ai: ['status', 'models', 'setModels', 'providers', 'saveProvider', 'removeProvider', 'importOpencode', 'checkUpdate'],
   trusted: ['list', 'save', 'remove', 'checkinNow'],
   news: ['channels', 'addChannel', 'updateChannel', 'removeChannel', 'items', 'setStatus', 'draft', 'runNow'],
   approvals: ['list', 'decide'],

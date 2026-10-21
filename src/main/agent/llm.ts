@@ -2,6 +2,7 @@
 
 import type { ManagerSettings, Settings } from '../../shared/types';
 import { recordUsage } from '../usage';
+import { llmGateway } from '../ai/gateway';
 import { resolveOperator } from './provider';
 
 export type ToolCall = { id: string; name: string; arguments: string };
@@ -171,6 +172,7 @@ export async function agentChatCompletion(
   override?: OperatorLlmOverride,
   temperature = 0.3,
 ): Promise<AgentCompletionResult> {
+  if (llmGateway()) throw new Error('Ход агента выполняется в сессии OpenCode — прямой вызов модели отключён');
   const settings = operatorSettings(getSettings, mgr, override);
   requireApiKey(settings);
 

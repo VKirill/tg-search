@@ -7,6 +7,8 @@ import { buildAgentTools, freshTurnState, toolsToLlmDefs } from './tools';
 import type { ToolHostDeps } from './tools/deps';
 import type { AgentDefsApi } from './defs';
 import { insertAgentStep } from './store';
+import { agentRole } from '../opencode/engine';
+import { listAgentSteps } from './store';
 import type { Db } from '../db';
 
 export interface SubagentRunInput {
@@ -27,6 +29,8 @@ export interface SubagentRunInput {
   ) => Promise<AgentCompletionResult>;
   includeDelegate?: boolean;
   images?: string[]; // data URIs of the client's photos — for a vision model (Gemini) working on pictures
+  aiEngine?: import('../opencode/engine').AiEngine; // run as an OpenCode session
+  sessionKey?: string; // 'task:<id>' — a background task keeps its own session
 }
 
 export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: string; steps: AgentStep[] }> {
@@ -44,6 +48,22 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
   }
   tools = tools.filter((t) => t.name !== 'assign_task'); // a subagent does the work itself, no chains of hand-offs
   tools = tools.filter((t) => resolveToolPermission(agent.permission, t.name) !== 'deny');
+  if (input.aiEngine && input.aiEngine.status().state === 'ready') {
+    const started = Date.now();
+    const result = await input.aiEngine.agentTurn({
+      key: input.sessionKey ?? null,
+      parentKey: `lead:${input.leadId}`,
+      agentName: input.agentName,
+      role: agentRole(agent.model),
+      files: input.images,
+      binding: { ctx: { leadId: input.leadId, clientId: input.clientId, dryRun: false, subagent: true }, tools, agentName: input.agentName, agent, stepPrefix: `${input.agentName}:` },
+      prompt: () => ({ text: `Контекст:\n${input.context}\n\nЗадача:\n${input.task}`, lastMessageId: 0 }),
+      timeoutMs: 15 * 60_000,
+    });
+    if (result.outcome !== 'succeeded') throw new Error(`OpenCode: ${result.error ?? result.outcome}`);
+    const steps = listAgentSteps(input.db, input.leadId, 100).filter((s) => s.ts >= started && s.tool.startsWith(`${input.agentName}:`)).reverse();
+    return { text: turnState.replyText ?? result.text, steps };
+  }
   const toolMap = new Map(tools.map((t) => [t.name, t]));
   const llmTools = toolsToLlmDefs(tools);
   const modelOverride = resolveAgentModel(agent.model, input.host.getSettings());

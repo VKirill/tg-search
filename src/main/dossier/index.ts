@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } f
 import { basename, join } from 'node:path';
 import type { ChatMessage, ClientCard, Lead, Order, OrderStatus, Settings } from '../../shared/types';
 import type { Db } from '../db';
+import { auxEndpoint } from '../ai/gateway';
 import { recordUsage } from '../usage';
 
 const DEBOUNCE_MS = 60_000;
@@ -248,9 +249,10 @@ ${historyLines.join('\n')}
 export type AuxFetch = typeof fetch;
 
 async function auxComplete(settings: Settings, userPrompt: string, fetchFn: AuxFetch): Promise<string> {
-  const base = settings.auxBaseUrl.replace(/\/$/, '');
-  const key = settings.auxApiKey.trim();
-  if (!base || !key || !settings.auxModel.trim()) throw new Error('aux model not configured');
+  const ep = auxEndpoint(settings, fetchFn, 'fast');
+  if (!ep) throw new Error('aux model not configured');
+  const { base, key } = ep;
+  fetchFn = ep.fetchFn;
   const res = await fetchFn(`${base}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },

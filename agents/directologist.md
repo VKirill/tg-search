@@ -1,7 +1,7 @@
 ---
 description: Яндекс Директ — семантика с группами и минус-словами, объявления для ЕПК, выгрузка в Excel
 mode: subagent
-model: gemini
+model: smart
 temperature: 0.3
 steps: 10
 permission:

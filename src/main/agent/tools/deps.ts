@@ -28,6 +28,7 @@ export interface ToolHostDeps extends OutreachDeps {
   skills?: SkillsStore;
   getTasks?: () => import('../tasks').TaskQueue | undefined; // background subagent tasks
   taskDir?: string; // inside a background task: where its files (tables…) go
+  aiEngine?: import('../../opencode/engine').AiEngine; // subagents run as OpenCode sessions
   turnState: TurnToolState;
 }
 

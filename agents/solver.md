@@ -1,7 +1,7 @@
 ---
 description: Решение школьных и студенческих заданий по условию
 mode: subagent
-model: gemini
+model: smart
 temperature: 0.2
 steps: 8
 permission:

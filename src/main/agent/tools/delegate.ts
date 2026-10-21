@@ -48,6 +48,7 @@ export function createDelegateTool(deps: DelegateDeps): AgentTool {
         approvals: deps.approvals,
         db: deps.db as Db,
         emit: deps.emit,
+        aiEngine: deps.aiEngine,
       });
       return text || '(пустой результат subagent)';
     },

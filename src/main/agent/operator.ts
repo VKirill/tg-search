@@ -19,6 +19,8 @@ import { createDelegateTool } from './tools/delegate';
 import { upsellBlock } from './upsell';
 import { freeClientBlock, isFreeLead } from '../trusted';
 import { CHAT_STYLE, HONESTY_RULE } from './style';
+import { listAgentSteps } from './store';
+import { agentRole } from '../opencode/engine';
 import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
@@ -45,6 +47,7 @@ export interface OperatorDeps extends OutreachDeps {
   getApprovals?: () => ApprovalsApi | undefined;
   skills?: SkillsStore;
   getTasks?: () => import('./tasks').TaskQueue | undefined;
+  aiEngine?: import('../opencode/engine').AiEngine; // agent turns run as OpenCode sessions
   /** Test hook: replace the operator LLM */
   complete?: (
     messages: AgentChatMessage[],
@@ -213,6 +216,37 @@ export function createOperator(deps: OperatorDeps): Operator {
     const steps: AgentStep[] = [];
     let turnCost = 0;
     const ctx = { leadId: lead.id, clientId, dryRun };
+
+    // OpenCode: the dialog's persistent session; tools run through the bridge with the same permissions
+    if (deps.aiEngine && deps.aiEngine.status().state === 'ready' && agentDef && deps.agents) {
+      const started = Date.now();
+      const dynamic = `${projectContextBlock(project, owner)}\n\n${catalog}\n\n${skillsPart}Контекст клиента:\n${clientCtx}`;
+      const result = await deps.aiEngine.agentTurn({
+        key: dryRun || !lead.id ? null : `lead:${lead.id}`,
+        agentName,
+        role: agentRole(agentDef.model),
+        binding: { ctx, tools, agentName, agent: agentDef },
+        prompt: (synced) => {
+          const all = lead.id ? deps.db.listMessages(lead.id) : [];
+          // the session already holds its own replies; new are the client's messages and the owner's manual ones
+          const fresh = synced
+            ? all.filter((m) => m.id > synced && (m.direction === 'in' || !m.auto))
+            : all.slice(-30);
+          const lines = fresh.map((m) => `${m.direction === 'in' ? 'Клиент' : 'Мы'}: ${m.text}`);
+          if (!synced && lead.text.trim()) lines.unshift(`Публикация клиента: ${lead.text}`);
+          if (!lines.length) lines.push(...history.slice(-3).map((t) => `${t.direction === 'in' ? 'Клиент' : 'Мы'}: ${t.text}`));
+          const notes = [systemNote, continuation && `Система: согласованное действие «${continuation.tool}» выполнено. Результат:\n${continuation.output}\n\nПродолжи диалог с клиентом.`].filter(Boolean);
+          return {
+            text: `<context>\n${dynamic}\n</context>\n\n<dialog>\n${lines.join('\n')}\n</dialog>${notes.length ? `\n\n${notes.join('\n\n')}` : ''}\n\nОтветь клиенту инструментом reply или сделай нужное другими инструментами.`,
+            lastMessageId: all.reduce((mx, m) => Math.max(mx, m.id), synced),
+          };
+        },
+      });
+      if (result.outcome !== 'succeeded') throw new Error(`OpenCode: ${result.error ?? result.outcome}`);
+      if (!turnState.replyText && !turnState.replyUsed && result.text) turnState.replyText = result.text;
+      const turnSteps = lead.id ? listAgentSteps(deps.db, lead.id, 50).filter((s) => s.ts >= started).reverse() : [];
+      return { reply: turnState.replyText, handoff: turnState.handoff, reason: turnState.handoffReason, steps: turnSteps, order: turnState.orderIntent };
+    }
 
     const complete =
       deps.complete ??

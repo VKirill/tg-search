@@ -29,6 +29,9 @@ import type {
   ProjectInput,
   Settings,
   SkillDef,
+  AiModel,
+  AiModelsView,
+  AiProvider,
   NewsChannel,
   NewsItem,
   SpamChat,
@@ -87,6 +90,9 @@ let settings: Settings = {
   operatorModel: '',
   tavilyApiKey: '',
   geminiApiKey: '',
+  aiProviders: '[]',
+  aiMainModel: 'zai-coding-plan/glm-5.3-flash',
+  aiHelperModels: '["router9/ag/gemini-3.8-flash"]',
 };
 
 const accounts: Account[] = [
@@ -518,6 +524,30 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockAiProviders: AiProvider[] = [
+  { id: 'router9', name: '9router', kind: 'openai-compatible', baseURL: 'https://9router.example/v1', hasKey: true, models: 3 },
+  { id: 'openlux-claude', name: 'openlux Claude', kind: 'openai-compatible', baseURL: 'https://openlux.example/v1', hasKey: true, models: 3 },
+  { id: 'deepseek', name: 'DeepSeek', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
+  { id: 'zai-coding-plan', name: 'Z.ai (GLM)', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
+];
+const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'] };
+function mockAiModels(): AiModelsView {
+  const m = (ref: string, name: string, vision: boolean, costIn: number, costOut: number, variants: string[] = []): AiModel => ({
+    ref, providerID: ref.split('/')[0], name, vision, tools: true, variants, costIn, costOut, context: 200_000,
+  });
+  return {
+    models: [
+      m('zai-coding-plan/glm-5.3-flash', 'GLM 5.3 Flash', false, 0, 0, ['low', 'medium', 'high']),
+      m('router9/ag/gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)', true, 0.3, 2.5),
+      m('openlux-claude/claude-sonnet-5-5', 'Claude Sonnet 5.5', true, 3, 15, ['low', 'medium', 'high']),
+      m('openlux-claude/claude-opus-5-5', 'Claude Opus 5.5', true, 15, 75, ['low', 'medium', 'high', 'max']),
+      m('deepseek/deepseek-flash', 'DeepSeek Flash', false, 0.1, 0.4),
+    ],
+    main: mockAiChoice.main,
+    helpers: mockAiChoice.helpers,
+  };
+}
 
 const mockTrusted: TrustedContact[] = [
   { username: 'tester_friend', userId: 501, free: true, dailyCheckin: true, checkinHour: 11, lastCheckinAt: Date.now() - 3600_000, note: '' },
@@ -1913,6 +1943,40 @@ export function createMockApi(): Api {
       async unblockChat(tgChatId) {
         const i = mockSpamChats.findIndex((c) => c.tgChatId === tgChatId);
         if (i >= 0) mockSpamChats.splice(i, 1);
+      },
+    },
+    ai: {
+      async status() {
+        return { state: 'ready' as const, version: '2.1.2', latest: '2.1.2', url: 'http://127.0.0.1:0', message: null, checkedAt: Date.now() };
+      },
+      async models() {
+        return mockAiModels();
+      },
+      async setModels({ main, helpers }) {
+        mockAiChoice.main = main;
+        mockAiChoice.helpers = helpers;
+        return mockAiModels();
+      },
+      async providers() {
+        return mockAiProviders.map((p) => ({ ...p }));
+      },
+      async saveProvider(p) {
+        const v = { id: p.id, name: p.name, kind: p.kind, baseURL: p.baseURL ?? null, hasKey: !!p.apiKey || !!mockAiProviders.find((x) => x.id === p.id)?.hasKey, models: p.models?.length ?? 0 };
+        const i = mockAiProviders.findIndex((x) => x.id === p.id);
+        if (i >= 0) mockAiProviders[i] = v;
+        else mockAiProviders.push(v);
+        return mockAiProviders.map((x) => ({ ...x }));
+      },
+      async removeProvider(id) {
+        const i = mockAiProviders.findIndex((x) => x.id === id);
+        if (i >= 0) mockAiProviders.splice(i, 1);
+        return mockAiProviders.map((x) => ({ ...x }));
+      },
+      async importOpencode() {
+        return 7;
+      },
+      async checkUpdate() {
+        return 'OpenCode 2.1.2 — последняя версия';
       },
     },
     trusted: {

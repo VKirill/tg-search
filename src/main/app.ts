@@ -54,6 +54,13 @@ import { createAgentTasks } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
 import { sendMediaMessage } from './pipeline/outreach';
 import { fileToDataUri } from './executors/images';
+import { createAiEngine } from './opencode/engine';
+import type { ToolCatalogEntry } from './opencode/bridge';
+import { TOOL_PREFIX } from './opencode/config';
+import { buildAgentTools, freshTurnState } from './agent/tools';
+import { createDelegateTool } from './agent/tools/delegate';
+import type { ProviderConfig } from './opencode/config';
+import type { AiModelsView, AiProvider } from '../shared/types';
 import { createSkillsStore } from './skills';
 
 export interface AppDeps {
@@ -67,6 +74,7 @@ export interface AppDeps {
   speech: SpeechService;
   dataDir: string;
   appDir?: string; // project root with shipped agents/ and skills/; the bundle in out/ cannot locate them itself
+  opencodeRoot?: string; // the app's own OpenCode v2 lives here; absent in tests (no AI engine)
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
   executors?: ExecutorRegistry;
@@ -188,8 +196,22 @@ export function createApp(deps: AppDeps): AppHandlers {
   });
   billingRef.current = billing;
   const autopilot = createAutopilot(pipeline);
+  // the AI engine: every model request goes through the app's own OpenCode v2 server
+  const aiEngine = deps.opencodeRoot
+    ? createAiEngine({
+      root: deps.opencodeRoot,
+      db,
+      emit,
+      getSettings,
+      setSettings: (p) => db.setSettings(p),
+      agents: () => agentDefs,
+      approvals: () => approvalsHolder.api,
+      toolCatalog: () => toolCatalog(),
+    })
+    : undefined;
   const managerAgent = createManagerAgent({
     ...pipeline,
+    aiEngine,
     getBilling: () => billing, // `...pipeline` copies the billing getter's current (empty) value
     manager,
     crm,
@@ -225,6 +247,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
       dataDir,
       skills,
+      aiEngine,
     });
 
   approvalsHolder.api = createApprovals({
@@ -264,6 +287,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       const { text } = await runSubagentTurn({
         agentName: task.agent, task: task.task, context, leadId: task.leadId, clientId: lead.clientId, images,
         host: { ...makeHostForLead(task.leadId), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit,
+        aiEngine, sessionKey: `task:${task.id}`,
       });
       return text;
     },
@@ -277,6 +301,33 @@ export function createApp(deps: AppDeps): AppHandlers {
       emit({ type: 'job', projectId: lead.projectId, stage: `Поручение #${task.id} (${task.agent}) не выполнено`, done: true, error });
     },
   });
+  // every app tool an OpenCode agent may call through the bridge (definitions only; calls run with the turn's host)
+  const toolCatalog = (): ToolCatalogEntry[] => {
+    const host = { ...makeHostForLead(0), turnState: freshTurnState() };
+    const tools = [...buildAgentTools(host), createDelegateTool({ ...host, agents: agentDefs, approvals: approvalsHolder.api!, primaryAgent: 'manager', clientContext: '' })];
+    return tools.map((t) => ({ name: `${TOOL_PREFIX}${t.name}`, description: t.description, input: t.parameters }));
+  };
+  const aiProviders = (): ProviderConfig[] => {
+    try {
+      return JSON.parse(getSettings().aiProviders || '[]') as ProviderConfig[];
+    } catch {
+      return [];
+    }
+  };
+  const providerView = (p: ProviderConfig): AiProvider => ({
+    id: p.id, name: p.name, kind: p.kind, baseURL: p.baseURL ?? null, hasKey: !!p.apiKey, models: p.models?.length ?? 0,
+  });
+  const aiModelsView = (): AiModelsView => {
+    const choice = aiEngine?.choice() ?? { main: getSettings().aiMainModel, helpers: [] };
+    return {
+      models: (aiEngine?.catalog() ?? []).map((m) => ({
+        ref: `${m.providerID}/${m.id}`, providerID: m.providerID, name: m.name, vision: m.vision, tools: m.tools,
+        variants: m.variants, costIn: m.costIn, costOut: m.costOut, context: m.context,
+      })),
+      main: choice.main,
+      helpers: choice.helpers,
+    };
+  };
   const operator = managerAgent.getOperator();
   const trusted = createTrusted({ db, engine, emit, checkin: (leadId, note) => managerAgent.checkin(leadId, note) });
   let checkinTimer: ReturnType<typeof setInterval> | null = null;
@@ -368,6 +419,12 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       // replies that were waiting on a timer when the app stopped: dialogs whose last message is incoming and fresh
       for (const leadId of db.leadsAwaitingReply(Date.now() - 2 * 3600_000)) managerAgent.onIncoming(leadId);
+      if (aiEngine) {
+        await aiEngine.start().catch((err) => {
+          console.error('ai engine', err);
+          emit({ type: 'job', projectId: db.listProjects()[0]?.id ?? 0, stage: 'ИИ-движок OpenCode не запустился', done: true, error: err instanceof Error ? err.message : String(err) });
+        });
+      }
       tasks.resume();
       // voice notes that failed to transcribe (key missing, provider error): one more try, then the agent answers
       void (async () => {
@@ -396,6 +453,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       memory.releaseModel();
     },
     async stop() {
+      await aiEngine?.stop().catch((err) => console.error('ai engine stop', err));
       if (dedupePruneTimer) clearInterval(dedupePruneTimer);
       dedupePruneTimer = null;
       if (spamChatTimer) clearInterval(spamChatTimer);
@@ -680,6 +738,47 @@ export function createApp(deps: AppDeps): AppHandlers {
       chats: async () => spamChats.list(),
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
+    },
+    ai: {
+      status: async () => aiEngine?.status() ?? { state: 'stopped', version: null, latest: null, url: null, message: 'ИИ-движок не подключён', checkedAt: null },
+      models: async () => aiModelsView(),
+      setModels: async ({ main, helpers }) => {
+        db.setSettings({ aiMainModel: main, aiHelperModels: JSON.stringify(helpers.filter((h) => h !== main)) });
+        return aiModelsView();
+      },
+      providers: async () => aiProviders().map(providerView),
+      saveProvider: async (p) => {
+        const list = aiProviders();
+        const prev = list.find((x) => x.id === p.id);
+        const visionGuess = (id: string) => /gemini|claude|gpt|grok|vision|vl|omni|qwen.*vl|4o/i.test(id);
+        const next: ProviderConfig = {
+          id: p.id.trim(), name: p.name.trim() || p.id.trim(), kind: p.kind,
+          baseURL: p.kind === 'openai-compatible' ? p.baseURL?.trim() : undefined,
+          apiKey: p.apiKey?.trim() || prev?.apiKey,
+          models: p.kind === 'openai-compatible'
+            ? (p.models ?? []).map((m) => m.trim()).filter(Boolean).map((m) => prev?.models?.find((x) => x.id === m)
+              ?? { id: m, name: m, vision: visionGuess(m), tools: true, context: 128_000, output: 16_000, reasoning: [] })
+            : undefined,
+        };
+        if (!/^[a-z0-9][a-z0-9_-]*$/i.test(next.id)) throw new Error('Идентификатор провайдера: латиница, цифры, дефис');
+        if (next.kind === 'openai-compatible' && (!next.baseURL || !next.models?.length)) throw new Error('Укажите адрес API и хотя бы одну модель');
+        db.setSettings({ aiProviders: JSON.stringify([...list.filter((x) => x.id !== next.id), next]) });
+        await aiEngine?.reconfigure();
+        return aiProviders().map(providerView);
+      },
+      removeProvider: async (id) => {
+        db.setSettings({ aiProviders: JSON.stringify(aiProviders().filter((x) => x.id !== id)) });
+        await aiEngine?.reconfigure();
+        return aiProviders().map(providerView);
+      },
+      importOpencode: async () => {
+        if (!aiEngine) throw new Error('ИИ-движок не подключён');
+        return aiEngine.importUserOpencode();
+      },
+      checkUpdate: async () => {
+        if (!aiEngine) throw new Error('ИИ-движок не подключён');
+        return aiEngine.update();
+      },
     },
     trusted: {
       list: async () => trusted.list(),

@@ -1,7 +1,7 @@
 ---
 description: Тексты, посты и контент-планы для соцсетей и рекламы
 mode: subagent
-model: gemini
+model: fast
 temperature: 0.5
 steps: 10
 permission:

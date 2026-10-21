@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import type { Settings } from '../../shared/types';
+import { gatewayFetch, llmGateway } from '../ai/gateway';
 import { recordUsage } from '../usage';
 
 const TIMEOUT_MS = 90_000;
@@ -28,7 +29,9 @@ async function visionJson(
   const base = (useOperator ? settings.operatorBaseUrl : settings.auxBaseUrl).replace(/\/$/, '');
   const key = (useOperator ? settings.operatorApiKey : settings.auxApiKey).trim();
   const model = (useOperator ? settings.operatorModel : settings.auxModel).trim();
-  if (!base || !key || !model) return null;
+  if (llmGateway()) {
+    fetchFn = gatewayFetch('vision');
+  } else if (!base || !key || !model) return null;
 
   const res = await fetchFn(`${base}/chat/completions`, {
     method: 'POST',

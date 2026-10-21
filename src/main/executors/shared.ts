@@ -6,6 +6,8 @@ import { recordUsage } from '../usage';
 import type { LlmOverride } from '../ai/llm';
 import type { DialogTurn } from '../ai/types';
 import type { OrderFile, Service, Settings } from '../../shared/types';
+import { llmGateway } from '../ai/gateway';
+import type { ModelRole } from '../opencode/models';
 import type { ExecutorInput } from './types';
 
 export const DEFAULT_VISION_MODEL = 'anthropic/claude-sonnet-5.5';
@@ -80,7 +82,20 @@ export async function visionChat(
   getSettings: () => Settings,
   messages: VisionMessage[],
   service: Service,
+  role: ModelRole = 'vision',
 ): Promise<string> {
+  const gw = llmGateway();
+  if (gw) {
+    const textOf = (c: VisionMessage['content']) => (typeof c === 'string' ? c : c.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('\n'));
+    const images = messages.flatMap((m) => (typeof m.content === 'string' ? [] : m.content.filter((p) => p.type === 'image_url').map((p) => (p as { image_url: { url: string } }).image_url.url)));
+    return gw.complete({
+      role,
+      system: messages.filter((m) => m.role === 'system').map((m) => textOf(m.content)).join('\n\n'),
+      messages: messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role as 'user' | 'assistant', text: textOf(m.content) })),
+      images,
+      title: service.name,
+    });
+  }
   const base = getSettings();
   const override = executorLlmOverride(service);
   const settings: Settings = {

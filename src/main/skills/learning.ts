@@ -4,6 +4,7 @@ import { clusterBriefsAsync, briefSimilarity, jaccard } from './similarity';
 import { clusterKey, type SkillsState } from './schema';
 import { parseSkillMd, serializeSkillMd } from './frontmatter';
 import { skillCoversTask, type SkillOption } from './jev';
+import { auxEndpoint } from '../ai/gateway';
 import type { postSystemOne } from '../ai/jev';
 
 const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
@@ -41,9 +42,10 @@ async function generateSkillDraft(
   db: Db,
   fetchFn: FetchFn,
 ): Promise<string | null> {
-  const base = settings.auxBaseUrl.replace(/\/$/, '');
-  const key = settings.auxApiKey.trim();
-  if (!base || !key || !settings.auxModel.trim()) return null;
+  const ep = auxEndpoint(settings, fetchFn, 'smart');
+  if (!ep) return null;
+  const { base, key } = ep;
+  fetchFn = ep.fetchFn;
 
   const blocks: string[] = [];
   for (const o of orders) {
@@ -169,10 +171,9 @@ export async function learnLessonsFromOrder(deps: {
   const names = deps.readState().leadSkills[deps.order.leadId] ?? [];
   if (!names.length) return 0;
   const settings = deps.getSettings();
-  const base = settings.auxBaseUrl.replace(/\/$/, '');
-  const key = settings.auxApiKey.trim();
-  if (!base || !key || !settings.auxModel.trim()) return 0;
-  const fetchFn = deps.fetchAux ?? fetch;
+  const ep = auxEndpoint(settings, deps.fetchAux ?? fetch, 'fast');
+  if (!ep) return 0;
+  const { base, key, fetchFn } = ep;
   const dialog = deps.db.listMessages(deps.order.leadId).slice(-30)
     .map((m) => `${m.direction === 'in' ? 'Клиент' : 'Мы'}: ${m.text}`).join('\n');
   let added = 0;

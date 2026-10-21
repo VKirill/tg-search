@@ -116,6 +116,7 @@ app.whenReady().then(async () => {
     executors: createExecutors(getSettings),
     dataDir,
     appDir: app.getAppPath(),
+    opencodeRoot: join(dataDir, 'opencode'),
     emit,
     openExternal: async (url) => openLink(url),
     payments: new YooKassaProvider(getSettings),

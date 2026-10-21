@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Settings } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
 import { TrustedSection } from './TrustedSection';
+import { AiEngineSection } from './AiEngineSection';
 import { useToast } from './Toast';
 
 const TTS_VOICES = ['alloy', 'nova', 'shimmer', 'echo', 'onyx', 'fable', 'sage', 'coral'];
@@ -63,6 +64,7 @@ export function SettingsView() {
           <div className="field"><label>Кому сообщать о передаче (@username)</label><input value={s.handoffNotifyTo} onChange={(e) => setS({ ...s, handoffNotifyTo: e.target.value })} /></div>
         </section>
         <TrustedSection />
+        <AiEngineSection />
         <section>
           <h2 className="section-title">Jev</h2>
           <div className="field"><label>Base URL</label><input value={s.jevBaseUrl} onChange={(e) => setS({ ...s, jevBaseUrl: e.target.value })} /></div>
@@ -70,64 +72,6 @@ export function SettingsView() {
           <div className="field"><label>Модель</label><input value={s.jevModel} onChange={(e) => setS({ ...s, jevModel: e.target.value })} /></div>
           <div className="field"><label>Цена, $ за 1 млн входных токенов (для статистики)</label><input value={s.jevPricePerMTok} onChange={(e) => setS({ ...s, jevPricePerMTok: e.target.value })} /></div>
           <div className="field"><label>Порог «это запрос» (0–1): ниже — болтовня, тематики её не проверяют</label><input value={s.requestThreshold} onChange={(e) => setS({ ...s, requestThreshold: e.target.value })} /></div>
-        </section>
-        <section>
-          <h2 className="section-title">LLM</h2>
-          <div className="field"><label>Base URL</label><input value={s.llmBaseUrl} onChange={(e) => setS({ ...s, llmBaseUrl: e.target.value })} /></div>
-          <div className="field"><label>API key</label><input type="password" value={s.llmApiKey} onChange={(e) => setS({ ...s, llmApiKey: e.target.value })} /></div>
-          <div className="field"><label>Модель</label><input value={s.llmModel} onChange={(e) => setS({ ...s, llmModel: e.target.value })} /></div>
-        </section>
-        <section>
-          <h2 className="section-title">Оператор (ведёт диалоги)</h2>
-          <p className="field-hint">Модель с вызовом инструментов: ответы клиентам, память, заказы, подписки. У каждого провайдера свой ключ — переключайте, чтобы сравнить.</p>
-          <div className="field">
-            <label>Провайдер</label>
-            <div className="segmented no-drag">
-              {(
-                [
-                  ['glm', 'GLM 5.3 Flash'],
-                  ['deepseek', 'DeepSeek V4.1 Flash'],
-                  ['custom', 'Свой адрес'],
-                ] as const
-              ).map(([id, label]) => (
-                <button key={id} type="button" className={s.operatorProvider === id ? 'button--active' : ''} onClick={() => setS({ ...s, operatorProvider: id })}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {s.operatorProvider === 'glm' && (
-            <div className="field">
-              <label>Ключ Z.ai (GLM)</label>
-              <input type="password" autoComplete="off" value={s.glmApiKey} onChange={(e) => setS({ ...s, glmApiKey: e.target.value })} />
-            </div>
-          )}
-          {s.operatorProvider === 'deepseek' && (
-            <div className="field">
-              <label>Ключ DeepSeek</label>
-              <input type="password" autoComplete="off" value={s.deepseekApiKey} onChange={(e) => setS({ ...s, deepseekApiKey: e.target.value })} />
-            </div>
-          )}
-          {s.operatorProvider === 'custom' && (
-            <>
-              <div className="field">
-                <label>Base URL (OpenAI-совместимый)</label>
-                <input value={s.operatorBaseUrl} onChange={(e) => setS({ ...s, operatorBaseUrl: e.target.value })} placeholder="https://openrouter.ai/api/v1" />
-              </div>
-              <div className="field">
-                <label>API key</label>
-                <input type="password" autoComplete="off" value={s.operatorApiKey} onChange={(e) => setS({ ...s, operatorApiKey: e.target.value })} />
-              </div>
-            </>
-          )}
-          <div className="field">
-            <label>Модель {s.operatorProvider !== 'custom' && <span className="crm-muted">(пусто — по умолчанию провайдера)</span>}</label>
-            <input
-              value={s.operatorModel}
-              onChange={(e) => setS({ ...s, operatorModel: e.target.value })}
-              placeholder={s.operatorProvider === 'glm' ? 'glm-5.3-flash' : s.operatorProvider === 'deepseek' ? 'deepseek-flash' : 'model id'}
-            />
-          </div>
         </section>
         <section>
           <h2 className="section-title">Поиск в интернете (Tavily)</h2>
@@ -147,12 +91,6 @@ export function SettingsView() {
           <div className="field"><label>Shop ID</label><input value={s.yookassaShopId} onChange={(e) => setS({ ...s, yookassaShopId: e.target.value })} /></div>
           <div className="field"><label>Секретный ключ</label><input type="password" autoComplete="off" value={s.yookassaSecretKey} onChange={(e) => setS({ ...s, yookassaSecretKey: e.target.value })} /></div>
           <div className="field"><label>Return URL</label><input value={s.yookassaReturnUrl} onChange={(e) => setS({ ...s, yookassaReturnUrl: e.target.value })} placeholder="https://t.me/your_bot" /></div>
-        </section>
-        <section>
-          <h2 className="section-title">Вспомогательная модель (подноготная клиентов)</h2>
-          <div className="field"><label>Base URL</label><input value={s.auxBaseUrl} onChange={(e) => setS({ ...s, auxBaseUrl: e.target.value })} placeholder="https://9router.example/v1" /></div>
-          <div className="field"><label>API key</label><input type="password" autoComplete="off" value={s.auxApiKey} onChange={(e) => setS({ ...s, auxApiKey: e.target.value })} /></div>
-          <div className="field"><label>Модель</label><input value={s.auxModel} onChange={(e) => setS({ ...s, auxModel: e.target.value })} placeholder="ag/gemini-3.8-flash" /></div>
         </section>
         <section>
           <h2 className="section-title">Изображения (fal.ai)</h2>

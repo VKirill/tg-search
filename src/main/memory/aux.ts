@@ -1,4 +1,5 @@
 import type { FactKind, Settings } from '../../shared/types';
+import { auxEndpoint } from '../ai/gateway';
 import { recordUsage } from '../usage';
 
 const TIMEOUT_MS = 90_000;
@@ -20,9 +21,10 @@ export async function compactDialog(
   lines: string[],
   fetchFn: FetchFn,
 ): Promise<CompactResult | null> {
-  const base = settings.auxBaseUrl.replace(/\/$/, '');
-  const key = settings.auxApiKey.trim();
-  if (!base || !key || !settings.auxModel.trim()) return null;
+  const ep = auxEndpoint(settings, fetchFn, 'fast');
+  if (!ep) return null;
+  const { base, key } = ep;
+  fetchFn = ep.fetchFn;
 
   const res = await fetchFn(`${base}/chat/completions`, {
     method: 'POST',

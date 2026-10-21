@@ -221,6 +221,11 @@ export interface Settings {
   operatorModel: string; // model override for any provider ('' = provider default)
   tavilyApiKey: string; // web search for the assistant
   geminiApiKey: string; // Google AI Studio: web search with Google grounding when Tavily is out of quota or unset
+  // AI engine (the app's own OpenCode v2): providers with keys (JSON ProviderConfig[]), the main chat model and the
+  // helper models the router may use ("provider/model" refs; helpers — JSON array)
+  aiProviders: string;
+  aiMainModel: string;
+  aiHelperModels: string;
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
@@ -374,6 +379,43 @@ export interface SpamTemplate {
   source: 'auto' | 'owner';
   createdAt: number;
   lastSeenAt: number;
+}
+
+// AI engine: the app's own OpenCode v2 server
+export interface AiStatus {
+  state: 'stopped' | 'installing' | 'starting' | 'ready' | 'error';
+  version: string | null;
+  latest: string | null;
+  url: string | null;
+  message: string | null;
+  checkedAt: number | null;
+}
+
+export interface AiModel {
+  ref: string; // "provider/model"
+  providerID: string;
+  name: string;
+  vision: boolean;
+  tools: boolean;
+  variants: string[]; // reasoning levels
+  costIn: number; // USD per 1M tokens
+  costOut: number;
+  context: number;
+}
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  kind: 'openai-compatible' | 'catalog';
+  baseURL: string | null;
+  hasKey: boolean; // keys never leave the main process
+  models: number;
+}
+
+export interface AiModelsView {
+  models: AiModel[]; // of the configured providers
+  main: string;
+  helpers: string[];
 }
 
 // «Свои люди»: their tasks are free (training the agent on real work); optional daily message from the agent
@@ -604,7 +646,8 @@ export interface LoginState {
 
 export type AppEvent =
   | { type: 'news:new'; item: NewsItem }
-  | { type: 'link:open'; url: string } // a Telegram link clicked anywhere: open it in «Чаты», not in the browser
+  | { type: 'link:open'; url: string }
+  | { type: 'ai:status'; status: AiStatus } // a Telegram link clicked anywhere: open it in «Чаты», not in the browser
   | { type: 'lead:new'; lead: Lead }
   | { type: 'lead:update'; lead: Lead }
   | { type: 'message:new'; message: ChatMessage }
@@ -770,6 +813,17 @@ export interface Api {
     chats(): Promise<SpamChat[]>; // the spam-chat blocklist
     blockChat(accountId: number, chatId: number): Promise<SpamChat>; // owner: leave on every account and block
     unblockChat(tgChatId: number): Promise<void>; // joinable again; its sources go back to candidates
+  };
+  ai: {
+    status(): Promise<AiStatus>;
+    models(): Promise<AiModelsView>;
+    setModels(choice: { main: string; helpers: string[] }): Promise<AiModelsView>;
+    providers(): Promise<AiProvider[]>;
+    // an OpenAI-compatible endpoint (key optional when updating) or a catalog provider's key
+    saveProvider(p: { id: string; name: string; kind: AiProvider['kind']; baseURL?: string; apiKey?: string; models?: string[] }): Promise<AiProvider[]>;
+    removeProvider(id: string): Promise<AiProvider[]>;
+    importOpencode(): Promise<number>; // from the user's own OpenCode config; returns providers found
+    checkUpdate(): Promise<string>;
   };
   trusted: {
     list(): Promise<TrustedContact[]>;

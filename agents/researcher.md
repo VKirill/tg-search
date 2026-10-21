@@ -1,7 +1,7 @@
 ---
 description: Поиск в интернете и исследование со списком источников
 mode: subagent
-model: deepseek
+model: fast
 temperature: 0.2
 steps: 12
 permission:

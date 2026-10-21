@@ -1,7 +1,7 @@
 ---
 description: Разбор картинок и документов — фото товара, карточки конкурентов, скриншоты, сравнение и выводы
 mode: subagent
-model: gemini
+model: vision
 temperature: 0.3
 steps: 8
 permission:

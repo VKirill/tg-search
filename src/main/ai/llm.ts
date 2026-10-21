@@ -1,6 +1,8 @@
 // OpenAI-compatible chat completions client (global fetch).
 
 import type { Settings } from '../../shared/types';
+import { llmGateway } from './gateway';
+import type { ModelRole } from '../opencode/models';
 import { recordUsage } from '../usage';
 
 export type LlmMessage = { role: 'system' | 'user' | 'assistant'; content: string };
@@ -8,6 +10,7 @@ export type LlmMessage = { role: 'system' | 'user' | 'assistant'; content: strin
 export type ChatCompletionOptions = {
   temperature?: number;
   jsonObject?: boolean;
+  role?: ModelRole; // which kind of OpenCode model does the job (default: fast)
 };
 
 /** Per-call LLM endpoint; empty fields fall back to global Settings. */
@@ -126,6 +129,16 @@ export async function chatCompletion(
   options: ChatCompletionOptions = {},
   override?: LlmOverride,
 ): Promise<string> {
+  const gw = llmGateway();
+  if (gw) {
+    const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
+    return gw.complete({
+      role: options.role ?? 'fast',
+      system,
+      messages: messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role as 'user' | 'assistant', text: m.content })),
+      json: options.jsonObject,
+    });
+  }
   const settings = settingsWithOverride(getSettings, override);
   requireApiKey(settings);
 

@@ -37,6 +37,7 @@ async function solveHomework(
       },
     ],
     service,
+    'smart', // math and logic: the strongest model that sees the photo, thinking harder
   );
 }
 
@@ -62,6 +63,7 @@ async function verifyHomework(
       },
     ],
     service,
+    'smart', // math and logic: the strongest model that sees the photo, thinking harder
   );
   try {
     const obj = parseJsonFromLlm(raw) as { agree?: boolean; summary?: string };

@@ -38,6 +38,7 @@ export interface ManagerAgentDeps extends OutreachDeps {
   getApprovals?: () => ApprovalsApi | undefined;
   skills?: SkillsStore;
   getTasks?: () => import('../agent/tasks').TaskQueue | undefined;
+  aiEngine?: import('../opencode/engine').AiEngine;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -168,6 +169,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
           : undefined,
         skills: deps.skills,
         getTasks: deps.getTasks,
+        aiEngine: deps.aiEngine,
         handoff: {
           doHandoff: async (leadId, reason, summary, bridgeReply) => {
             const l = deps.db.getLead(leadId);

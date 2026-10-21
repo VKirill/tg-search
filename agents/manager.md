@@ -1,7 +1,7 @@
 ---
 description: Ведёт диалог с клиентом от имени помощника владельца, продаёт услуги и подписку
 mode: primary
-model: glm
+model: main
 temperature: 0.4
 steps: 8
 permission:

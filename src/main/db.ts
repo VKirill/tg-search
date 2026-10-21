@@ -244,6 +244,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   operatorModel: '',
   tavilyApiKey: '',
   geminiApiKey: '',
+  aiProviders: '[]',
+  aiMainModel: '',
+  aiHelperModels: '[]',
 };
 
 // Starter services; price ranges from Russian freelance market data (Kwork, student exchanges), 2026-10

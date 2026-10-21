@@ -2976,3 +2976,75 @@ button.chip:hover {
   min-width: 160px;
   font-weight: 500;
 }
+
+.ai-engine__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.ai-models,
+.ai-providers {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-providers {
+  max-height: none;
+}
+
+.ai-models label,
+.ai-providers li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.ai-models__name {
+  font-weight: 500;
+}
+
+.ai-engine__form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-width: 520px;
+}
+
+.ai-engine__form input,
+.ai-engine__form textarea {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.trusted-list select,
+.ai-engine select {
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary, inherit);
+}
+
+.ai-models input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+}
+
+.ai-models label {
+  margin: 0;
+  cursor: pointer;
+}
