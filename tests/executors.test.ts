@@ -215,9 +215,9 @@ describe('image_gen', () => {
 describe('copywriting', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('saves long result to markdown file', async () => {
+  it('saves a huge result (beyond one Rich Message) to a markdown file', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'copy-'));
-    const long = 'а'.repeat(3600);
+    const long = 'а'.repeat(31_000);
     vi.spyOn(llm, 'chatCompletion').mockResolvedValue(long);
     vi.spyOn(images, 'generateImages').mockResolvedValue([]);
 
