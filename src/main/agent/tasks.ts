@@ -99,14 +99,28 @@ export function createAgentTasks(deps: {
 
   async function execute(task: AgentTask) {
     const dir = taskDir(deps.dataDir, task.leadId, task.id);
+    let text: string;
     try {
-      const text = (await deps.run(task, dir)).trim();
+      text = (await deps.run(task, dir)).trim();
       set(task.id, { status: 'done', result: text, finished_at: Date.now() });
-      await deps.deliver(get(task.id), text, filesIn(dir));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       set(task.id, { status: 'failed', error, finished_at: Date.now() });
       await deps.fail(get(task.id), error).catch((e) => console.error('task fail handler', e));
+      return;
+    }
+    // the work is done: a delivery problem never turns it into a failed task; one more try in a couple of minutes
+    for (const delayMs of [0, 2 * 60_000]) {
+      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+      if (get(task.id).deliveredAt) return;
+      try {
+        await deps.deliver(get(task.id), text, filesIn(dir));
+        return;
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        console.error('task delivery', task.id, error);
+        if (delayMs) await deps.fail(get(task.id), `результат готов, но не доставлен: ${error}`).catch((e) => console.error('task fail handler', e));
+      }
     }
   }
 

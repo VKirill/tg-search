@@ -97,3 +97,32 @@ function captureEvidence(dir: string, procs: ProcessMemory[]) {
     console.error('memory evidence', err);
   }
 }
+
+// The main process console goes to userData/logs/main.log too: a packaged app has no terminal, and agent failures
+// (a turn that errored, a route Jev picked) must be readable afterwards. Rotated at 5 MB, one previous file kept.
+export function teeConsoleToFile(dataDir: string): void {
+  const dir = join(dataDir, 'logs');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'main.log');
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      try {
+        if ((statSync(file, { throwIfNoEntry: false })?.size ?? 0) > MAX_LOG_BYTES) renameSync(file, `${file}.1`);
+        const text = args.map((a) => (a instanceof Error ? a.stack ?? a.message : typeof a === 'string' ? a : safeJson(a))).join(' ');
+        appendFileSync(file, `${new Date().toISOString()} ${level.toUpperCase()} ${text}\n`);
+      } catch {
+        /* logging must never break the app */
+      }
+    };
+  }
+}
+
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v)?.slice(0, 2000) ?? String(v);
+  } catch {
+    return String(v);
+  }
+}

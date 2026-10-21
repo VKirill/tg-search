@@ -45,6 +45,25 @@ function pickSendingAccount(
   throw new Error(limiterErrorMessage(lastFail));
 }
 
+// Waits out the pause between sends (a finished result must reach the client, not fail on «ещё 170 с»); the daily
+// limit is not waited for — it throws as before
+export async function waitForSendWindow(deps: Pick<OutreachDeps, 'db'>, leadId: number, maxWaitMs = 10 * 60_000): Promise<void> {
+  const until = Date.now() + maxWaitMs;
+  for (;;) {
+    const lead = deps.db.getLead(leadId);
+    try {
+      pickSendingAccount(deps.db, deps.db.getProject(lead.projectId).accountIds, lead, Date.now());
+      return;
+    } catch (err) {
+      const accounts = listAuthorizedProjectAccounts(deps.db, deps.db.getProject(lead.projectId).accountIds);
+      const waits = accounts.map((a) => canSend(a, Date.now(), isReplyTo(deps.db, lead))).filter((r) => !r.ok && r.reason === 'pause');
+      if (!waits.length || Date.now() >= until) throw err;
+      const waitMs = Math.min(...waits.map((r) => (r.ok ? 0 : r.waitMs ?? 1000)));
+      await new Promise((r) => setTimeout(r, Math.min(waitMs + 500, Math.max(0, until - Date.now()))));
+    }
+  }
+}
+
 async function dmChatId(deps: OutreachDeps, accountId: number, lead: Lead): Promise<number> {
   if (lead.authorUserId == null) throw new Error('Контакт не определён — ответьте в чате');
   return deps.engine.ensurePrivateChat(accountId, lead.authorUserId);

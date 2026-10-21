@@ -17,7 +17,7 @@ import { OpenAiSpeech } from './ai/speech';
 import { JevCategorizer } from './ai/categorizer';
 import { createExecutors } from './executors/registry';
 import { setUsageSink } from './usage';
-import { startMemoryWatch } from './diagnostics';
+import { startMemoryWatch, teeConsoleToFile } from './diagnostics';
 import { registerMediaProtocol, registerMediaSchemes } from './media';
 import { YooKassaProvider } from './payments/yookassa';
 
@@ -70,6 +70,7 @@ app.whenReady().then(async () => {
   });
 
   const dataDir = app.getPath('userData');
+  teeConsoleToFile(dataDir);
   mkdirSync(dataDir, { recursive: true });
   const db = new Db(join(dataDir, 'tg-search.db'));
   // Development defaults from the environment; values saved in Settings take priority.

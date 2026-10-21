@@ -138,6 +138,34 @@ describe('background tasks', () => {
     expect(await send.run({ task_id: 2, intro: 'ещё' }, ctx)).toMatch(/уже отправлено/);
   });
 
+  it('a delivery stuck on the send pause leaves the task done and does not hand the dialog over', async () => {
+    const { db, dataDir, lead } = setup();
+    const failed: string[] = [];
+    const queue = createAgentTasks({
+      db, dataDir, emit: () => {}, run: async () => 'решение',
+      deliver: async () => {
+        throw new Error('Пауза между отправками: ещё 170 с');
+      },
+      fail: async (_t, e) => void failed.push(e),
+    });
+    queue.enqueue(lead.id, 'analyst', 'фото задачи');
+    await tick();
+    await tick();
+    expect(queue.get(1)?.status).toBe('done');
+    expect(failed).toEqual([]); // a second try comes later; only a second miss is reported
+  });
+
+  it('waitForSendWindow waits out the pause instead of failing', async () => {
+    const { db, lead } = setup();
+    const { waitForSendWindow } = await import('../src/main/pipeline/outreach');
+    const acc = db.upsertAccountByPhone('+79990001133');
+    db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 50, pauseSec: 1, lastSentAt: Date.now() });
+    db.updateProject(lead.projectId, { accountIds: [acc.id] });
+    const started = Date.now();
+    await waitForSendWindow({ db }, lead.id);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+  });
+
   it('make_xlsx writes a real workbook into the task folder', async () => {
     const { dataDir } = setup();
     const tool = createMakeXlsxTool({ taskDir: dataDir } as never);

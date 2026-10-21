@@ -44,7 +44,7 @@ import { listAgentSteps } from './agent/store';
 import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
 import { createSpamChats, guardSpamJoins, spamChatReason, SPAM_CHAT_CHECK_MS } from './dedupe/spamChats';
 import { createNews, NEWS_INTERVAL_MS } from './news';
-import { CHECKIN_TICK_MS, createTrusted } from './trusted';
+import { CHECKIN_TICK_MS, createTrusted, isTrustedLead } from './trusted';
 import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
@@ -52,7 +52,7 @@ import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
-import { sendMediaMessage } from './pipeline/outreach';
+import { sendMediaMessage, waitForSendWindow } from './pipeline/outreach';
 import { fileToDataUri } from './executors/images';
 import { agentRole, createAiEngine } from './opencode/engine';
 import type { ToolCatalogEntry } from './opencode/bridge';
@@ -306,13 +306,18 @@ export function createApp(deps: AppDeps): AppHandlers {
       await managerAgent.checkin(task.leadId, reviewNote(task, text, files)).catch((err) => console.error('task review', err));
       const now = tasks.get(task.id);
       if (now?.deliveredAt) return; // sent or sent for a redo
+      console.warn(`task #${task.id}: the agent did not send the result after its review — sending it directly`);
       // the agent did not take it (auto-replies off, handed off, the model failed): straight to the client as before
       const intro = TASK_INTROS[task.id % TASK_INTROS.length];
+      await waitForSendWindow(pipeline, task.leadId);
+      if (tasks.get(task.id)?.deliveredAt) return; // the agent's deferred turn got there while we waited
       await sendMediaMessage(pipeline, task.leadId, text ? `${intro}\n\n${text}` : intro, files, true);
       tasks.markDelivered(task.id);
     },
     fail: async (task, error) => {
-      const lead = db.updateLead(task.leadId, { handoff: true, handoffReason: `Поручение «${task.agent}» не выполнено: ${error}` });
+      // «свои люди»: the agent keeps the dialog (the owner is the customer there); others go to the owner
+      const current = db.getLead(task.leadId);
+      const lead = isTrustedLead(db, current) ? current : db.updateLead(task.leadId, { handoff: true, handoffReason: `Поручение «${task.agent}» не выполнено: ${error}` });
       emit({ type: 'lead:update', lead });
       emit({ type: 'job', projectId: lead.projectId, stage: `Поручение #${task.id} (${task.agent}) не выполнено`, done: true, error });
     },
@@ -567,6 +572,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       setHandoff: async (leadId, handoff) => {
         const lead = db.updateLead(leadId, { handoff, handoffReason: handoff ? 'Взято вручную' : null });
         emit({ type: 'lead:update', lead });
+        // given back to the agent: it answers what the client wrote meanwhile
+        if (!handoff && db.listMessages(leadId).at(-1)?.direction === 'in') managerAgent.onIncoming(leadId);
         return lead;
       },
     },

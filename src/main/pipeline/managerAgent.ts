@@ -282,6 +282,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
         timers.set(leadId, timer);
         return;
       }
+      console.error(`manager reply failed, lead ${leadId}${systemNote ? ' (system note)' : ''}:`, err);
       deps.emit({
         type: 'job',
         projectId: project.id,

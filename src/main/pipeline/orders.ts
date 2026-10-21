@@ -16,7 +16,7 @@ import type { Billing } from '../billing/types';
 import type { PaymentProvider } from '../payments/types';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { sendMediaMessage, sendMessage, type OutreachDeps } from './outreach';
-import { isFreeLead } from '../trusted';
+import { isFreeLead, isTrustedLead } from '../trusted';
 import { listAuthorizedProjectAccounts } from './accounts';
 
 const POLL_MS = 30_000;
@@ -192,8 +192,12 @@ export function createOrders(deps: OrdersDeps) {
       const reason = err instanceof Error ? err.message : String(err);
       patchOrder(orderId, { status: 'failed', error: reason });
       const handoffReason = `Исполнитель не справился: ${reason}`;
-      const updatedLead = deps.db.updateLead(lead.id, { handoff: true, handoffReason });
-      deps.emit({ type: 'lead:update', lead: updatedLead });
+      console.error(`order #${orderId}: ${handoffReason}`);
+      // «свои люди»: the agent keeps the dialog (the owner is the customer there) and can try another way
+      if (!isTrustedLead(deps.db, deps.db.getLead(lead.id))) {
+        const updatedLead = deps.db.updateLead(lead.id, { handoff: true, handoffReason });
+        deps.emit({ type: 'lead:update', lead: updatedLead });
+      }
       return deps.db.getOrder(orderId);
     }
   }
@@ -293,13 +297,30 @@ export function createOrders(deps: OrdersDeps) {
     const since = Math.max(Date.now() - 24 * 3600_000, previous);
     const media = deps.db.listMessages(order.leadId)
       .filter((m) => m.direction === 'in' && m.mediaPath && m.kind !== 'voice' && m.date > since && existsSync(m.mediaPath));
-    if (!media.length) return order;
+    if (!media.length) return reusePreviousInputs(order);
     const dir = workDir(deps.dataDir, order.leadId, order.id);
     const files: OrderFile[] = media.map((m) => {
       const name = basename(m.mediaPath!);
       const dest = join(dir, name);
       copyFileSync(m.mediaPath!, dest);
       return { path: dest, role: 'input', name, mime: /\.(jpe?g|png|webp)$/i.test(name) ? 'image/jpeg' : 'application/octet-stream' };
+    });
+    return patchOrder(order.id, { files: [...order.files, ...files] });
+  }
+
+  // «а 15 реши» — the next task from the page already sent: an order of the same service without new photos takes the
+  // previous order's inputs
+  function reusePreviousInputs(order: Order): Order {
+    const prev = deps.db.listOrders(order.leadId)
+      .filter((o) => o.id !== order.id && o.serviceId === order.serviceId && o.createdAt <= order.createdAt)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    const inputs = prev?.files.filter((f) => f.role === 'input' && existsSync(f.path)) ?? [];
+    if (!inputs.length || order.files.some((f) => f.role === 'input')) return order;
+    const dir = workDir(deps.dataDir, order.leadId, order.id);
+    const files: OrderFile[] = inputs.map((f) => {
+      const dest = join(dir, basename(f.path));
+      copyFileSync(f.path, dest);
+      return { ...f, path: dest };
     });
     return patchOrder(order.id, { files: [...order.files, ...files] });
   }

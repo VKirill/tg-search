@@ -446,4 +446,24 @@ describe('photos attached to a new order', () => {
     const created = db.listOrders(lead.id).find((o) => o.id !== first.id)!;
     expect(created.files.map((f) => f.name)).toEqual(['homework.jpg']);
   });
+
+  it('«а 15 реши»: no new photo — the next order of the same service takes the previous order\'s page', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'tg-orders-media-'));
+    const { db, lead } = setupDb();
+    const { orders } = ordersPipeline(db, new FakeEngine(), new FakePayments(), makeExecutors(async () => ({ text: '', files: [] })), dataDir);
+    const page = join(dataDir, 'page.jpg');
+    writeFileSync(page, 'x');
+    db.addMessage({ leadId: lead.id, accountId: null, direction: 'in', where: 'dm', kind: 'text', text: '[фото]', mediaPath: page,
+      tgChatId: 1, tgMessageId: 1, date: Date.now() - 60_000, auto: false });
+    const homework = db.listServices()[1].id;
+    const intent = (brief: string) => ({ serviceId: homework, brief, agreedPrice: null, wantsPreview: false, readyToPay: false, photoConsent: false });
+    await orders.applyManagerIntent(lead.id, intent('задача 11'));
+    const first = db.listOrders(lead.id)[0];
+    expect(first.files.map((f) => f.name)).toEqual(['page.jpg']);
+    db.updateOrder(first.id, { status: 'delivered' });
+    db.raw.prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(Date.now() - 30_000, first.id);
+    await orders.applyManagerIntent(lead.id, intent('задача 15'));
+    const second = db.listOrders(lead.id).find((o) => o.id !== first.id)!;
+    expect(second.files.map((f) => f.name)).toEqual(['page.jpg']);
+  });
 });

@@ -3,7 +3,7 @@ import type { AgentTool } from '../types';
 import type { ToolHostDeps } from './deps';
 import { writeXlsx, type Sheet } from '../../files/xlsx';
 import { isFreeLead } from '../../trusted';
-import { sendMediaMessage } from '../../pipeline/outreach';
+import { sendMediaMessage, waitForSendWindow } from '../../pipeline/outreach';
 
 // The primary agent hands bigger work to a subagent in the background and keeps talking to the client
 export function createAssignTaskTool(deps: ToolHostDeps): AgentTool {
@@ -76,6 +76,7 @@ export function createSendTaskResultTool(deps: ToolHostDeps): AgentTool {
       if (ctx.dryRun) return `[dryRun] Отправили бы результат поручения #${task.id}`;
       const intro = String(args.intro ?? '').trim();
       const text = [intro, task.result?.trim()].filter(Boolean).join('\n\n');
+      await waitForSendWindow(deps, ctx.leadId); // the agent may have just written «взял» — the pause runs out first
       await sendMediaMessage(deps, ctx.leadId, text, tasks.files(task), true);
       tasks.markDelivered(task.id);
       if (deps.turnState) deps.turnState.replyUsed = true; // the client got this turn's message
