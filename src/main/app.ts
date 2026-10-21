@@ -31,6 +31,7 @@ import { createImporter } from './pipeline/importer';
 import { createManagerAgent } from './pipeline/managerAgent';
 import { stopChainOnIncoming } from './pipeline/sequence';
 import type { Lead } from '../shared/types';
+import { createDossier } from './dossier';
 
 export interface AppDeps {
   db: Db;
@@ -44,6 +45,7 @@ export interface AppDeps {
   dataDir: string;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
+  revealInFolder?: (path: string) => Promise<void>;
 }
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
@@ -52,14 +54,22 @@ export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, openExternal, speech, dataDir } = deps;
   const manager = deps.manager ?? stubManagerAi();
   const crmAi = deps.crmAi ?? stubCrmAi();
+  const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
   const crm = createCrm({ db, crmAi, emit: deps.emit });
   const emit = (e: AppEvent) => {
     deps.emit(e);
-    if (e.type === 'message:new') crm.onMessage(e.message);
-    if (e.type === 'lead:update') crm.onLeadUpdate(e.lead);
+    if (e.type === 'message:new') {
+      crm.onMessage(e.message);
+      dossier.onMessage(e.message);
+    }
+    if (e.type === 'lead:update') {
+      crm.onLeadUpdate(e.lead);
+      dossier.onLeadUpdate(e.lead);
+    }
+    if (e.type === 'order:update') dossier.onOrder(e.order);
   };
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer };
+  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer, dossier };
   const autopilot = createAutopilot(pipeline);
   const managerAgent = createManagerAgent({ ...pipeline, manager, crm });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
@@ -129,6 +139,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       managerAgent.stop();
       autopilot.stop();
       crm.stop();
+      dossier.stop();
       await engine.close();
     },
 
@@ -356,8 +367,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       },
     },
     dossier: {
-      path: notYet('dossier worker'),
-      open: notYet('dossier worker'),
+      path: async (leadId) => dossier.path(leadId),
+      open: async (leadId) => (deps.revealInFolder ?? (async () => {}))(dossier.path(leadId)),
     },
     stats: {
       report: async (period) => buildReport(db, period),

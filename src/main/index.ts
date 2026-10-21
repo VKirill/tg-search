@@ -97,6 +97,9 @@ app.whenReady().then(async () => {
     dataDir,
     emit,
     openExternal: (url) => shell.openExternal(url),
+    revealInFolder: async (path) => {
+      shell.showItemInFolder(path);
+    },
   });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {
