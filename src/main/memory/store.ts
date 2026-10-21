@@ -58,6 +58,7 @@ export function createMemoryStore(deps: MemoryStoreDeps): MemoryStoreApi {
   const fetchFn = deps.fetchFn ?? fetch;
   const embedder = deps.embedder ?? createWorkerEmbedder(deps.dataDir);
   const indexedPaths = new Set<string>();
+  const queryVecCache = new Map<string, Float32Array>();
 
   function emitUpdate(clientId: number) {
     deps.emit({ type: 'memory:update', clientId });
@@ -424,7 +425,12 @@ export function createMemoryStore(deps: MemoryStoreDeps): MemoryStoreApi {
 
   function search(clientId: number, query: string): MemorySearchResult {
     const ftsHits = searchFts(clientId, query);
-    const qVec = embedder.embedQuerySync?.(query) ?? null;
+    const qVec = embedder.embedQuerySync?.(query) ?? queryVecCache.get(query) ?? null;
+    if (!embedder.embedQuerySync && !queryVecCache.has(query)) {
+      void embedder.embedQuery(query).then((v) => {
+        if (v) queryVecCache.set(query, v);
+      });
+    }
     const vecHits = qVec ? vectorHits(clientId, qVec) : [];
     const merged = reciprocalRankFusion([ftsHits, vecHits]);
     return loadSearchResults(clientId, merged, query);
@@ -432,7 +438,9 @@ export function createMemoryStore(deps: MemoryStoreDeps): MemoryStoreApi {
 
   async function searchAsync(clientId: number, query: string): Promise<MemorySearchResult> {
     const ftsHits = searchFts(clientId, query);
-    const vecHits = await searchVectors(clientId, query);
+    const qVec = await embedder.embedQuery(query);
+    if (qVec) queryVecCache.set(query, qVec);
+    const vecHits = qVec ? vectorHits(clientId, qVec) : [];
     const merged = reciprocalRankFusion([ftsHits, vecHits]);
     return loadSearchResults(clientId, merged, query);
   }
