@@ -330,6 +330,18 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       // replies that were waiting on a timer when the app stopped: dialogs whose last message is incoming and fresh
       for (const leadId of db.leadsAwaitingReply(Date.now() - 2 * 3600_000)) managerAgent.onIncoming(leadId);
+      // voice notes that failed to transcribe (key missing, provider error): one more try, then the agent answers
+      void (async () => {
+        for (const m of db.failedVoiceMessages(Date.now() - 24 * 3600_000)) {
+          try {
+            const text = await speech.transcribe(m.mediaPath!);
+            db.updateMessageText(m.id, text);
+            managerAgent.onIncoming(m.leadId);
+          } catch (err) {
+            console.error('retry voice', m.id, err instanceof Error ? err.message : err);
+          }
+        }
+      })();
       // orders whose executor was running when the app stopped: run again (the result was never delivered)
       for (const o of db.listOrders().filter((x) => x.status === 'in_progress' || x.status === 'paid')) {
         orders.run(o.id).catch((err) => console.error('resume order', o.id, err));

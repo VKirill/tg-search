@@ -68,3 +68,13 @@ temp/
 out/
 release/
 .bb/
+
+# local data must never reach the public repo (the app keeps it in userData, this is a safety net)
+*.db
+*.sqlite*
+*.session
+td.binlog
+tdlib/
+*.ips
+.claude/
+.agents/

@@ -2,6 +2,7 @@
 // Arrays and nested objects are stored as JSON text.
 
 import { DatabaseSync } from 'node:sqlite';
+import { VOICE_TRANSCRIPT_FAILED } from './voice/incoming';
 import {
   DEFAULT_AUTOPILOT,
   DEFAULT_MANAGER,
@@ -212,22 +213,22 @@ export const SETTINGS_DEFAULTS: Settings = {
   jevModel: 'jev-1.14.0',
   handoffNotifyTo: '',
   ownerName: 'Кирилл',
-  sttBaseUrl: 'https://api.openai.com/v1',
+  sttBaseUrl: 'https://api.groq.com/openai/v1', // Groq Whisper: fast and cheap; any OpenAI-compatible endpoint works
   sttApiKey: '',
-  sttModel: 'gpt-4o-transcribe',
+  sttModel: 'whisper-large-v3-turbo',
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
   ttsVoice: 'nova',
   jevPricePerMTok: '0.042',
-  sttPricePerMin: '0.006',
+  sttPricePerMin: '0.00067', // Groq whisper-large-v3-turbo: $0.04 per hour
   ttsPricePerMin: '0.015',
   imagePricePerImage: '0.04',
   requestThreshold: '0.2',
   yookassaShopId: '',
   yookassaSecretKey: '',
   yookassaReturnUrl: 'https://t.me',
-  auxBaseUrl: 'https://9router.vechkasov.pro/v1',
+  auxBaseUrl: '', // any OpenAI-compatible endpoint (e.g. a 9router instance); set in Settings
   auxApiKey: '',
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
@@ -591,6 +592,12 @@ export class Db {
     this.run('DELETE FROM broadcasts WHERE id = ?', id);
   }
 
+  failedVoiceMessages(sinceMs: number): ChatMessage[] {
+    return this.all(
+      `SELECT * FROM messages WHERE kind = 'voice' AND direction = 'in' AND media_path IS NOT NULL AND date >= ? AND text = ?`,
+      sinceMs, VOICE_TRANSCRIPT_FAILED,
+    ).map(toMessage);
+  }
   updateMessageText(id: number, text: string) {
     this.run('UPDATE messages SET text = ? WHERE id = ?', text, id);
   }

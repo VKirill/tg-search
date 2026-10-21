@@ -59,6 +59,20 @@ describe('OpenAiSpeech HTTP', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('sends a Telegram .oga voice note as .ogg (Whisper APIs reject the «oga» extension)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'stt-oga-'));
+    const oga = join(dir, 'voice-1.oga');
+    await writeTestWav(oga, 0.1);
+    const fetchMock = vi.fn(async () => ({
+      ok: true, status: 200, headers: new Headers(), json: async () => ({ text: 'ок' }), text: async () => '',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new OpenAiSpeech(baseSettings, dir).transcribe(oga);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(((init.body as FormData).get('file') as File).name).toBe('voice-1.ogg');
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it('posts JSON speech with voice and instructions', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tg-speech-'));
     const rawWav = join(dir, 'speech.wav');

@@ -228,8 +228,8 @@ export class OpenAiSpeech implements SpeechService {
     if (!key) throw new Error('Укажите ключ распознавания речи в настройках');
     return {
       ...s,
-      sttModel: s.sttModel.trim() || 'gpt-4o-transcribe',
-      sttBaseUrl: s.sttBaseUrl.trim() || 'https://api.openai.com/v1',
+      sttModel: s.sttModel.trim() || 'whisper-large-v3-turbo',
+      sttBaseUrl: s.sttBaseUrl.trim() || 'https://api.groq.com/openai/v1',
     };
   }
 
@@ -270,7 +270,8 @@ export class OpenAiSpeech implements SpeechService {
     const url = `${s.sttBaseUrl.replace(/\/$/, '')}/audio/transcriptions`;
     const buf = await readFile(filePath);
     const form = new FormData();
-    form.append('file', new Blob([buf]), basename(filePath));
+    // Telegram voice notes are Ogg Opus saved as .oga; Whisper APIs judge the format by extension and reject «oga»
+    form.append('file', new Blob([buf]), basename(filePath).replace(/\.(oga|opus)$/i, '.ogg'));
     form.append('model', s.sttModel);
     const res = await fetchWithRetry(
       url,

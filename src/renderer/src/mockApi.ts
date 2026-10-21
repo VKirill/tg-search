@@ -2094,7 +2094,7 @@ export function createMockApi(): Api {
       async send(_accountId, chatId, text, replyTo) {
         await delay(200);
         const item: ChatItem = {
-          messageId: Date.now(), date: Date.now(), text, senderName: 'Кирилл', senderUsername: 'kirill_vech', isOutgoing: true,
+          messageId: Date.now(), date: Date.now(), text, senderName: 'Кирилл', senderUsername: 'owner_work', isOutgoing: true,
           voice: null, replyToMessageId: replyTo ?? null, link: null,
         };
         const c = mockChats.find((x) => x.chatId === chatId);
