@@ -13,7 +13,7 @@ const baseSettings = (): Settings => ({
   llmModel: 'anthropic/claude-haiku-5.5',
   jevBaseUrl: '',
   jevApiKey: '',
-  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
+  jevModel: '', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
 });
 
 function completionBody(content: string) {
@@ -64,6 +64,8 @@ function tgMessage(chatId: number, messageId: number, text: string): TgMessage {
     senderUsername: null,
     senderIsBot: false,
     voice: null,
+    photo: null,
+    document: null,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,

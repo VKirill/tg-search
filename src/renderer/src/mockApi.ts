@@ -6,6 +6,8 @@ import type {
   AutopilotSettings,
   Broadcast,
   Category,
+  Order,
+  Service,
   ChatInfo,
   ChatItem,
   ChatMessage,
@@ -46,7 +48,7 @@ let settings: Settings = {
   ttsBaseUrl: 'https://api.openai.com/v1',
   ttsApiKey: '',
   ttsModel: 'gpt-4o-mini-tts',
-  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
+  ttsVoice: 'nova', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
 };
 
 const accounts: Account[] = [
@@ -506,6 +508,21 @@ function mockStats(period: StatsReport['period']): StatsReport {
       { kind: 'tts', model: 'gpt-4o-mini-tts', calls: 3 * n, inputTokens: 0, outputTokens: 0, units: 32 * n, costUsd: totals.costByKind.tts },
     ],
   };
+}
+
+const mockServices: Service[] = [
+  { id: 1, kind: 'homework', name: 'Домашнее задание по фото', categoryId: 4, enabled: true, priceMin: 300, priceMax: 1500, instructions: 'Решаем задачи по фото пошагово, с самопроверкой.', model: '', previewEnabled: false, revisions: 1 },
+  { id: 2, kind: 'marketplace_card', name: 'Карточка товара для маркетплейса', categoryId: 5, enabled: true, priceMin: 500, priceMax: 3000, instructions: 'SEO-название, описание, характеристики, инфографика 1–5 слайдов.', model: '', previewEnabled: true, revisions: 2 },
+  { id: 3, kind: 'image_gen', name: 'Нейрофото и генерация изображений', categoryId: 3, enabled: true, priceMin: 500, priceMax: 2500, instructions: 'Нейрофотосессии и обложки; фото клиента только с согласия.', model: '', previewEnabled: true, revisions: 1 },
+  { id: 4, kind: 'copywriting', name: 'Тексты и контент-план', categoryId: 6, enabled: true, priceMin: 300, priceMax: 3000, instructions: 'Посты и контент-план без брифа: допущения называем явно.', model: '', previewEnabled: true, revisions: 2 },
+];
+
+const mockOrders: Order[] = [];
+
+function mockOrderPatch(id: number, patch: Partial<Order>): Order {
+  const o = mockOrders.find((x) => x.id === id)!;
+  Object.assign(o, patch, { updatedAt: Date.now() });
+  return { ...o };
 }
 
 const mockChats: ChatSummary[] = [
@@ -1024,6 +1041,64 @@ export function createMockApi(): Api {
         emit({ type: 'job', projectId: 0, stage: 'Готово', done: true });
         return { posted: 2, skipped: 1, errors: 0 };
       },
+    },
+    services: {
+      async list() {
+        return mockServices.map((x) => ({ ...x }));
+      },
+      async create(input) {
+        const v = { id: nid(), ...input };
+        mockServices.push(v);
+        return { ...v };
+      },
+      async update(id, patch) {
+        const v = mockServices.find((x) => x.id === id)!;
+        Object.assign(v, patch);
+        return { ...v };
+      },
+      async remove(id) {
+        const i = mockServices.findIndex((x) => x.id === id);
+        if (i >= 0) mockServices.splice(i, 1);
+      },
+    },
+    orders: {
+      async list(leadId) {
+        return mockOrders.filter((o) => leadId == null || o.leadId === leadId).map((o) => ({ ...o }));
+      },
+      async create(leadId, serviceId, brief) {
+        const o: Order = {
+          id: nid(), leadId, serviceId, status: 'collecting', price: null, brief, files: [], paymentId: null, paymentUrl: null,
+          paidAt: null, result: null, revisionsUsed: 0, error: null, createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        mockOrders.unshift(o);
+        return { ...o };
+      },
+      async update(id, patch) {
+        return mockOrderPatch(id, patch);
+      },
+      async requestPayment(id) {
+        await delay(400);
+        return mockOrderPatch(id, { status: 'awaiting_payment', paymentUrl: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=demo' });
+      },
+      async markPaid(id) {
+        return mockOrderPatch(id, { status: 'paid', paidAt: Date.now() });
+      },
+      async run(id) {
+        await delay(800);
+        return mockOrderPatch(id, { status: 'delivered', result: 'Готово: решение отправлено клиенту.' });
+      },
+      async deliver(id) {
+        return mockOrderPatch(id, { status: 'delivered' });
+      },
+      async cancel(id) {
+        return mockOrderPatch(id, { status: 'cancelled' });
+      },
+    },
+    dossier: {
+      async path(leadId) {
+        return `~/Library/Application Support/TG Search/clients/${leadId}`;
+      },
+      async open() {},
     },
     stats: {
       async report(period) {

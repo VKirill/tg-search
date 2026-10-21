@@ -327,6 +327,38 @@ export function createApp(deps: AppDeps): AppHandlers {
       remove: (id) => broadcaster.remove(id),
       runNow: (id) => broadcaster.runNow(id),
     },
+    services: {
+      list: async () => db.listServices(),
+      create: async (input) => db.createService(input),
+      update: async (id, patch) => db.updateService(id, patch),
+      remove: async (id) => db.removeService(id),
+    },
+    orders: {
+      list: async (leadId) => db.listOrders(leadId),
+      create: async (leadId, serviceId, brief) => {
+        const order = db.createOrder(leadId, serviceId, brief);
+        emit({ type: 'order:update', order });
+        return order;
+      },
+      update: async (id, patch) => {
+        const order = db.updateOrder(id, patch);
+        emit({ type: 'order:update', order });
+        return order;
+      },
+      requestPayment: notYet('orders worker'),
+      markPaid: notYet('orders worker'),
+      run: notYet('orders worker'),
+      deliver: notYet('orders worker'),
+      cancel: async (id) => {
+        const order = db.updateOrder(id, { status: 'cancelled' });
+        emit({ type: 'order:update', order });
+        return order;
+      },
+    },
+    dossier: {
+      path: notYet('dossier worker'),
+      open: notYet('dossier worker'),
+    },
     stats: {
       report: async (period) => buildReport(db, period),
     },
@@ -368,5 +400,11 @@ function chatItem(m: TgMessage) {
   return {
     messageId: m.messageId, date: m.date, text: m.text, senderName: m.senderName, senderUsername: m.senderUsername,
     isOutgoing: m.isOutgoing, voice: m.voice, replyToMessageId: m.replyToMessageId, link: m.link,
+  };
+}
+
+function notYet(owner: string) {
+  return async (): Promise<never> => {
+    throw new Error(`not implemented (${owner})`);
   };
 }

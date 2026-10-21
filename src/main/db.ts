@@ -10,6 +10,9 @@ import {
   type Anamnesis,
   type Broadcast,
   type Category,
+  type Order,
+  type Service,
+  type ServiceKind,
   type UsageKind,
   type BroadcastChat,
   type ClientCard,
@@ -104,6 +107,20 @@ CREATE TABLE IF NOT EXISTS usage (
   output_tokens INTEGER NOT NULL DEFAULT 0, units REAL NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS usage_day ON usage(day);
+CREATE TABLE IF NOT EXISTS services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL, name TEXT NOT NULL, category_id INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
+  price_min INTEGER NOT NULL, price_max INTEGER NOT NULL, instructions TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+  preview_enabled INTEGER NOT NULL DEFAULT 0, revisions INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  service_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'collecting', price INTEGER, brief TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '[]', payment_id TEXT, payment_url TEXT, paid_at INTEGER, result TEXT,
+  revisions_used INTEGER NOT NULL DEFAULT 0, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orders_lead ON orders(lead_id);
 CREATE TABLE IF NOT EXISTS seen (
   project_id INTEGER NOT NULL, tg_chat_id INTEGER NOT NULL, tg_message_id INTEGER NOT NULL,
   PRIMARY KEY(project_id, tg_chat_id, tg_message_id)
@@ -204,7 +221,47 @@ export const SETTINGS_DEFAULTS: Settings = {
   sttPricePerMin: '0.006',
   ttsPricePerMin: '0.015',
   requestThreshold: '0.2',
+  yookassaShopId: '',
+  yookassaSecretKey: '',
+  yookassaReturnUrl: 'https://t.me',
+  auxBaseUrl: 'https://9router.vechkasov.pro/v1',
+  auxApiKey: '',
+  auxModel: 'ag/gemini-3.8-flash',
+  falKey: '',
+  imageModel: 'fal-ai/nano-banana-2/edit',
 };
+
+// Starter services; price ranges from Russian freelance market data (Kwork, student exchanges), 2026-10
+const DEFAULT_SERVICES: { kind: ServiceKind; name: string; category: string; min: number; max: number; preview: boolean; instructions: string }[] = [
+  {
+    kind: 'homework', name: 'Домашнее задание по фото', category: 'Учёба и домашние задания', min: 300, max: 1500, preview: false,
+    instructions:
+      'Решаем школьные и студенческие задачи по фото: математика, физика, химия, информатика, языки. Попросить фото задания целиком, ' +
+      'класс или курс и срок. Цена: 300–500 ₽ за простое школьное задание, до 1500 ₽ за вузовский уровень или много задач. ' +
+      'Решение — пошагово с объяснением, ответ выделен, самопроверка перед отправкой. Если фото нечитаемо — попросить переснять.',
+  },
+  {
+    kind: 'marketplace_card', name: 'Карточка товара для маркетплейса', category: 'Карточки маркетплейсов', min: 500, max: 3000, preview: true,
+    instructions:
+      'Карточки для Wildberries, Ozon, Яндекс Маркета: SEO-название, описание, характеристики, ключевые слова, инфографика 1–5 слайдов. ' +
+      'Спросить: маркетплейс, товар и его фото, преимущества, ссылки на конкурентов. Цена: 500 ₽ текст или 1–2 слайда, до 3000 ₽ за полный комплект. ' +
+      'Правила WB: на изображениях нельзя цены, скидки, QR-коды, телефоны и призывы к покупке. Превью — один слайд инфографики.',
+  },
+  {
+    kind: 'image_gen', name: 'Нейрофото и генерация изображений', category: 'Фото, видео и дизайн', min: 500, max: 2500, preview: true,
+    instructions:
+      'Нейрофотосессии, обработка и генерация изображений по фото клиента или описанию: портреты, аватарки, обложки, фото для соцсетей. ' +
+      'Спросить: 1–3 чётких фото лица (для нейрофото), стиль, количество образов. Цена: 500 ₽ за 1–3 изображения, до 2500 ₽ за 10 образов. ' +
+      'Фото клиента (в том числе аватар) использовать только после его явного согласия. Превью — одно изображение.',
+  },
+  {
+    kind: 'copywriting', name: 'Тексты и контент-план', category: 'Тексты и копирайтинг', min: 300, max: 3000, preview: true,
+    instructions:
+      'Посты, описания, продающие тексты, контент-план на неделю или месяц. Брифа обычно нет: опереться на нишу, ссылки на аккаунт и конкурентов, ' +
+      'додумать аудиторию и цели, явно назвать допущения. Цена: 300 ₽ за короткий текст, 1000–3000 ₽ за контент-план на неделю с примерами постов. ' +
+      'Превью — 2–3 пункта плана или первый пост; к контент-плану можно предложить обложки.',
+  },
+];
 
 const DEFAULT_CATEGORIES: [string, string][] = [
   ['IT-разработка', 'Сайты, лендинги, Telegram-боты, приложения, интеграции, автоматизация, доработка и поддержка'],
@@ -244,8 +301,18 @@ export class Db {
   }
 
   private seedCategories() {
-    if (this.one('SELECT 1 FROM categories LIMIT 1')) return;
-    for (const [name, description] of DEFAULT_CATEGORIES) this.run('INSERT INTO categories(name, description) VALUES(?, ?)', name, description);
+    if (!this.one('SELECT 1 FROM categories LIMIT 1')) {
+      for (const [name, description] of DEFAULT_CATEGORIES) this.run('INSERT INTO categories(name, description) VALUES(?, ?)', name, description);
+    }
+    if (!this.one('SELECT 1 FROM services LIMIT 1')) {
+      const cats = new Map(this.listCategories().map((c) => [c.name, c.id]));
+      for (const d of DEFAULT_SERVICES) {
+        this.run(
+          'INSERT INTO services(kind, name, category_id, price_min, price_max, instructions, preview_enabled) VALUES(?, ?, ?, ?, ?, ?, ?)',
+          d.kind, d.name, cats.get(d.category) ?? null, d.min, d.max, d.instructions, Number(d.preview),
+        );
+      }
+    }
   }
 
   private one(sql: string, ...args: any[]): Row | undefined {
@@ -591,4 +658,73 @@ export class Db {
       ),
     };
   }
+
+  // Services («Исполнители»)
+  listServices(): Service[] {
+    return this.all('SELECT * FROM services ORDER BY id').map(toService);
+  }
+  getService(id: number): Service {
+    const r = this.one('SELECT * FROM services WHERE id = ?', id);
+    if (!r) throw new Error(`service ${id} not found`);
+    return toService(r);
+  }
+  createService(v: Omit<Service, 'id'>): Service {
+    const res = this.run(
+      `INSERT INTO services(kind, name, category_id, enabled, price_min, price_max, instructions, model, preview_enabled, revisions)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions,
+    );
+    return this.getService(Number(res.lastInsertRowid));
+  }
+  updateService(id: number, patch: Partial<Omit<Service, 'id'>>): Service {
+    const v = { ...this.getService(id), ...patch };
+    this.run(
+      `UPDATE services SET kind = ?, name = ?, category_id = ?, enabled = ?, price_min = ?, price_max = ?, instructions = ?, model = ?,
+       preview_enabled = ?, revisions = ? WHERE id = ?`,
+      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions, id,
+    );
+    return this.getService(id);
+  }
+  removeService(id: number) {
+    this.run('DELETE FROM services WHERE id = ?', id);
+  }
+
+  // Orders
+  listOrders(leadId?: number): Order[] {
+    return (leadId ? this.all('SELECT * FROM orders WHERE lead_id = ? ORDER BY id DESC', leadId) : this.all('SELECT * FROM orders ORDER BY id DESC LIMIT 500')).map(toOrder);
+  }
+  getOrder(id: number): Order {
+    const r = this.one('SELECT * FROM orders WHERE id = ?', id);
+    if (!r) throw new Error(`order ${id} not found`);
+    return toOrder(r);
+  }
+  createOrder(leadId: number, serviceId: number, brief: string): Order {
+    const now = Date.now();
+    const res = this.run('INSERT INTO orders(lead_id, service_id, brief, created_at, updated_at) VALUES(?, ?, ?, ?, ?)', leadId, serviceId, brief, now, now);
+    return this.getOrder(Number(res.lastInsertRowid));
+  }
+  updateOrder(id: number, patch: Partial<Omit<Order, 'id' | 'leadId' | 'createdAt' | 'updatedAt'>>): Order {
+    const o = { ...this.getOrder(id), ...patch };
+    this.run(
+      `UPDATE orders SET service_id = ?, status = ?, price = ?, brief = ?, files = ?, payment_id = ?, payment_url = ?, paid_at = ?,
+       result = ?, revisions_used = ?, error = ?, updated_at = ? WHERE id = ?`,
+      o.serviceId, o.status, o.price, o.brief, json(o.files), o.paymentId, o.paymentUrl, o.paidAt, o.result, o.revisionsUsed, o.error, Date.now(), id,
+    );
+    return this.getOrder(id);
+  }
+}
+
+function toService(r: Row): Service {
+  return {
+    id: r.id, kind: r.kind, name: r.name, categoryId: r.category_id, enabled: !!r.enabled, priceMin: r.price_min, priceMax: r.price_max,
+    instructions: r.instructions, model: r.model, previewEnabled: !!r.preview_enabled, revisions: r.revisions,
+  };
+}
+
+function toOrder(r: Row): Order {
+  return {
+    id: r.id, leadId: r.lead_id, serviceId: r.service_id, status: r.status, price: r.price, brief: r.brief, files: parse(r.files, []),
+    paymentId: r.payment_id, paymentUrl: r.payment_url, paidAt: r.paid_at, result: r.result, revisionsUsed: r.revisions_used,
+    error: r.error, createdAt: r.created_at, updatedAt: r.updated_at,
+  };
 }

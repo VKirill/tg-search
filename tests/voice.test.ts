@@ -80,6 +80,8 @@ describe('incoming voice in DM', () => {
       makeMsg(500, 10, '', {
         senderUserId: lead.authorUserId!,
         voice: { fileId: 42, durationSec: 5 },
+        photo: null,
+        document: null,
       }),
     );
     let msg: import('../src/shared/types').ChatMessage | undefined;
@@ -119,6 +121,8 @@ describe('incoming voice in DM', () => {
       makeMsg(500, 11, '', {
         senderUserId: lead.authorUserId!,
         voice: { fileId: 43, durationSec: 4 },
+        photo: null,
+        document: null,
       }),
     );
     let msg: import('../src/shared/types').ChatMessage | undefined;

@@ -181,6 +181,71 @@ export interface Settings {
   sttPricePerMin: string; // USD per audio minute, estimate for statistics
   ttsPricePerMin: string; // USD per audio minute, estimate for statistics
   requestThreshold: string; // 0..1: messages below this «is a request» probability skip project qualification
+  // Payments (ЮKassa; test shop until the owner connects the working one)
+  yookassaShopId: string;
+  yookassaSecretKey: string;
+  yookassaReturnUrl: string; // where the client lands after paying, e.g. https://t.me/<account>
+  // Auxiliary model for client dossiers (OpenAI-compatible; default 9router Gemini 3.8 Flash, needs stream:false)
+  auxBaseUrl: string;
+  auxApiKey: string;
+  auxModel: string;
+  // Image generation for executors and previews (fal.ai)
+  falKey: string;
+  imageModel: string; // fal model id for generation/editing
+}
+
+// «Исполнители»: services the AI manager sells and performs itself end to end.
+export type ServiceKind = 'homework' | 'marketplace_card' | 'image_gen' | 'copywriting';
+
+export interface Service {
+  id: number;
+  kind: ServiceKind; // which built-in executor performs it
+  name: string;
+  categoryId: number | null; // demand category it answers
+  enabled: boolean;
+  priceMin: number; // RUB; the agent quotes inside [priceMin, priceMax] by complexity
+  priceMax: number;
+  instructions: string; // the skill: what we do, what to ask, how to price, quality bar, delivery format
+  model: string; // LLM for this executor ('' = executor default)
+  previewEnabled: boolean; // a free sample (covers, one image, plan outline) before payment to sell the order
+  revisions: number; // free revisions after delivery
+}
+
+export type OrderStatus =
+  | 'collecting' // gathering wishes, inputs, assumptions
+  | 'quoted' // price named, waiting for agreement
+  | 'awaiting_payment'
+  | 'paid'
+  | 'in_progress'
+  | 'delivered'
+  | 'revision'
+  | 'done'
+  | 'cancelled'
+  | 'failed';
+
+export interface OrderFile {
+  path: string; // local file
+  role: 'input' | 'preview' | 'output';
+  name: string;
+  mime: string;
+}
+
+export interface Order {
+  id: number;
+  leadId: number;
+  serviceId: number;
+  status: OrderStatus;
+  price: number | null; // RUB
+  brief: string; // what the client wants + the agent's assumptions (clients rarely give a real brief)
+  files: OrderFile[];
+  paymentId: string | null;
+  paymentUrl: string | null;
+  paidAt: number | null;
+  result: string | null; // text deliverable or a summary of delivered files
+  revisionsUsed: number;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // Demand map: every analyzed message gets one category and a «request vs chatter» probability.
@@ -316,6 +381,7 @@ export type AppEvent =
   | { type: 'project:update'; project: Project }
   | { type: 'broadcast:update'; broadcast: Broadcast }
   | { type: 'crm:update'; card: ClientCard }
+  | { type: 'order:update'; order: Order }
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
@@ -418,6 +484,26 @@ export interface Api {
     update(id: number, patch: Partial<BroadcastInput> & { enabled?: boolean }): Promise<Broadcast>;
     remove(id: number): Promise<void>;
     runNow(id: number): Promise<{ posted: number; skipped: number; errors: number }>;
+  };
+  services: {
+    list(): Promise<Service[]>;
+    create(input: Omit<Service, 'id'>): Promise<Service>;
+    update(id: number, patch: Partial<Omit<Service, 'id'>>): Promise<Service>;
+    remove(id: number): Promise<void>;
+  };
+  orders: {
+    list(leadId?: number): Promise<Order[]>;
+    create(leadId: number, serviceId: number, brief: string): Promise<Order>;
+    update(id: number, patch: Partial<Pick<Order, 'brief' | 'price' | 'status'>>): Promise<Order>;
+    requestPayment(id: number): Promise<Order>; // creates the ЮKassa payment and sends the link to the client
+    markPaid(id: number): Promise<Order>; // manual confirmation
+    run(id: number): Promise<Order>; // execute now (paid orders; owner may force)
+    deliver(id: number): Promise<Order>; // send the result to the client
+    cancel(id: number): Promise<Order>;
+  };
+  dossier: {
+    path(leadId: number): Promise<string>; // the client's folder with profile, history and orders
+    open(leadId: number): Promise<void>; // reveal it in Finder
   };
   stats: {
     report(period: 'day' | 'week' | 'month'): Promise<StatsReport>;

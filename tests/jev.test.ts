@@ -11,7 +11,7 @@ const settings = (): Settings => ({
   llmModel: '',
   jevBaseUrl: 'https://api.openlux.ai/v1',
   jevApiKey: 'test-key',
-  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
+  jevModel: 'jev-1.14.0', handoffNotifyTo: '', ownerName: 'Кирилл', sttBaseUrl: '', sttApiKey: '', sttModel: '', ttsBaseUrl: '', ttsApiKey: '', ttsModel: '', ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
 });
 
 const project = (): Project => ({
@@ -44,6 +44,8 @@ function msg(id: number, text: string): TgMessage {
     senderUsername: 'a',
     senderIsBot: false,
     voice: null,
+    photo: null,
+    document: null,
     replyToMessageId: null,
     link: null,
     isOutgoing: false,

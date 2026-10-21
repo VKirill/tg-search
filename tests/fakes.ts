@@ -110,6 +110,8 @@ export class FakeEngine implements TelegramEngine {
       senderUsername: null,
       senderIsBot: false,
       voice: null,
+      photo: null,
+      document: null,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -129,6 +131,8 @@ export class FakeEngine implements TelegramEngine {
       senderUsername: null,
       senderIsBot: false,
       voice: null,
+      photo: null,
+      document: null,
       replyToMessageId: null,
       link: null,
       isOutgoing: true,
@@ -152,7 +156,7 @@ export class FakeEngine implements TelegramEngine {
     this.posted.push({ accountId, chatId, text });
     return {
       chatId, messageId: Date.now(), date: Date.now(), text, senderUserId: null, senderChatId: null,
-      senderName: null, senderUsername: null, senderIsBot: false, voice: null, replyToMessageId: null, link: null, isOutgoing: true,
+      senderName: null, senderUsername: null, senderIsBot: false, voice: null, photo: null, document: null, replyToMessageId: null, link: null, isOutgoing: true,
     };
   }
 
@@ -161,9 +165,28 @@ export class FakeEngine implements TelegramEngine {
     this.voiceSent.push({ accountId, chatId, filePath, durationSec });
     return {
       chatId, messageId: Date.now(), date: Date.now(), text: '', senderUserId: null, senderChatId: null,
-      senderName: null, senderUsername: null, senderIsBot: false, voice: { fileId: 1, durationSec }, replyToMessageId: null,
+      senderName: null, senderUsername: null, senderIsBot: false, voice: { fileId: 1, durationSec }, photo: null, document: null, replyToMessageId: null,
       link: null, isOutgoing: true,
     };
+  }
+  sentFiles: { kind: 'photo' | 'document'; chatId: number; filePath: string; caption?: string }[] = [];
+  private fileMsg(chatId: number): TgMessage {
+    return {
+      chatId, messageId: Date.now(), date: Date.now(), text: '', senderUserId: null, senderChatId: null, senderName: null,
+      senderUsername: null, senderIsBot: false, voice: null, photo: null, document: null, replyToMessageId: null, link: null, isOutgoing: true,
+    };
+  }
+  async sendPhoto(_accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage> {
+    this.sentFiles.push({ kind: 'photo', chatId, filePath, caption });
+    return this.fileMsg(chatId);
+  }
+  async sendDocument(_accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage> {
+    this.sentFiles.push({ kind: 'document', chatId, filePath, caption });
+    return this.fileMsg(chatId);
+  }
+  userPhotos = new Map<number, string>();
+  async getUserPhoto(_accountId: number, userId: number): Promise<string | null> {
+    return this.userPhotos.get(userId) ?? null;
   }
   files = new Map<number, string>();
   async downloadFile(_accountId: number, fileId: number): Promise<string> {
@@ -293,6 +316,8 @@ export function makeMsg(
     senderChatId: null,
     senderIsBot: false,
     voice: null,
+    photo: null,
+    document: null,
     senderName: 'Author',
     senderUsername: 'author',
     replyToMessageId: null,

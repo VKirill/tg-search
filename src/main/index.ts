@@ -66,6 +66,10 @@ app.whenReady().then(async () => {
     jevApiKey: s.jevApiKey || process.env.OPENLUX_API_KEY || '',
     sttApiKey: s.sttApiKey || openAiKey,
     ttsApiKey: s.ttsApiKey || openAiKey,
+    yookassaShopId: s.yookassaShopId || process.env.YOOKASSA_SHOP_ID || '',
+    yookassaSecretKey: s.yookassaSecretKey || process.env.YOOKASSA_SECRET_KEY || '',
+    auxApiKey: s.auxApiKey || process.env.NINEROUTER_API_KEY || '',
+    falKey: s.falKey || process.env.FAL_KEY || '',
   });
 
   const emit = (e: AppEvent) => {

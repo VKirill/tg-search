@@ -506,6 +506,32 @@ export class TdlEngine implements TelegramEngine {
     );
   }
 
+  async sendPhoto(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    return await this.sendContent(slot, chatId, {
+      _: 'inputMessagePhoto',
+      photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: filePath } },
+      ...(caption ? { caption: { _: 'formattedText', text: caption, entities: [] } } : {}),
+    });
+  }
+
+  async sendDocument(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    return await this.sendContent(slot, chatId, {
+      _: 'inputMessageDocument',
+      document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: filePath } },
+      ...(caption ? { caption: { _: 'formattedText', text: caption, entities: [] } } : {}),
+    });
+  }
+
+  async getUserPhoto(accountId: number, userId: number): Promise<string | null> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const u = await this.invoke(slot, { _: 'getUser', user_id: userId });
+    const big = u.profile_photo?.big;
+    if (!big?.id) return null;
+    return await this.downloadFile(accountId, big.id);
+  }
+
   async downloadFile(accountId: number, fileId: number): Promise<string> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const file = await this.invoke(slot, { _: 'downloadFile', file_id: fileId, priority: 1, offset: 0, limit: 0, synchronous: true });

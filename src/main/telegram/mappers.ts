@@ -108,6 +108,19 @@ export function replyToMessageId(msg: message): number | null {
   return null;
 }
 
+function photoOf(msg: message): TgMessage['photo'] {
+  if (msg.content._ !== 'messagePhoto') return null;
+  const sizes = msg.content.photo.sizes;
+  const largest = sizes[sizes.length - 1];
+  return largest ? { fileId: largest.photo.id } : null;
+}
+
+function documentOf(msg: message): TgMessage['document'] {
+  if (msg.content._ !== 'messageDocument') return null;
+  const d = msg.content.document;
+  return { fileId: d.document.id, name: d.file_name, mime: d.mime_type };
+}
+
 function voiceOf(msg: message): TgMessage['voice'] {
   if (msg.content._ !== 'messageVoiceNote') return null;
   const note = msg.content.voice_note;
@@ -137,6 +150,8 @@ export function mapMessage(
     senderUsername: opts.senderUsername ?? null,
     senderIsBot: opts.senderIsBot ?? false,
     voice: voiceOf(msg),
+    photo: photoOf(msg),
+    document: documentOf(msg),
     replyToMessageId: replyToMessageId(msg),
     link: buildPublicMessageLink(chatUsername, msg.id),
     isOutgoing: msg.is_outgoing,

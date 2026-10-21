@@ -161,7 +161,7 @@ describe('OpenAiManagerAi', () => {
       ttsBaseUrl: '',
       ttsApiKey: '',
       ttsModel: '',
-      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2',
+      ttsVoice: '', jevPricePerMTok: '0.042', sttPricePerMin: '0.006', ttsPricePerMin: '0.015', requestThreshold: '0.2', yookassaShopId: '', yookassaSecretKey: '', yookassaReturnUrl: '', auxBaseUrl: '', auxApiKey: '', auxModel: '', falKey: '', imageModel: '',
     });
     const ai = new OpenAiManagerAi(settings);
     const project = {

@@ -24,6 +24,8 @@ export interface TgMessage {
   senderUsername: string | null;
   senderIsBot: boolean; // chat moderation bots etc.: never leads
   voice: { fileId: number; durationSec: number } | null; // voice note (text is the caption, usually empty)
+  photo: { fileId: number } | null; // largest size of a photo message (homework, product photos)
+  document: { fileId: number; name: string; mime: string } | null;
   replyToMessageId: number | null;
   link: string | null; // public t.me link when the chat has a username
   isOutgoing: boolean;
@@ -75,6 +77,10 @@ export interface TelegramEngine {
   downloadFile(accountId: number, fileId: number): Promise<string>;
   // Private chat with a user (created if needed); its id is where DMs to that user go.
   ensurePrivateChat(accountId: number, userId: number): Promise<number>;
+  // Files and avatars for executors: photo/document with optional caption; the user's current profile photo (null if none)
+  sendPhoto(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage>;
+  sendDocument(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage>;
+  getUserPhoto(accountId: number, userId: number): Promise<string | null>;
 
   // Manual client («Чаты»)
   listChats(accountId: number, limit: number): Promise<{ chat: TgChat; unreadCount: number; last: TgMessage | null }[]>;
