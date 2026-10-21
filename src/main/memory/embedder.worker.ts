@@ -19,7 +19,7 @@ type Job =
 
 async function handle(job: Job) {
   if (job.type === 'unload') {
-    unloadEmbedderModel();
+    await unloadEmbedderModel();
     parentPort!.postMessage({ id: job.id, ok: true });
     return;
   }

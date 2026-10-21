@@ -17,6 +17,7 @@ import { OpenAiSpeech } from './ai/speech';
 import { JevCategorizer } from './ai/categorizer';
 import { createExecutors } from './executors/registry';
 import { setUsageSink } from './usage';
+import { startMemoryWatch } from './diagnostics';
 import { registerMediaProtocol, registerMediaSchemes } from './media';
 import { YooKassaProvider } from './payments/yookassa';
 
@@ -124,6 +125,11 @@ app.whenReady().then(async () => {
 
   createWindow();
   await handlers.start();
+  startMemoryWatch({
+    dataDir,
+    processes: () => app.getAppMetrics().map((m) => ({ type: m.type, mb: m.memory.workingSetSize / 1024 })),
+    relieve: () => handlers.relieveMemory(),
+  });
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 

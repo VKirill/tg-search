@@ -695,6 +695,7 @@ export function createMemoryStore(deps: MemoryStoreDeps): MemoryStoreApi {
   }
 
   const api: MemoryStoreApi = {
+    releaseModel: () => embedder.stop(), // terminates the worker; the next embedding starts a fresh one
     ensureClient,
     clientForLead,
     context,

@@ -26,5 +26,6 @@ export interface MemoryStore {
   // Hooks from the app's event route: capture assets, compact episodes, extract facts
   onMessage(message: ChatMessage): void;
   onOrder(order: Order): void;
+  releaseModel(): void; // unload the local embedding model now (memory pressure); it reloads on the next request
   stop(): void;
 }

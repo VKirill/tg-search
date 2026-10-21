@@ -58,7 +58,7 @@ export interface AppDeps {
   revealInFolder?: (path: string) => Promise<void>;
 }
 
-export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
+export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void>; relieveMemory(): void };
 
 export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, openExternal, speech, dataDir } = deps;
@@ -238,6 +238,9 @@ export function createApp(deps: AppDeps): AppHandlers {
       billing?.start();
     },
 
+    relieveMemory() {
+      memory.releaseModel();
+    },
     async stop() {
       billing?.stop();
       orders.stopPoller();

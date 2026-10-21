@@ -265,6 +265,7 @@ describe('operator agent', () => {
       },
       search: () => ({ facts: [], episodes: [], assets }),
       searchAsync: async () => ({ facts: [], episodes: [], assets }),
+      releaseModel: () => {},
       addAsset: () => {
         throw new Error('no');
       },
