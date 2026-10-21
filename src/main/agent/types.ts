@@ -33,6 +33,8 @@ export interface OperatorTurnOptions {
   projectOverride?: Project;
   /** After owner approval/denial: one turn with the tool outcome injected. */
   approvalContinuation?: { tool: string; output: string };
+  /** A system instruction for this turn, e.g. the agent writes first (daily check-in) */
+  systemNote?: string;
 }
 
 export interface Operator {

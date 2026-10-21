@@ -209,6 +209,15 @@ tgs call spam.unblockChat <chatId>
 
 Каналы и чаты, где аккаунт админ, автоматически не блокируются.
 
+### 12. Свои люди (задания бесплатно, ежедневное касание)
+
+```bash
+tgs call trusted.list
+tgs call trusted.save '{"username":"name","free":true,"dailyCheckin":true,"checkinHour":11}'
+tgs call trusted.remove '"name"'
+tgs call trusted.checkinNow     # написать сейчас тем, с кем сегодня не общались — только по просьбе пользователя
+```
+
 ## Правила безопасности для Claude
 
 1. **Отправка сообщений**: не включать `autopilot.aiReply`, `manager.enabled`, `broadcasts.enabled` без явного подтверждения пользователя в этом разговоре.

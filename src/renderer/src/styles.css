@@ -2955,3 +2955,24 @@ button.chip:hover {
   gap: 8px;
   font-size: 13px;
 }
+
+.trusted-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trusted-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.trusted-list__name {
+  min-width: 160px;
+  font-weight: 500;
+}

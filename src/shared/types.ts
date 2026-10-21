@@ -375,6 +375,17 @@ export interface SpamTemplate {
   lastSeenAt: number;
 }
 
+// «Свои люди»: their tasks are free (training the agent on real work); optional daily message from the agent
+export interface TrustedContact {
+  username: string; // without @, lowercase
+  userId: number | null; // learned on first contact
+  free: boolean;
+  dailyCheckin: boolean; // the agent writes first once a day to ask for tasks
+  checkinHour: number; // local hour, 0..23
+  lastCheckinAt: number | null;
+  note: string;
+}
+
 // «Новости»: channels read without subscribing; their posts are scored by Jev against Settings.newsInterests
 export interface NewsChannel {
   id: number;
@@ -758,6 +769,12 @@ export interface Api {
     chats(): Promise<SpamChat[]>; // the spam-chat blocklist
     blockChat(accountId: number, chatId: number): Promise<SpamChat>; // owner: leave on every account and block
     unblockChat(tgChatId: number): Promise<void>; // joinable again; its sources go back to candidates
+  };
+  trusted: {
+    list(): Promise<TrustedContact[]>;
+    save(contact: Pick<TrustedContact, 'username'> & Partial<Pick<TrustedContact, 'free' | 'dailyCheckin' | 'checkinHour' | 'note'>>): Promise<TrustedContact>;
+    remove(username: string): Promise<void>;
+    checkinNow(): Promise<void>; // run the daily check-in now (for those not contacted today)
   };
   news: {
     channels(): Promise<NewsChannel[]>;

@@ -3,12 +3,13 @@ import { join } from 'node:path';
 import type { AgentTool } from '../types';
 import type { DialogTurn } from '../../ai/types';
 import { sendMessage } from '../../pipeline/outreach';
+import { isFreeLead } from '../../trusted';
 import type { ToolHostDeps } from './deps';
 
 function dialogHistory(deps: ToolHostDeps, leadId: number): DialogTurn[] {
   const lead = deps.db.getLead(leadId);
   const messages = deps.db.listMessages(leadId);
-  const turns: DialogTurn[] = [{ direction: 'in', text: lead.text }];
+  const turns: DialogTurn[] = lead.text.trim() ? [{ direction: 'in', text: lead.text }] : [];
   for (const m of messages) turns.push({ direction: m.direction, text: m.text });
   return turns;
 }
@@ -26,9 +27,10 @@ export function createRunTaskTool(deps: ToolHostDeps): AgentTool {
     async run(args, ctx) {
       const instructions = String(args.instructions ?? '').trim();
       if (!instructions) return 'Ошибка: пустое поручение';
-      if (ctx.clientId == null) return 'Клиент не привязан';
+      if (ctx.clientId == null && !isFreeLead(deps.db, deps.db.getLead(ctx.leadId))) return 'Клиент не привязан';
       if (ctx.dryRun) return `[dryRun] Запустили бы ассистента: ${instructions.slice(0, 200)}`;
-      if (!deps.billing?.consumeTask(ctx.clientId)) {
+      const free = isFreeLead(deps.db, deps.db.getLead(ctx.leadId));
+      if (!free && (ctx.clientId == null || !deps.billing?.consumeTask(ctx.clientId))) {
         return 'нужна подписка или разовый заказ';
       }
       const services = deps.db.listServices().filter((s) => s.kind === 'assistant' && s.enabled);

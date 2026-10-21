@@ -537,6 +537,14 @@ export class Db {
   }
 
   // Dialog messages
+  // Leads whose latest message is from the client and newer than sinceMs
+  leadsAwaitingReply(sinceMs: number): number[] {
+    return this.all(
+      `SELECT m.lead_id FROM messages m WHERE m.id = (SELECT id FROM messages WHERE lead_id = m.lead_id ORDER BY date DESC, id DESC LIMIT 1)
+         AND m.direction = 'in' AND m.date >= ?`,
+      sinceMs,
+    ).map((r) => r.lead_id as number);
+  }
   listMessages(leadId: number): ChatMessage[] {
     return this.all('SELECT * FROM messages WHERE lead_id = ? ORDER BY date, id', leadId).map(toMessage);
   }

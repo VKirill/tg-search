@@ -28,6 +28,7 @@ import {
   mapUserToMe,
   senderIdsFromMessage,
 } from './mappers';
+import { markdownToFormatted } from './markdown';
 import type { TelegramEngine, TgChat, TgLoginResult, TgMe, TgMessage } from './types';
 
 const API_SETTINGS_ERROR = 'Укажите api_id и api_hash Telegram в настройках';
@@ -543,7 +544,7 @@ export class TdlEngine implements TelegramEngine {
     return await this.sendContent(slot, chatId, {
       _: 'inputMessagePhoto',
       photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: filePath } },
-      ...(caption ? { caption: { _: 'formattedText', text: caption, entities: [] } } : {}),
+      ...(caption ? { caption: markdownToFormatted(caption) } : {}),
     });
   }
 
@@ -552,7 +553,7 @@ export class TdlEngine implements TelegramEngine {
     return await this.sendContent(slot, chatId, {
       _: 'inputMessageDocument',
       document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: filePath } },
-      ...(caption ? { caption: { _: 'formattedText', text: caption, entities: [] } } : {}),
+      ...(caption ? { caption: markdownToFormatted(caption) } : {}),
     });
   }
 
@@ -930,7 +931,7 @@ export class TdlEngine implements TelegramEngine {
     return this.sendContent(
       slot,
       chatId,
-      { _: 'inputMessageText', text: { _: 'formattedText', text, entities: [] } },
+      { _: 'inputMessageText', text: markdownToFormatted(text) },
       replyToMessageId,
     );
   }

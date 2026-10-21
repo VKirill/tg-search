@@ -44,6 +44,7 @@ import { listAgentSteps } from './agent/store';
 import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
 import { createSpamChats, guardSpamJoins, spamChatReason, SPAM_CHAT_CHECK_MS } from './dedupe/spamChats';
 import { createNews, NEWS_INTERVAL_MS } from './news';
+import { CHECKIN_TICK_MS, createTrusted } from './trusted';
 import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
@@ -238,6 +239,9 @@ export function createApp(deps: AppDeps): AppHandlers {
     db,
   });
   const operator = managerAgent.getOperator();
+  const trusted = createTrusted({ db, engine, emit, checkin: (leadId, note) => managerAgent.checkin(leadId, note) });
+  let checkinTimer: ReturnType<typeof setInterval> | null = null;
+  const checkinTick = () => void trusted.checkinTick().catch((err) => console.error('checkin', err));
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
   const realtime = createRealtime({ ...pipeline, dataDir });
   const importer = createImporter({ db, engine, emit });
@@ -249,7 +253,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       engine.onPrivateMessage((accountId, msg) => {
         void (async () => {
           if (msg.senderUserId == null) return;
-          const leads = db.findLeadsByAuthor(msg.senderUserId);
+          const known = db.findLeadsByAuthor(msg.senderUserId);
+          const leads = known.length ? known : [trusted.leadForIncoming(msg, accountId)].filter((l) => l != null);
           if (leads.length === 0) return;
           const lead = leads[0];
           const project = db.getProject(lead.projectId);
@@ -309,12 +314,16 @@ export function createApp(deps: AppDeps): AppHandlers {
       pruneFingerprints(db);
       dedupe.learnExistingLeads();
       spamChatTimer = setInterval(checkSpamChats, SPAM_CHAT_CHECK_MS);
+      checkinTimer = setInterval(checkinTick, CHECKIN_TICK_MS);
+      setTimeout(checkinTick, 90_000).unref?.();
       setTimeout(checkSpamChats, 60_000).unref?.();
       if (news.channels().length) {
         newsTimer = setInterval(readNews, NEWS_INTERVAL_MS);
         setTimeout(readNews, 120_000).unref?.();
       }
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
+      // replies that were waiting on a timer when the app stopped: dialogs whose last message is incoming and fresh
+      for (const leadId of db.leadsAwaitingReply(Date.now() - 2 * 3600_000)) managerAgent.onIncoming(leadId);
       realtime.start();
       autopilot.start();
       broadcaster.start();
@@ -332,6 +341,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       spamChatTimer = null;
       if (newsTimer) clearInterval(newsTimer);
       newsTimer = null;
+      if (checkinTimer) clearInterval(checkinTimer);
+      checkinTimer = null;
       billing?.stop();
       orders.stopPoller();
       broadcaster.stop();
@@ -608,6 +619,12 @@ export function createApp(deps: AppDeps): AppHandlers {
       chats: async () => spamChats.list(),
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
+    },
+    trusted: {
+      list: async () => trusted.list(),
+      save: async (c) => trusted.save(c),
+      remove: async (username) => trusted.remove(username),
+      checkinNow: () => trusted.checkinTick(new Date(), true),
     },
     news: {
       channels: async () => news.channels(),

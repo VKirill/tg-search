@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Settings } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
+import { TrustedSection } from './TrustedSection';
 import { useToast } from './Toast';
 
 const TTS_VOICES = ['alloy', 'nova', 'shimmer', 'echo', 'onyx', 'fable', 'sage', 'coral'];
@@ -61,6 +62,7 @@ export function SettingsView() {
           <div className="field"><label>Имя (помощник)</label><input value={s.ownerName} onChange={(e) => setS({ ...s, ownerName: e.target.value })} /></div>
           <div className="field"><label>Кому сообщать о передаче (@username)</label><input value={s.handoffNotifyTo} onChange={(e) => setS({ ...s, handoffNotifyTo: e.target.value })} /></div>
         </section>
+        <TrustedSection />
         <section>
           <h2 className="section-title">Jev</h2>
           <div className="field"><label>Base URL</label><input value={s.jevBaseUrl} onChange={(e) => setS({ ...s, jevBaseUrl: e.target.value })} /></div>

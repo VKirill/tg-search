@@ -14,6 +14,7 @@ import type { Operator, OperatorResult } from '../agent/types';
 import type { ExecutorRegistry } from '../executors/types';
 import type { AgentDefsApi } from '../agent/defs';
 import type { ApprovalsApi } from '../agent/approvals';
+import { isTrustedLead } from '../trusted';
 import type { SkillsStore } from '../skills';
 
 export interface OrdersHooks {
@@ -43,7 +44,7 @@ export interface ManagerAgentDeps extends OutreachDeps {
 }
 
 function buildDialogHistory(lead: Lead, messages: ChatMessage[]): DialogTurn[] {
-  const turns: DialogTurn[] = [{ direction: 'in', text: lead.text }];
+  const turns: DialogTurn[] = lead.text.trim() ? [{ direction: 'in', text: lead.text }] : [];
   for (const m of messages) turns.push({ direction: m.direction, text: m.text });
   return turns;
 }
@@ -195,7 +196,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     return op.steps.some((s) => s.tool === 'handoff' && s.ok);
   }
 
-  async function runReply(leadId: number) {
+  async function runReply(leadId: number, systemNote?: string) {
     timers.delete(leadId);
     let lead: Lead;
     let project: Project;
@@ -205,18 +206,20 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     } catch {
       return;
     }
-    if (!project.manager.enabled || lead.handoff) return;
+    // «свои люди» are served even when auto-replies to clients are off, without the reply cap
+    const trusted = isTrustedLead(deps.db, lead);
+    if ((!project.manager.enabled && !trusted) || lead.handoff) return;
 
     const messages = deps.db.listMessages(leadId);
     const history = buildDialogHistory(lead, messages);
 
-    if (countAutoRepliesAfterFirstIn(messages) >= project.manager.maxReplies) {
+    if (!trusted && countAutoRepliesAfterFirstIn(messages) >= project.manager.maxReplies) {
       await doHandoff(project, lead, 'Лимит ответов ИИ', '', history);
       return;
     }
 
     try {
-      const op = await getOperator().turn(leadId);
+      const op = await getOperator().turn(leadId, systemNote ? { systemNote } : undefined);
       const result = operatorToManagerResult(op);
       if (result.handoff) {
         if (!handoffAlreadyDone(op)) {
@@ -240,7 +243,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
         if (!gate.ok) {
           const waitMs = gate.reason === 'pause' ? gate.waitMs ?? project.manager.replyDelaySec * 1000 : 60_000;
           const timer = setTimeout(() => {
-            runReply(leadId).catch((err) => console.error('manager retry', err));
+            runReply(leadId, systemNote).catch((err) => console.error('manager retry', err));
           }, waitMs);
           timers.set(leadId, timer);
           return;
@@ -278,7 +281,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
   function onIncoming(leadId: number) {
     const lead = deps.db.getLead(leadId);
     const project = deps.db.getProject(lead.projectId);
-    if (!project.manager.enabled || lead.handoff) return;
+    if ((!project.manager.enabled && !isTrustedLead(deps.db, lead)) || lead.handoff) return;
 
     clearLeadTimer(leadId);
     const delayMs = project.manager.replyDelaySec * 1000;
@@ -292,5 +295,8 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     for (const id of timers.keys()) clearLeadTimer(id);
   }
 
-  return { onIncoming, stop, getOperator };
+  // The agent writes first (daily check-in of a trusted contact)
+  const checkin = (leadId: number, note: string) => runReply(leadId, note);
+
+  return { onIncoming, stop, getOperator, checkin };
 }

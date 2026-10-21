@@ -16,6 +16,7 @@ import type { Billing } from '../billing/types';
 import type { PaymentProvider } from '../payments/types';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { sendMessage, type OutreachDeps } from './outreach';
+import { isFreeLead } from '../trusted';
 import { listAuthorizedProjectAccounts } from './accounts';
 
 const POLL_MS = 30_000;
@@ -86,7 +87,7 @@ async function savePhotoConsent(deps: OrdersDeps, lead: Lead, order: Order): Pro
 
 function dialogHistory(deps: OrdersDeps, lead: Lead): DialogTurn[] {
   const messages = deps.db.listMessages(lead.id);
-  const turns: DialogTurn[] = [{ direction: 'in', text: lead.text }];
+  const turns: DialogTurn[] = lead.text.trim() ? [{ direction: 'in', text: lead.text }] : [];
   for (const m of messages) turns.push({ direction: m.direction, text: m.text });
   return turns;
 }
@@ -140,6 +141,11 @@ export function createOrders(deps: OrdersDeps) {
 
   async function requestPayment(orderId: number): Promise<Order> {
     const order = deps.db.getOrder(orderId);
+    // «свои люди»: tasks are free — straight to work
+    if (isFreeLead(deps.db, deps.db.getLead(order.leadId))) {
+      patchOrder(orderId, { price: 0 });
+      return markPaid(orderId);
+    }
     const service = deps.db.getService(order.serviceId);
     if (order.price == null || !priceInRange(service, order.price)) {
       throw new Error(`Цена должна быть от ${service.priceMin} до ${service.priceMax} ₽`);

@@ -32,6 +32,7 @@ import type {
   NewsChannel,
   NewsItem,
   SpamChat,
+  TrustedContact,
   SpamTemplate,
   StatsReport,
   Source,
@@ -516,6 +517,10 @@ const cards: Record<number, ClientCard> = {
   5: { leadId: 5, stage: 'lost', summary: 'Скрыт как нерелевантный.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
   6: { leadId: 6, stage: 'new', summary: 'Другая тематика.', anamnesis: emptyAnamnesis(), brief: '', notes: '', completeness: 0, updatedAt: now, briefUpdatedAt: null },
 };
+
+const mockTrusted: TrustedContact[] = [
+  { username: 'tester_friend', userId: 501, free: true, dailyCheckin: true, checkinHour: 11, lastCheckinAt: Date.now() - 3600_000, note: '' },
+];
 
 const mockNewsChannels: NewsChannel[] = [
   { id: 1, tgChatId: -1009101, title: 'ИИ для маркетолога', username: 'ai_marketing_news', enabled: true, lastMessageId: 812, lastCheckedAt: Date.now() - 600_000, createdAt: Date.now() - 86400_000 },
@@ -1908,6 +1913,24 @@ export function createMockApi(): Api {
         const i = mockSpamChats.findIndex((c) => c.tgChatId === tgChatId);
         if (i >= 0) mockSpamChats.splice(i, 1);
       },
+    },
+    trusted: {
+      async list() {
+        return mockTrusted.map((c) => ({ ...c }));
+      },
+      async save(c) {
+        const username = c.username.replace(/^@/, '').toLowerCase();
+        const prev = mockTrusted.find((x) => x.username === username);
+        const v = { username, userId: prev?.userId ?? null, free: c.free ?? true, dailyCheckin: c.dailyCheckin ?? false, checkinHour: c.checkinHour ?? 11, lastCheckinAt: prev?.lastCheckinAt ?? null, note: c.note ?? '' };
+        if (prev) Object.assign(prev, v);
+        else mockTrusted.push(v);
+        return { ...v };
+      },
+      async remove(username) {
+        const i = mockTrusted.findIndex((x) => x.username === username);
+        if (i >= 0) mockTrusted.splice(i, 1);
+      },
+      async checkinNow() {},
     },
     news: {
       async channels() {

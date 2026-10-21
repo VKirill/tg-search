@@ -17,6 +17,7 @@ import { gateToolCall } from './approvals';
 import { resolveAgentModel } from './model';
 import { createDelegateTool } from './tools/delegate';
 import { upsellBlock } from './upsell';
+import { freeClientBlock, isFreeLead } from '../trusted';
 import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
@@ -58,7 +59,8 @@ export interface OperatorDeps extends OutreachDeps {
 }
 
 function buildDialogHistory(lead: Lead, messages: ChatMessage[]) {
-  const turns: { direction: 'in' | 'out'; text: string }[] = [{ direction: 'in', text: lead.text }];
+  // a personal-chat lead (a trusted contact) has no publication text
+  const turns: { direction: 'in' | 'out'; text: string }[] = lead.text.trim() ? [{ direction: 'in', text: lead.text }] : [];
   for (const m of messages) turns.push({ direction: m.direction, text: m.text });
   return turns;
 }
@@ -100,11 +102,12 @@ export function createOperator(deps: OperatorDeps): Operator {
     card: import('../../shared/types').ClientCard | undefined,
     dryRun: boolean,
     continuation?: OperatorTurnOptions['approvalContinuation'],
+    systemNote?: string,
   ): Promise<OperatorResult> {
     let lastErr: unknown;
     for (let i = 0; i < 2; i++) {
       try {
-        return await runToolLoop(project, lead, history, mgr, card, dryRun, continuation);
+        return await runToolLoop(project, lead, history, mgr, card, dryRun, continuation, systemNote);
       } catch (e) {
         lastErr = e;
         console.error('operator turn failed', e);
@@ -137,6 +140,7 @@ export function createOperator(deps: OperatorDeps): Operator {
     card: import('../../shared/types').ClientCard | undefined,
     dryRun: boolean,
     continuation?: OperatorTurnOptions['approvalContinuation'],
+    systemNote?: string,
   ): Promise<OperatorResult> {
     const owner = deps.getSettings().ownerName;
     const messages = deps.db.listMessages(lead.id);
@@ -149,7 +153,7 @@ export function createOperator(deps: OperatorDeps): Operator {
     const skillsBlock = deps.skills?.formatAvailableBlock() ?? '';
     const skillHint = deps.skills ? await deps.skills.hintForClientMessage(lastIn) : '';
     const skillsCtx = [skillsBlock, skillHint].filter(Boolean).join('\n\n');
-    const upsell = upsellBlock(deps.db, lead.id);
+    const upsell = isFreeLead(deps.db, lead) ? freeClientBlock(owner) : upsellBlock(deps.db, lead.id);
     const skillsPart = [skillsCtx, upsell].filter(Boolean).map((b) => `${b}\n\n`).join('');
 
     const agentName = (project.agent || 'manager').trim() || 'manager';
@@ -198,6 +202,7 @@ export function createOperator(deps: OperatorDeps): Operator {
         content: t.text,
       })),
     ];
+    if (systemNote) chatMessages.push({ role: 'user', content: systemNote });
     if (continuation) {
       chatMessages.push({
         role: 'user',
@@ -332,7 +337,7 @@ export function createOperator(deps: OperatorDeps): Operator {
       }
       const servicesCtx = managerServicesContext(deps.db.listServices(), lead.id ? deps.db.listOrders(lead.id) : []);
       const mgrWithCatalog = { ...mgr, prompt: `${mgr.prompt}\n\n${servicesCtx}` };
-      return runWithFallback(project, lead, history, mgrWithCatalog, card, dryRun, opts?.approvalContinuation);
+      return runWithFallback(project, lead, history, mgrWithCatalog, card, dryRun, opts?.approvalContinuation, opts?.systemNote);
     },
   };
 }
