@@ -4004,3 +4004,9 @@ button.chip:hover {
 .channel-post__when {
   width: auto;
 }
+.channel-post__cover {
+  max-width: 420px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}

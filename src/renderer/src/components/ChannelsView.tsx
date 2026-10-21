@@ -18,6 +18,7 @@ import {
 } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
 import { formatLeadDate } from '../utils/format';
+import { mediaDisplayUrl } from '../utils/media';
 import { useToast } from './Toast';
 
 const ITEM_KIND: Record<string, string> = { news: 'новость', deal: 'акция', event: 'событие' };
@@ -214,6 +215,7 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
         <div className="helper-chat__opts">
           <label><input type="checkbox" checked={d.enabled} onChange={(e) => patch({ enabled: e.target.checked })} /> работает</label>
           <label><input type="checkbox" checked={d.autopublish} onChange={(e) => patch({ autopublish: e.target.checked })} /> публиковать сам, без одобрения</label>
+          <label><input type="checkbox" checked={d.cover} onChange={(e) => patch({ cover: e.target.checked })} /> обложка к каждому посту</label>
         </div>
         <div className="groups-inline">
           <label>Аккаунт
@@ -245,6 +247,13 @@ function DeskEditor({ desk, accounts, onSaved, onRemoved, fail }: {
           <textarea rows={3} value={d.about} placeholder="Город, темы, для кого: например, новости, акции и события Валенсии для жителей" onChange={(e) => patch({ about: e.target.value })} />
           <p className="field-hint">По этому описанию Jev решает, что подходит каналу, а редактор — о чём и для кого писать.</p>
         </div>
+        {d.cover && (
+          <div className="field">
+            <label>Стиль обложек</label>
+            <input className="text-input" value={d.coverStyle} placeholder="Например: тёплая плоская иллюстрация, бумажная фактура, оранжевый и синий" onChange={(e) => patch({ coverStyle: e.target.value })} />
+            <p className="field-hint">Обложку рисует Muse Image по сюжетам выпуска: мета-промт превращает их в сцену-афишу. Текст на картинке — только название канала и дата.</p>
+          </div>
+        )}
         <div className="field">
           <label>Редактор: стиль и правила</label>
           <textarea rows={6} value={d.editorPrompt} onChange={(e) => patch({ editorPrompt: e.target.value })} />
@@ -674,6 +683,7 @@ function PostCard({ post, reload, fail }: { post: ChannelPost; reload: () => Pro
         {post.status === 'draft' && post.scheduledAt && <span className="tag tag--soft">выйдет {formatLeadDate(post.scheduledAt)}</span>}
       </div>
       {post.error && <p className="crm-muted">{post.error}</p>}
+      {post.image && !/^https?:/.test(post.image) && <img className="channel-post__cover" src={mediaDisplayUrl(post.image)} alt="" />}
       {post.status === 'published' && (
         <div className="channel-row">
           <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => confirm('Удалить пост из канала? Его сюжеты вернутся в работу.') && act(() => api.channels.unpublish(post.id))}>Удалить из канала</button>
@@ -694,6 +704,7 @@ function PostCard({ post, reload, fail }: { post: ChannelPost; reload: () => Pro
             title="Выйдет само в это время"
             onChange={(e) => act(() => api.channels.schedule(post.id, e.target.value ? new Date(e.target.value).getTime() : null))}
           />
+          <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => act(() => api.channels.redrawCover(post.id))}>Новая обложка</button>
           <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => act(() => api.channels.rejectPost(post.id))}>Отклонить</button>
         </div>
       )}

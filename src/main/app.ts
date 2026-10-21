@@ -65,7 +65,7 @@ import { postSystemOne } from './ai/jev';
 import { llmGateway } from './ai/gateway';
 import { parseJsonFromLlm } from './ai/llm';
 import { sendMediaMessage, waitForSendWindow } from './pipeline/outreach';
-import { fileToDataUri } from './executors/images';
+import { fileToDataUri, generateImages } from './executors/images';
 import { agentRole, createAiEngine } from './opencode/engine';
 import type { ToolCatalogEntry } from './opencode/bridge';
 import { TOOL_PREFIX } from './opencode/config';
@@ -476,6 +476,14 @@ export function createApp(deps: AppDeps): AppHandlers {
       });
     },
     embed: (text) => embedder.embedDocument(text),
+    // a cover for a channel post: Muse Image (the app's image model), landscape for the top of a Rich Message
+    async cover(prompt, deskId) {
+      if (!getSettings().falKey.trim()) return null;
+      const [file] = await generateImages(getSettings, join(dataDir, 'channels', String(deskId), 'covers'), {
+        prompt, namePrefix: `cover-${Date.now()}`, role: 'output', aspectRatio: '4:3',
+      });
+      return file?.path ?? null;
+    },
     async sameStory(item, candidates) {
       if (!getSettings().jevApiKey.trim()) throw new Error('no Jev'); // similarity alone decides
       const questions: Record<string, object> = {};
@@ -1000,6 +1008,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       publish: async (id) => channels.publish(id),
       rejectPost: async (id) => channels.rejectPost(id),
       unpublish: async (id) => channels.unpublish(id),
+      redrawCover: async (id) => channels.redrawCover(id),
     },
     assistants: {
       status: async () => integrations.status(),

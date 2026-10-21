@@ -678,6 +678,8 @@ export interface ChannelDesk {
   links: 'none' | 'sources'; // none — posts are the channel's own stories: no links, no mention of sources
   categories: ChannelCategory[];
   audiences: ChannelAudience[];
+  cover: boolean; // each post gets a cover drawn for it (Muse Image, from the issue's stories)
+  coverStyle: string; // the covers' art direction, e.g. «warm flat illustration, orange and blue»; empty — a neutral default
   createdAt: number;
 }
 
@@ -1294,7 +1296,8 @@ export interface Api {
     savePost(id: number, text: string): Promise<ChannelPost>;
     publish(id: number): Promise<ChannelPost>;
     rejectPost(id: number): Promise<void>;
-    unpublish(id: number): Promise<ChannelPost>; // a published post deleted from the channel; its stories return to work
+    unpublish(id: number): Promise<ChannelPost>;
+    redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again // a published post deleted from the channel; its stories return to work
   };
   assistants: {
     status(): Promise<AiAssistantsStatus>;

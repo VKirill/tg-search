@@ -552,7 +552,7 @@ const mockScenarios: HelperScenarioDef[] = BUILTIN_HELPER_SCENARIOS.map((x) => (
 const mockDesks: ChannelDesk[] = [{
   id: 1, chatId: -1009000000001, title: 'Sevilla al día', username: 'city_demo', accountId: 1, enabled: true, language: 'español',
   about: 'Noticias, ofertas y eventos de Sevilla para residentes', editorPrompt: '', autopublish: false, threshold: 0.6,
-  area: 'Sevilla y su área metropolitana', links: 'none', categories: DEFAULT_CHANNEL_CATEGORIES, audiences: DEFAULT_CHANNEL_AUDIENCES,
+  area: 'Sevilla y su área metropolitana', links: 'none', categories: DEFAULT_CHANNEL_CATEGORIES, audiences: DEFAULT_CHANNEL_AUDIENCES, cover: true, coverStyle: '',
   slots: [{ time: '09:00', kind: 'digest' }, { time: '19:00', kind: 'deals' }], createdAt: Date.now() - 86400_000,
 }];
 const mockChannelSources: ChannelSource[] = [
@@ -2081,6 +2081,9 @@ export function createMockApi(): Api {
         const p = mockChannelPosts.find((x) => x.id === id)!;
         Object.assign(p, { status: 'published', publishedAt: Date.now(), messageId: 101 });
         return p;
+      },
+      async redrawCover(id) {
+        return mockChannelPosts.find((x) => x.id === id)!;
       },
       async unpublish(id) {
         const p = mockChannelPosts.find((x) => x.id === id)!;

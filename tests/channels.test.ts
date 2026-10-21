@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
-import { articleText, createChannels, stripLinks } from '../src/main/channels';
+import { createChannels, parseIssue, renderIssue, stripLinks } from '../src/main/channels';
 import { parseFeed } from '../src/main/channels/feeds';
 import { FakeEngine, makeMsg } from './fakes';
 
@@ -48,9 +48,15 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
     llm: async (prompt, { title }) => {
       prompts.push(prompt);
       // a search page → concrete items; a JSON array with text around it, as models write it
-      if (title === 'channel-factcheck') return /<post>\n([\s\S]*?)\n<\/post>/.exec(prompt)?.[1] ?? '';
+      if (title === 'channel-factcheck') return /<issue>\n([\s\S]*?)\n<\/issue>/.exec(prompt)?.[1] ?? '';
+      if (title === 'channel-cover-prompt') return 'A poster of the city day';
       if (title === 'channel-extract') return 'Aquí tienes:\n```json\n[{"title": "2x1 en horchata en Triana", "text": "Solo este fin de semana", "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"}]\n```';
-      return '**🌆 Sevilla hoy**\n\n- La EMT amplía el servicio. [Fuente](https://news.example/emt)';
+      // the editor writes the issue as data; a link slipped into a field must not survive
+      return JSON.stringify({
+        title: 'Sevilla hoy · miércoles 21', lead: 'Lo que importa hoy.',
+        sections: [{ title: '📰 La ciudad', items: [{ emoji: '🚌', title: 'La EMT amplía el servicio', text: 'Tres líneas nocturnas nuevas. [Fuente](https://news.example/emt)', when: 'desde el lunes', where: 'Plaza Nueva, Sevilla', price: '', tags: ['🆓 gratis'] }] }],
+        footer: '📲 Síguenos: @city_demo · vía @other_channel',
+      });
     },
     // «oferta» is a deal; «fútbol» is off-topic; «Madrid» is outside the channel's area
     score: async (_desk, items) => (scored.push(...items.map((it) => it.title)), items.map((it) => (
@@ -74,6 +80,31 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
   });
   return { db, engine, channels, acc, prompts, scored, editor };
 }
+
+describe('issue layout', () => {
+  it('title, lead as a quote, sections divided, items with tags and a when · where (map) · price line', () => {
+    const issue = parseIssue(JSON.stringify({
+      title: 'Valencia Hoy · 21 oct', lead: 'Un finde lleno de planes.',
+      sections: [
+        { title: '📰 La ciudad', items: [{ emoji: '🏗️', title: 'Benimaclet tendrá 1.345 viviendas', text: 'El pleno lo aprueba el viernes.', when: '', where: 'Benimaclet', price: '', tags: [] }] },
+        { title: '🎭 Agenda', items: [
+          { emoji: '🎶', title: 'Tardeo remember', text: 'Éxitos de los 90.', when: 'sáb 24, 17:00', where: 'Recinto Ágora, Torrent', price: 'gratis con invitación', tags: ['🆓 gratis', '🌙 tarde'] },
+          { emoji: '', title: '', text: 'sin título: fuera' },
+        ] },
+        { title: 'vacía', items: [] },
+      ],
+      footer: '📲 Síguenos',
+    }));
+    expect(issue.sections).toHaveLength(2);
+    expect(renderIssue(issue, { own: true, username: 'x' })).toBe([
+      '## Valencia Hoy · 21 oct', '', '> Un finde lleno de planes.', '', '---', '', '### 📰 La ciudad', '',
+      '**🏗️ Benimaclet tendrá 1.345 viviendas**', 'El pleno lo aprueba el viernes.', '📍 Benimaclet', '', '---', '', '### 🎭 Agenda', '',
+      '**🎶 Tardeo remember** · 🆓 gratis · 🌙 tarde', 'Éxitos de los 90.',
+      '🗓 sáb 24, 17:00 · 📍 [Recinto Ágora, Torrent](https://www.google.com/maps/search/?api=1&query=Recinto%20%C3%81gora%2C%20Torrent) · 💶 gratis con invitación',
+      '', '---', '', '📲 Síguenos',
+    ].join('\n'));
+  });
+});
 
 describe('own stories', () => {
   it('a post leaves no way out: links become text, sources and other channels go, the own channel stays', () => {
@@ -204,7 +235,8 @@ describe('channel assistant', () => {
     expect(prompt.match(/<story /g)).toHaveLength(1);
     expect(prompt.match(/<source /g)).toHaveLength(2);
     expect(prompt).not.toContain('url=');
-    expect(p.text).not.toMatch(/https?:|\]\(/); // the editor's link is stripped
+    expect(p.text.replace(/\]\(https:\/\/www\.google\.com\/maps\/search\/[^)]+\)/g, '')).not.toMatch(/https?:|\]\(|other_channel/); // only map links remain
+    expect(p.text).toContain('📍 [Plaza Nueva, Sevilla](https://www.google.com/maps/search/?api=1&query=Plaza%20Nueva%2C%20Sevilla)');
     expect(channels.stories(d.id, 'used', 50)[0].items).toHaveLength(2); // both tellings are used
   });
 
@@ -299,7 +331,7 @@ describe('channel assistant', () => {
 
     const p = await channels.compose(d.id, 'deals');
     expect(p.status).toBe('draft');
-    expect(editor()).toContain('Язык поста — español');
+    expect(editor()).toContain('Язык всех текстов — español');
     expect(editor()).toContain('2x1 en horchata');
     expect(editor()).toContain('Вид поста: deals — «Акции, скидки и события»');
     expect(channels.items(d.id)[0].status).toBe('used');
