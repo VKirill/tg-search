@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Category, Order, Service, ServiceKind } from '../../../shared/types';
+import type { AgentDef, Category, Order, Service, ServiceKind } from '../../../shared/types';
 import { formatPriceRange, formatRub, serviceKindLabel } from '../utils/format';
 import { getApi } from '../hooks/useApi';
 import { IconPlus } from './Icons';
 import { useToast } from './Toast';
 
-const KINDS: ServiceKind[] = ['homework', 'marketplace_card', 'image_gen', 'copywriting'];
+const KINDS: ServiceKind[] = ['homework', 'marketplace_card', 'image_gen', 'copywriting', 'assistant', 'agent'];
 
 const INSTRUCTIONS_HINT =
   'Опишите скилл исполнителя: что делаем, что спросить у клиента, как оценивать сложность внутри вилки, планка качества, формат сдачи (файлы, текст, правки).';
@@ -48,6 +48,7 @@ export function ServicesView() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [subagents, setSubagents] = useState<AgentDef[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +67,10 @@ export function ServicesView() {
 
   useEffect(() => {
     load();
+    getApi()
+      .agents.list()
+      .then((list) => setSubagents(list.filter((a) => a.mode === 'subagent')))
+      .catch(() => {});
     const off = getApi().onEvent((e) => {
       if (e.type === 'order:update') load();
     });
@@ -98,6 +103,10 @@ export function ServicesView() {
     if (!editing) return;
     if (editing.priceMin > editing.priceMax) {
       setPriceError('Минимум не может быть больше максимума');
+      return;
+    }
+    if (editing.kind === 'agent' && !editing.agent.trim()) {
+      setPriceError('Выберите субагента для типа «Агент»');
       return;
     }
     setPriceError(null);
@@ -201,10 +210,31 @@ export function ServicesView() {
               </div>
               <div className="field">
                 <label>Тип исполнителя</label>
-                <select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as ServiceKind })}>
+                <select
+                  value={editing.kind}
+                  onChange={(e) => {
+                    const kind = e.target.value as ServiceKind;
+                    setEditing({ ...editing, kind, agent: kind === 'agent' ? editing.agent : '' });
+                  }}
+                >
                   {KINDS.map((k) => <option key={k} value={k}>{serviceKindLabel(k)}</option>)}
                 </select>
               </div>
+              {editing.kind === 'agent' && (
+                <div className="field">
+                  <label>Субагент</label>
+                  <select
+                    value={editing.agent}
+                    onChange={(e) => setEditing({ ...editing, agent: e.target.value })}
+                    required
+                  >
+                    <option value="">— выберите —</option>
+                    {subagents.map((a) => (
+                      <option key={a.name} value={a.name}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label>Категория спроса</label>
                 <select

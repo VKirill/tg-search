@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Account, ManagerOrderIntent, ManagerSettings, Project, ProjectInput, ProjectTask, SequenceStep, Service, Source } from '../../../shared/types';
+import type { Account, AgentDef, ManagerOrderIntent, ManagerSettings, Project, ProjectInput, ProjectTask, SequenceStep, Service, Source } from '../../../shared/types';
 import { DEFAULT_MANAGER } from '../../../shared/types';
 import { formatPriceRange, foundByLabel, serviceKindLabel, sourceStatusLabel, taskLabel } from '../utils/format';
 import { getApi } from '../hooks/useApi';
@@ -46,6 +46,7 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved, onOpen
   const [sandboxOut, setSandboxOut] = useState('');
   const [sandboxOrder, setSandboxOrder] = useState<ManagerOrderIntent | null | undefined>(undefined);
   const [catalog, setCatalog] = useState<Service[]>([]);
+  const [primaryAgents, setPrimaryAgents] = useState<AgentDef[]>([]);
   const [showAutopilot, setShowAutopilot] = useState(false);
   const [liveProject, setLiveProject] = useState<Project | null>(project);
 
@@ -77,6 +78,7 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved, onOpen
       keywords: [...project.keywords],
       sequence: [...project.sequence],
       manager: { ...project.manager },
+      agent: project.agent ?? '',
       id: project.id,
     });
     setLiveProject(project);
@@ -87,6 +89,10 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved, onOpen
   useEffect(() => {
     if (tab === 'manager') {
       getApi().services.list().then((list) => setCatalog(list.filter((s) => s.enabled))).catch(() => {});
+      getApi()
+        .agents.list()
+        .then((list) => setPrimaryAgents(list.filter((a) => a.mode === 'primary')))
+        .catch(() => {});
     }
   }, [tab]);
 
@@ -190,6 +196,18 @@ export function ProjectEditorSheet({ project, accounts, onClose, onSaved, onOpen
           )}
           {tab === 'manager' && (
             <>
+              <div className="field">
+                <label>Агент</label>
+                <select
+                  value={p.agent ?? ''}
+                  onChange={(e) => patch({ agent: e.target.value })}
+                >
+                  <option value="">manager (по умолчанию)</option>
+                  {primaryAgents.map((a) => (
+                    <option key={a.name} value={a.name}>{a.name} — {a.description.slice(0, 60)}</option>
+                  ))}
+                </select>
+              </div>
               <label className="checkbox-row">
                 <input type="checkbox" checked={p.manager.enabled} onChange={(e) => patch({ manager: { ...p.manager, enabled: e.target.checked } })} />
                 ИИ-менеджер включён
@@ -300,6 +318,7 @@ function emptyProject(): ProjectInput & { id?: number } {
     keywords: [],
     sequence: [],
     manager: { ...DEFAULT_MANAGER },
+    agent: '',
   };
 }
 
