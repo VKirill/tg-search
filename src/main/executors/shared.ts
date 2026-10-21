@@ -170,6 +170,8 @@ export function requireInputPhotos(input: ExecutorInput, message: string): strin
   return paths;
 }
 
+const RICH_TEXT_MAX = 30_000;
+
 export async function packageTextOutput(
   workDir: string,
   text: string,
@@ -177,7 +179,8 @@ export async function packageTextOutput(
   fileBase = role === 'preview' ? 'preview' : 'result',
 ): Promise<{ text: string; files: OrderFile[] }> {
   const files: OrderFile[] = [];
-  if (text.length > 3500) {
+  // a Rich Message holds a whole multi-task solution (the client sees «Показать ещё»): a file only for a huge result
+  if (text.length > RICH_TEXT_MAX) {
     await mkdir(workDir, { recursive: true });
     const path = join(workDir, `${fileBase}.md`);
     await writeFile(path, text, 'utf8');
