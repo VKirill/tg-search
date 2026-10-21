@@ -25,6 +25,8 @@ registerMediaSchemes();
 
 let win: BrowserWindow | null = null;
 let control: { stop(): void } | null = null;
+let stopApp: (() => Promise<void>) | null = null;
+let stopped = false;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -125,6 +127,7 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+  stopApp = () => handlers.stop();
   await handlers.start();
   startMemoryWatch({
     dataDir,
@@ -135,10 +138,19 @@ app.whenReady().then(async () => {
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 
-app.on('before-quit', async () => {
+// TDLib threads must be closed before exit: otherwise its mutexes are destroyed under running threads and
+// Electron dies with SIGABRT/SIGSEGV on every quit (crash reports of 2026-10-21)
+app.on('before-quit', (e) => {
   control?.stop();
   control = null;
+  if (stopped || !stopApp) return;
+  e.preventDefault();
+  stopped = true;
+  const timeout = new Promise<void>((r) => setTimeout(r, 5000));
+  Promise.race([stopApp().catch((err) => console.error('stop', err)), timeout]).finally(() => app.quit());
 });
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => app.quit());
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
