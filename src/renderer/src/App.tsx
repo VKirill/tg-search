@@ -13,9 +13,14 @@ import { ProjectsView } from './components/ProjectsView';
 import { ServicesView } from './components/ServicesView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { SettingsView } from './components/SettingsView';
+import { AgentsView } from './components/AgentsView';
+import { SkillsView } from './components/SkillsView';
+import { ApprovalsView } from './components/ApprovalsView';
+import { SpamTemplatesView } from './components/SpamTemplatesView';
 import { ToastProvider, installGlobalErrors, useToast } from './components/Toast';
 import { getApi } from './hooks/useApi';
 import { getShotBootstrap } from './mockApi';
+import type { ChatOpenTarget } from './components/ChatsView';
 
 const shotSeed =
   typeof location !== 'undefined' && location.hash.includes('shot=') ? getShotBootstrap() : null;
@@ -58,6 +63,8 @@ function AppInner() {
   const [freshIds, setFreshIds] = useState<Set<number>>(new Set());
   const [jobLabel, setJobLabel] = useState<string | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [chatTarget, setChatTarget] = useState<ChatOpenTarget | null>(null);
 
   const selectedLead = leads.find((l) => l.id === leadId) ?? null;
   const leadProject = selectedLead ? projects.find((p) => p.id === selectedLead.projectId) ?? null : null;
@@ -135,9 +142,27 @@ function AppInner() {
         setJobLabel(e.done ? null : e.stage);
         if (e.error) toast(e.error);
       }
+      if (e.type === 'approval:update') {
+        if (e.approval.status === 'pending') {
+          setPendingApprovals((n) => n + 1);
+          toast(`Новое согласование: ${e.approval.summary}`);
+        } else {
+          getApi()
+            .approvals.list('pending')
+            .then((list) => setPendingApprovals(list.length))
+            .catch(() => {});
+        }
+      }
     });
     return off;
   }, [toast]);
+
+  useEffect(() => {
+    getApi()
+      .approvals.list('pending')
+      .then((list) => setPendingApprovals(list.length))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const hash = location.hash.replace(/^#/, '');
@@ -165,8 +190,24 @@ function AppInner() {
       'client-files': 'inbox',
       'client-money': 'inbox',
       'agent-trace': 'inbox',
+      agents: 'agents',
+      'agents-editor': 'agents',
+      'agent-rules': 'agents',
+      skills: 'skills',
+      'skills-draft': 'skills',
+      approvals: 'approvals',
+      spam: 'spam',
+      publication: 'chats',
+      'lead-repeat': 'leads',
     };
     if (map[shot]) setView(map[shot]);
+    if (shot === 'lead-repeat') {
+      setLeadId(2);
+      setView('leads');
+    }
+    if (shot === 'publication') {
+      setChatTarget({ accountId: 1, chatId: 101, messageId: 8801 });
+    }
   }, []);
 
   const scopedLeads = useMemo(() => {
@@ -253,6 +294,27 @@ function AppInner() {
     if (v === 'accounts') setAccountsOpen(true);
   };
 
+  const openPublication = (lead: Lead) => {
+    const accountId =
+      lead.accountId ?? accounts.find((a) => a.status === 'authorized')?.id ?? null;
+    if (accountId == null) {
+      toast('Нет авторизованного аккаунта для просмотра чата');
+      return;
+    }
+    setChatTarget({ accountId, chatId: lead.tgChatId, messageId: lead.tgMessageId });
+    setView('chats');
+  };
+
+  const markSpamLead = async (lead: Lead) => {
+    try {
+      const l = await getApi().spam.markSpam(lead.id);
+      setLeads((prev) => prev.map((x) => (x.id === l.id ? l : x)));
+      if (leadId === l.id) setLeadId(null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const showMailColumns = view === 'inbox' || view === 'leads';
   const listTitle = view === 'inbox' ? 'Входящие' : 'Лиды';
 
@@ -262,6 +324,7 @@ function AppInner() {
         view={view === 'accounts' ? 'accounts' : view}
         collapsed={navCollapsed}
         accounts={accounts}
+        pendingApprovals={pendingApprovals}
         onView={onNav}
         onToggleCollapse={() => setNavCollapsed((c) => !c)}
       />
@@ -314,6 +377,7 @@ function AppInner() {
                 onFilters={setLeadFilters}
                 onSelect={setLeadId}
                 onFeedback={onFeedback}
+                onMarkSpam={markSpamLead}
               />
             </aside>
             <ChatPanel
@@ -321,11 +385,26 @@ function AppInner() {
               source={selectedSource}
               project={leadProject}
               onLeadChange={(l) => setLeads((prev) => prev.map((x) => (x.id === l.id ? l : x)))}
+              onOpenPublication={openPublication}
+              onMarkSpam={(l) => setLeads((prev) => prev.map((x) => (x.id === l.id ? l : x)))}
             />
             <CrmPanel lead={selectedLead} collapsed={crmCollapsed} onToggleCollapse={() => setCrmCollapsed((c) => !c)} />
           </>
         )}
-        {view === 'chats' && <ChatsView accounts={accounts} projects={projects} />}
+        {view === 'chats' && (
+          <ChatsView
+            accounts={accounts}
+            projects={projects}
+            initialTarget={chatTarget}
+            onConsumeTarget={() => setChatTarget(null)}
+          />
+        )}
+        {view === 'agents' && <AgentsView />}
+        {view === 'skills' && <SkillsView />}
+        {view === 'approvals' && (
+          <ApprovalsView leads={leads} onPendingCount={setPendingApprovals} />
+        )}
+        {view === 'spam' && <SpamTemplatesView />}
         {view === 'funnel' && <FunnelView projectId={projectFilterId} onOpenLead={openLeadFromFunnel} />}
         {view === 'projects' && (
           <ProjectsView

@@ -18,9 +18,11 @@ type ChatPanelProps = {
   source: Source | null;
   project: Project | null;
   onLeadChange: (lead: Lead) => void;
+  onOpenPublication?: (lead: Lead) => void;
+  onMarkSpam?: (lead: Lead) => void;
 };
 
-export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProps) {
+export function ChatPanel({ lead, source, project, onLeadChange, onOpenPublication, onMarkSpam }: ChatPanelProps) {
   const toast = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
@@ -209,8 +211,17 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
     setRecording(false);
   };
 
-  const open = (url: string) => {
-    getApi().shell.openExternal(url).catch(() => window.open(url, '_blank'));
+  const markSpam = async () => {
+    if (!lead) return;
+    if (!confirm('Пометить текст как спам? Лид скроется из входящих.')) return;
+    try {
+      const l = await getApi().spam.markSpam(lead.id);
+      onLeadChange(l);
+      onMarkSpam?.(l);
+      toast('Помечено как спам');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
   };
 
   if (!lead) {
@@ -241,6 +252,7 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
             <button type="button" className="btn btn--sm" onClick={toggleHandoff}>
               {lead.handoff ? 'Вернуть ИИ-менеджеру' : 'Взять на себя'}
             </button>
+            <button type="button" className="btn btn--sm btn--ghost" onClick={markSpam}>Спам</button>
             {!recording ? (
               <button type="button" className="btn btn--sm" onClick={startRecording}>Записать созвон</button>
             ) : (
@@ -257,7 +269,18 @@ export function ChatPanel({ lead, source, project, onLeadChange }: ChatPanelProp
           <div className="quote-card__meta"><span>{formatLeadDate(lead.date)}</span></div>
           <div className="quote-card__actions no-drag">
             {lead.link && (
-              <button type="button" className="btn btn--sm" onClick={() => open(lead.link!)}>Открыть публикацию <IconExternal /></button>
+              <>
+                <button type="button" className="btn btn--sm btn--primary" onClick={() => onOpenPublication?.(lead)}>
+                  Открыть публикацию
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => getApi().shell.openExternal(lead.link!).catch(() => window.open(lead.link!, '_blank'))}
+                >
+                  Открыть в Telegram <IconExternal />
+                </button>
+              </>
             )}
           </div>
         </div>

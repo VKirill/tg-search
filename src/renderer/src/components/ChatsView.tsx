@@ -40,9 +40,16 @@ function Avatar({ chat }: { chat: ChatInfo }) {
   );
 }
 
-type Props = { accounts: Account[]; projects: Project[] };
+export type ChatOpenTarget = { accountId: number; chatId: number; messageId: number };
 
-export function ChatsView({ accounts, projects }: Props) {
+type Props = {
+  accounts: Account[];
+  projects: Project[];
+  initialTarget?: ChatOpenTarget | null;
+  onConsumeTarget?: () => void;
+};
+
+export function ChatsView({ accounts, projects, initialTarget, onConsumeTarget }: Props) {
   const api = getApi();
   const toast = useToast();
   const authorized = accounts.filter((a) => a.status === 'authorized');
@@ -59,7 +66,10 @@ export function ChatsView({ accounts, projects }: Props) {
   const [replyTo, setReplyTo] = useState<ChatItem | null>(null);
   const [voiceUrls, setVoiceUrls] = useState<Record<number, string>>({});
   const [sources, setSources] = useState<Record<number, Source[]>>({});
+  const [highlightMessageId, setHighlightMessageId] = useState<number | null>(null);
+  const [publicationLink, setPublicationLink] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (accountId == null && authorized[0]) setAccountId(authorized[0].id);
@@ -73,6 +83,54 @@ export function ChatsView({ accounts, projects }: Props) {
   useEffect(() => {
     loadChats().catch((e) => toast(e.message));
   }, [loadChats, toast]);
+
+  const openAround = useCallback(
+    async (target: ChatOpenTarget) => {
+      setAccountId(target.accountId);
+      setHighlightMessageId(target.messageId);
+      setReplyTo(null);
+      setLoadingHistory(true);
+      try {
+        const list = await api.chats.list(target.accountId);
+        setChats(list);
+        const chat =
+          list.find((c) => c.chatId === target.chatId) ??
+          ({
+            chatId: target.chatId,
+            title: `Чат ${target.chatId}`,
+            username: null,
+            kind: 'supergroup',
+            memberCount: null,
+            isMember: true,
+          } as ChatSummary);
+        setSelected(chat);
+        const page = await api.chats.around(target.accountId, target.chatId, target.messageId);
+        setItems(page);
+        setNoMore(true);
+        const hit = page.find((m) => m.messageId === target.messageId);
+        setPublicationLink(hit?.link ?? null);
+        requestAnimationFrame(() => {
+          const el = messageRefs.current[target.messageId];
+          if (el) {
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          } else {
+            timelineRef.current?.scrollTo(0, timelineRef.current.scrollHeight);
+          }
+        });
+      } catch (e) {
+        toast((e as Error).message);
+      } finally {
+        setLoadingHistory(false);
+        onConsumeTarget?.();
+      }
+    },
+    [api, loadChats, onConsumeTarget, toast],
+  );
+
+  useEffect(() => {
+    if (!initialTarget) return;
+    openAround(initialTarget);
+  }, [initialTarget, openAround]);
 
   const loadSources = useCallback(async () => {
     const entries = await Promise.all(projects.map(async (p) => [p.id, await api.sources.list(p.id)] as const));
@@ -89,6 +147,8 @@ export function ChatsView({ accounts, projects }: Props) {
     setItems([]);
     setNoMore(false);
     setReplyTo(null);
+    setHighlightMessageId(null);
+    setPublicationLink(null);
     setLoadingHistory(true);
     try {
       const page = await api.chats.history(accountId, chat.chatId, null);
@@ -310,8 +370,24 @@ export function ChatsView({ accounts, projects }: Props) {
                   {KIND_LABEL[selected.kind]}
                   {selected.memberCount ? ` · ${selected.memberCount.toLocaleString('ru-RU')} участников` : ''}
                 </div>
+                {highlightMessageId != null && (
+                  <div className="chats-publication-bar">
+                    <span>Публикация лида в чате</span>
+                    {(publicationLink || selected.username) && (
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        onClick={() =>
+                          api.shell.openExternal(publicationLink ?? `https://t.me/${selected.username}`)
+                        }
+                      >
+                        Открыть в Telegram <IconExternal size={12} />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              {selected.username && (
+              {selected.username && highlightMessageId == null && (
                 <button type="button" className="btn btn--sm" onClick={() => api.shell.openExternal(`https://t.me/${selected.username}`)}>
                   Открыть в Telegram <IconExternal size={12} />
                 </button>
@@ -334,7 +410,15 @@ export function ChatsView({ accounts, projects }: Props) {
               {items.map((m) => {
                 const quoted = m.replyToMessageId ? items.find((x) => x.messageId === m.replyToMessageId) : null;
                 return (
-                  <div key={m.messageId} className={`bubble bubble--${m.isOutgoing ? 'out' : 'in'}`}>
+                  <div
+                    key={m.messageId}
+                    ref={(el) => {
+                      messageRefs.current[m.messageId] = el;
+                    }}
+                    className={`bubble bubble--${m.isOutgoing ? 'out' : 'in'}${
+                      highlightMessageId === m.messageId ? ' bubble--highlight' : ''
+                    }`}
+                  >
                     {!m.isOutgoing && m.senderName && <div className="bubble__auto">{m.senderName}</div>}
                     {quoted && <div className="chats-quote">{quoted.text.slice(0, 120) || 'сообщение'}</div>}
                     {m.voice &&

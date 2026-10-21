@@ -249,3 +249,39 @@ export function IconServices(p: IconProps) {
     </StrokeIcon>
   );
 }
+
+export function IconAgents(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <circle cx="12" cy="9" r="3.5" />
+      <path d="M5 19c1.2-3 3.4-4.5 7-4.5s5.8 1.5 7 4.5" />
+      <path d="M17 7.5l1.5-1.5M19 9.5h2" />
+    </StrokeIcon>
+  );
+}
+
+export function IconSkills(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M12 3l2.2 4.5 5 .7-3.6 3.4.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.2l5-.7L12 3z" />
+    </StrokeIcon>
+  );
+}
+
+export function IconApprovals(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M5 12l3 3 7-7" />
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+    </StrokeIcon>
+  );
+}
+
+export function IconSpam(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <path d="M12 9v4M12 17h.01" />
+      <path d="M10.3 4.5h3.4L20 12l-6.3 7.5h-3.4L4 12l6.3-7.5z" />
+    </StrokeIcon>
+  );
+}

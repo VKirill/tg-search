@@ -31,6 +31,7 @@ type LeadsPanelProps = {
   onFilters: (f: LeadFilters) => void;
   onSelect: (id: number) => void;
   onFeedback: (leadId: number, value: 'up' | 'down' | null) => void;
+  onMarkSpam?: (lead: Lead) => void;
 };
 
 export function LeadsPanel({
@@ -48,6 +49,7 @@ export function LeadsPanel({
   onFilters,
   onSelect,
   onFeedback,
+  onMarkSpam,
 }: LeadsPanelProps) {
   const list = [...leads];
 
@@ -132,6 +134,9 @@ export function LeadsPanel({
               <div className="lead-card__badges">
                 {category && <span className="tag tag--category">{category.name}</span>}
                 {lead.handoff && <span className="tag tag--warn">передача</span>}
+                {lead.repeatCount > 0 && (
+                  <span className="tag tag--muted">повторил {lead.repeatCount} раз</span>
+                )}
                 {lead.sequenceStep > 0 && lead.nextStepAt && <span className="tag">цепочка {lead.sequenceStep}</span>}
               </div>
               <div className="lead-card__row">
@@ -156,6 +161,18 @@ export function LeadsPanel({
                   >
                     <IconThumbDown filled={lead.feedback === 'down'} />
                   </button>
+                  {onMarkSpam && (
+                    <button
+                      type="button"
+                      className="btn btn--xs btn--ghost"
+                      onClick={() => {
+                        if (!confirm('Пометить как спам?')) return;
+                        onMarkSpam(lead);
+                      }}
+                    >
+                      Спам
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="lead-card__date">{formatLeadDate(lead.date)}</div>
