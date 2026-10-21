@@ -127,8 +127,9 @@ app.whenReady().then(async () => {
   await handlers.start();
   startMemoryWatch({
     dataDir,
-    processes: () => app.getAppMetrics().map((m) => ({ type: m.type, mb: m.memory.workingSetSize / 1024 })),
+    processes: () => app.getAppMetrics().map((m) => ({ type: m.type, pid: m.pid, mb: m.memory.workingSetSize / 1024 })),
     relieve: () => handlers.relieveMemory(),
+    critical: () => app.quit(),
   });
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
