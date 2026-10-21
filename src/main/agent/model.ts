@@ -9,6 +9,10 @@ export function resolveAgentModel(model: string, settings: Settings): OperatorLl
   if (m === 'glm') {
     return { baseUrl: PRESETS.glm.baseUrl, apiKey: settings.glmApiKey, model: settings.operatorModel || PRESETS.glm.model };
   }
+  // Gemini through the auxiliary endpoint (9router): fast and cheap for texts, semantics and tables
+  if (m === 'gemini') {
+    return { baseUrl: settings.auxBaseUrl, apiKey: settings.auxApiKey, model: settings.auxModel };
+  }
   if (m === 'deepseek') {
     return {
       baseUrl: PRESETS.deepseek.baseUrl,

@@ -26,6 +26,8 @@ export interface ToolHostDeps extends OutreachDeps {
   handoff?: HandoffActions;
   dataDir?: string;
   skills?: SkillsStore;
+  getTasks?: () => import('../tasks').TaskQueue | undefined; // background subagent tasks
+  taskDir?: string; // inside a background task: where its files (tables…) go
   turnState: TurnToolState;
 }
 

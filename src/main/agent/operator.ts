@@ -44,6 +44,7 @@ export interface OperatorDeps extends OutreachDeps {
   approvals?: ApprovalsApi;
   getApprovals?: () => ApprovalsApi | undefined;
   skills?: SkillsStore;
+  getTasks?: () => import('./tasks').TaskQueue | undefined;
   /** Test hook: replace the operator LLM */
   complete?: (
     messages: AgentChatMessage[],
@@ -149,7 +150,11 @@ export function createOperator(deps: OperatorDeps): Operator {
     const skillHint = deps.skills ? await deps.skills.hintForClientMessage(lastIn) : '';
     const skillsCtx = [skillsBlock, skillHint].filter(Boolean).join('\n\n');
     const upsell = isFreeLead(deps.db, lead) ? freeClientBlock(owner) : upsellBlock(deps.db, lead.id);
-    const skillsPart = [skillsCtx, upsell].filter(Boolean).map((b) => `${b}\n\n`).join('');
+    const open = deps.getTasks?.()?.open(lead.id) ?? [];
+    const openTasks = open.length
+      ? `<open_tasks>\nСейчас в работе (результат придёт сам, повторно не поручай):\n${open.map((t) => `- #${t.id} ${t.agent}: ${t.task.slice(0, 160)}`).join('\n')}\n</open_tasks>`
+      : '';
+    const skillsPart = [skillsCtx, upsell, openTasks].filter(Boolean).map((b) => `${b}\n\n`).join('');
 
     const agentName = (project.agent || 'manager').trim() || 'manager';
     let agentDef: AgentDef | undefined;

@@ -12,10 +12,14 @@ function globMatch(pattern: string, name: string): boolean {
   return pattern === name;
 }
 
-/** Last matching glob wins; default allow when nothing matches. */
+/**
+ * An exact tool name beats any glob, whatever the order in the file («"*": deny» after «make_xlsx: allow» used to deny
+ * everything); among globs the last match wins; default allow when nothing matches.
+ */
 export function resolveToolPermission(permission: Record<string, ToolPermission>, toolName: string): ToolPermission {
   const entries = Object.entries(permission);
   if (!entries.length) return 'allow';
+  if (toolName in permission) return permission[toolName];
   let result: ToolPermission = 'allow';
   for (const [pattern, perm] of entries) {
     if (globMatch(pattern, toolName)) result = perm;

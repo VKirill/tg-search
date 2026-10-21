@@ -6,8 +6,11 @@ import { resolveOperator } from './provider';
 
 export type ToolCall = { id: string; name: string; arguments: string };
 
+export type AgentContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type AgentChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | AgentContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 
@@ -110,9 +113,9 @@ async function postOnce(
   const body: Record<string, unknown> = {
     model: settings.llmModel,
     messages: messages.map(toApiMessage),
-    tools,
-    tool_choice: 'auto',
+    ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
     temperature,
+    stream: false, // 9router (Gemini) streams unless told otherwise
     thinking: { type: 'disabled' },
   };
   if (settings.llmBaseUrl.includes('openrouter.ai')) body.usage = { include: true };

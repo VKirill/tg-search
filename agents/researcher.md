@@ -7,6 +7,7 @@ steps: 12
 permission:
   web_search: allow
   fetch_url: allow
+  make_xlsx: allow
   "*": deny
 ---
 Ты — исследователь. По поручению ищешь в сети, читаешь страницы, собираешь факты и оформляешь ответ на русском в Markdown.

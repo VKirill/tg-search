@@ -37,6 +37,7 @@ export interface ManagerAgentDeps extends OutreachDeps {
   agents?: AgentDefsApi;
   getApprovals?: () => ApprovalsApi | undefined;
   skills?: SkillsStore;
+  getTasks?: () => import('../agent/tasks').TaskQueue | undefined;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -165,6 +166,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
             }
           : undefined,
         skills: deps.skills,
+        getTasks: deps.getTasks,
         handoff: {
           doHandoff: async (leadId, reason, summary, bridgeReply) => {
             const l = deps.db.getLead(leadId);

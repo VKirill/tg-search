@@ -50,6 +50,10 @@ import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
 import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
+import { createAgentTasks } from './agent/tasks';
+import { runSubagentTurn } from './agent/subagent';
+import { sendMediaMessage } from './pipeline/outreach';
+import { fileToDataUri } from './executors/images';
 import { createSkillsStore } from './skills';
 
 export interface AppDeps {
@@ -200,6 +204,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     executors: ordersDeps.executors,
     agents: agentDefs,
     getApprovals: () => approvalsHolder.api,
+    getTasks: () => tasks,
     skills,
   });
 
@@ -238,6 +243,39 @@ export function createApp(deps: AppDeps): AppHandlers {
     makeToolHost: makeHostForLead,
     emit,
     db,
+  });
+  // background subagent tasks: the agent hands work off and keeps talking; results go to the client by themselves
+  const TASK_INTROS = ['готово, смотри', 'вот, держи', 'сделал, глянь'];
+  const tasks = createAgentTasks({
+    db,
+    dataDir,
+    emit,
+    run: async (task, dir) => {
+      const lead = db.getLead(task.leadId);
+      const context = db.listMessages(task.leadId).slice(-20)
+        .map((m) => `${m.direction === 'in' ? 'Клиент' : 'Мы'}: ${m.text}`).join('\n');
+      // a Gemini subagent sees the client's recent photos themselves, not only their captions
+      const vision = agentDefs.get(task.agent).model === 'gemini';
+      const photos = vision
+        ? db.listMessages(task.leadId).filter((m) => m.direction === 'in' && m.mediaPath && /\.(jpe?g|png|webp)$/i.test(m.mediaPath)
+          && m.date >= Date.now() - 3 * 86400_000).slice(-4)
+        : [];
+      const images = await Promise.all(photos.map((m) => fileToDataUri(m.mediaPath!)));
+      const { text } = await runSubagentTurn({
+        agentName: task.agent, task: task.task, context, leadId: task.leadId, clientId: lead.clientId, images,
+        host: { ...makeHostForLead(task.leadId), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit,
+      });
+      return text;
+    },
+    deliver: async (task, text, files) => {
+      const intro = TASK_INTROS[task.id % TASK_INTROS.length];
+      await sendMediaMessage(pipeline, task.leadId, text ? `${intro}\n\n${text}` : intro, files, true);
+    },
+    fail: async (task, error) => {
+      const lead = db.updateLead(task.leadId, { handoff: true, handoffReason: `Поручение «${task.agent}» не выполнено: ${error}` });
+      emit({ type: 'lead:update', lead });
+      emit({ type: 'job', projectId: lead.projectId, stage: `Поручение #${task.id} (${task.agent}) не выполнено`, done: true, error });
+    },
   });
   const operator = managerAgent.getOperator();
   const trusted = createTrusted({ db, engine, emit, checkin: (leadId, note) => managerAgent.checkin(leadId, note) });
@@ -330,6 +368,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       // replies that were waiting on a timer when the app stopped: dialogs whose last message is incoming and fresh
       for (const leadId of db.leadsAwaitingReply(Date.now() - 2 * 3600_000)) managerAgent.onIncoming(leadId);
+      tasks.resume();
       // voice notes that failed to transcribe (key missing, provider error): one more try, then the agent answers
       void (async () => {
         for (const m of db.failedVoiceMessages(Date.now() - 24 * 3600_000)) {

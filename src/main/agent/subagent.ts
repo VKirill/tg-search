@@ -26,6 +26,7 @@ export interface SubagentRunInput {
     agent: AgentDef,
   ) => Promise<AgentCompletionResult>;
   includeDelegate?: boolean;
+  images?: string[]; // data URIs of the client's photos — for a vision model (Gemini) working on pictures
 }
 
 export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: string; steps: AgentStep[] }> {
@@ -41,6 +42,7 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
   if (!input.includeDelegate) {
     tools = tools.filter((t) => t.name !== 'delegate');
   }
+  tools = tools.filter((t) => t.name !== 'assign_task'); // a subagent does the work itself, no chains of hand-offs
   tools = tools.filter((t) => resolveToolPermission(agent.permission, t.name) !== 'deny');
   const toolMap = new Map(tools.map((t) => [t.name, t]));
   const llmTools = toolsToLlmDefs(tools);
@@ -49,7 +51,12 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
 
   const chatMessages: AgentChatMessage[] = [
     { role: 'system', content: system },
-    { role: 'user', content: input.task },
+    {
+      role: 'user',
+      content: input.images?.length
+        ? [{ type: 'text', text: input.task }, ...input.images.map((url) => ({ type: 'image_url' as const, image_url: { url } }))]
+        : input.task,
+    },
   ];
 
   const steps: AgentStep[] = [];
