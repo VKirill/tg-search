@@ -43,10 +43,21 @@ export interface ManagerSettings {
   voiceReplies: 'never' | 'mirror'; // mirror: answer with a voice note when the client sent a voice note
 }
 
+// What the manager wants to do with an order in this turn; code validates and applies it.
+export interface ManagerOrderIntent {
+  serviceId: number; // matching service from the catalog
+  brief: string; // client's wishes + the agent's assumptions so far
+  agreedPrice: number | null; // the price the client accepted (inside the service range)
+  wantsPreview: boolean; // make and send a free sample now
+  readyToPay: boolean; // client agreed: send the payment link
+  photoConsent: boolean; // client explicitly allowed using their photo/avatar
+}
+
 export interface ManagerTestResult {
   reply: string;
   handoff: boolean; // the manager wants a human to take over
   reason: string;
+  order?: ManagerOrderIntent | null;
 }
 
 export interface Project {
