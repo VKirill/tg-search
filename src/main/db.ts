@@ -230,9 +230,12 @@ export const SETTINGS_DEFAULTS: Settings = {
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
   imageModel: 'fal-ai/nano-banana-2/edit',
-  operatorBaseUrl: 'https://api.deepseek.com',
+  operatorProvider: 'glm',
+  glmApiKey: '',
+  deepseekApiKey: '',
+  operatorBaseUrl: '',
   operatorApiKey: '',
-  operatorModel: 'deepseek-flash',
+  operatorModel: '',
   tavilyApiKey: '',
 };
 

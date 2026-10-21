@@ -30,7 +30,7 @@ const settings = () => ({
   auxApiKey: '',
   auxModel: '',
   falKey: '',
-  imageModel: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
+  imageModel: '', operatorProvider: 'glm' as const, glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
 });
 
 describe('YooKassaProvider', () => {

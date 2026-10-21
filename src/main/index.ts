@@ -72,6 +72,8 @@ app.whenReady().then(async () => {
     yookassaSecretKey: s.yookassaSecretKey || process.env.YOOKASSA_SECRET_KEY || '',
     auxApiKey: s.auxApiKey || process.env.NINEROUTER_API_KEY || '',
     falKey: s.falKey || process.env.FAL_KEY || '',
+    glmApiKey: s.glmApiKey || process.env.ZAI_API_KEY || '',
+    deepseekApiKey: s.deepseekApiKey || process.env.DEEPSEEK_API_KEY || '',
   });
 
   const emit = (e: AppEvent) => {

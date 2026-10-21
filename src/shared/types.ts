@@ -205,10 +205,14 @@ export interface Settings {
   // Image generation for executors and previews (fal.ai)
   falKey: string;
   imageModel: string; // fal model id for generation/editing
-  // Operator: the tool-calling agent that talks to clients (cheap model; default DeepSeek V4.1 Flash)
+  // Operator: the tool-calling agent that talks to clients. Provider switch keeps a key per provider so the owner can
+  // compare GLM and DeepSeek without retyping; 'custom' uses operatorBaseUrl/operatorApiKey/operatorModel.
+  operatorProvider: 'glm' | 'deepseek' | 'custom';
+  glmApiKey: string; // Z.ai (GLM 5.3 Flash)
+  deepseekApiKey: string; // DeepSeek V4.1 Flash
   operatorBaseUrl: string;
   operatorApiKey: string;
-  operatorModel: string;
+  operatorModel: string; // model override for any provider ('' = provider default)
   tavilyApiKey: string; // web search for the assistant
 }
 

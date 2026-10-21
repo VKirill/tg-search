@@ -61,7 +61,7 @@ let settings: Settings = {
   auxApiKey: '',
   auxModel: 'ag/gemini-3.8-flash',
   falKey: '',
-  imageModel: 'fal-ai/nano-banana-2/edit', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
+  imageModel: 'fal-ai/nano-banana-2/edit', operatorProvider: 'glm', glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '',
 };
 
 const accounts: Account[] = [
