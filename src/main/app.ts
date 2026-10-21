@@ -45,6 +45,7 @@ import { createAgentDefs } from './agent/defs';
 import { createApprovals, type RunApprovedTool } from './agent/approvals';
 import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
 import { createExecutors } from './executors/registry';
+import { createSkillsStore } from './skills';
 
 export interface AppDeps {
   db: Db;
@@ -79,6 +80,12 @@ export function createApp(deps: AppDeps): AppHandlers {
     settings: () => db.getSettings(),
     emit: deps.emit,
   });
+  const skills = createSkillsStore({
+    dataDir,
+    db,
+    getSettings,
+    emit: deps.emit,
+  });
   const crm = createCrm({ db, crmAi, emit: deps.emit });
   const emit = (e: AppEvent) => {
     deps.emit(e);
@@ -97,6 +104,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     if (e.type === 'order:update') {
       dossier.onOrder(e.order);
       memory.onOrder(e.order);
+      void skills.onOrderUpdated(e.order);
     }
   };
   const spinner = deps.spinner ?? passthroughSpinner;
@@ -178,6 +186,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     executors: ordersDeps.executors,
     agents: agentDefs,
     getApprovals: () => approvalsHolder.api,
+    skills,
   });
 
   const makeHostForLead = (leadId: number) =>
@@ -196,6 +205,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         requestPayment: orders.requestPayment.bind(orders),
       },
       dataDir,
+      skills,
     });
 
   approvalsHolder.api = createApprovals({
@@ -553,10 +563,12 @@ export function createApp(deps: AppDeps): AppHandlers {
       saveRules: async (text) => agentDefs.saveRules(text),
     },
     skills: {
-      list: notYet('skills worker'),
-      save: notYet('skills worker'),
-      remove: notYet('skills worker'),
-      approve: notYet('skills worker'),
+      list: async () => skills.list(),
+      save: async (skill) => skills.save(skill),
+      remove: async (name) => {
+        skills.remove(name);
+      },
+      approve: async (name) => skills.approve(name),
     },
     spam: {
       templates: async () => dedupe.listTemplates(),

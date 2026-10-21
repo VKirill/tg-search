@@ -8,9 +8,10 @@ import { createBillingTools } from './billing';
 import { createSendAssetTool } from './asset';
 import { createWebTools } from './web';
 import { createRunTaskTool } from './runTask';
+import { createSkillsTool } from './skills';
 
 export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
-  return [
+  const tools: AgentTool[] = [
     createReplyTool(deps),
     createHandoffTool(deps),
     ...createMemoryTools(deps),
@@ -20,6 +21,8 @@ export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
     createRunTaskTool(deps),
     ...createWebTools(deps),
   ];
+  if (deps.skills) tools.push(createSkillsTool(deps));
+  return tools;
 }
 
 export function toolsToLlmDefs(tools: AgentTool[]) {

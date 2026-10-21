@@ -16,6 +16,7 @@ import type { ApprovalsApi } from './approvals';
 import { gateToolCall } from './approvals';
 import { resolveAgentModel } from './model';
 import { createDelegateTool } from './tools/delegate';
+import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
 const TURN_COST_CAP_USD = 0.15;
@@ -45,6 +46,7 @@ export interface OperatorDeps extends OutreachDeps {
   agents?: AgentDefsApi;
   approvals?: ApprovalsApi;
   getApprovals?: () => ApprovalsApi | undefined;
+  skills?: SkillsStore;
   /** Test hook: replace the operator LLM */
   complete?: (
     messages: AgentChatMessage[],
@@ -143,6 +145,11 @@ export function createOperator(deps: OperatorDeps): Operator {
     const catalog = catalogContext(deps.db, lead.id, billingPlansText(deps.billing, clientId));
     const clientCtx = buildClientContext(deps.db, lead, lastIn, deps.memory, card);
 
+    const skillsBlock = deps.skills?.formatAvailableBlock() ?? '';
+    const skillHint = deps.skills ? await deps.skills.hintForClientMessage(lastIn) : '';
+    const skillsCtx = [skillsBlock, skillHint].filter(Boolean).join('\n\n');
+    const skillsPart = skillsCtx ? `${skillsCtx}\n\n` : '';
+
     const agentName = (project.agent || 'manager').trim() || 'manager';
     let agentDef: AgentDef | undefined;
     let maxRounds = MAX_TOOL_ROUNDS;
@@ -157,11 +164,11 @@ export function createOperator(deps: OperatorDeps): Operator {
       modelOverride = resolveAgentModel(agentDef.model, deps.getSettings());
       const companyRules = deps.agents.rules();
       const identity = HARD_IDENTITY_RULES.replaceAll('{owner}', owner || 'владельца');
-      system = `${companyRules}\n\n${identity}\n\n${agentDef.prompt}\n\n${projectContextBlock(project, owner)}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+      system = `${companyRules}\n\n${identity}\n\n${agentDef.prompt}\n\n${projectContextBlock(project, owner)}\n\n${catalog}\n\n${skillsPart}Контекст клиента:\n${clientCtx}`;
     } else {
       const persona = projectManagerPrompt(project, mgr.prompt, owner);
       const rules = OPERATOR_RULES.replaceAll('{owner}', owner || 'владельца');
-      system = `${persona}\n\n${rules}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+      system = `${persona}\n\n${rules}\n\n${catalog}\n\n${skillsPart}Контекст клиента:\n${clientCtx}`;
     }
 
     const turnState = freshTurnState();
