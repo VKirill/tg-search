@@ -12,6 +12,18 @@ CREATE TABLE IF NOT EXISTS agent_steps (
   ok INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_steps_lead ON agent_steps(lead_id, ts);
+CREATE TABLE IF NOT EXISTS approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER NOT NULL,
+  agent TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  input TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
 `;
 
 const ASSISTANT_SERVICE = {

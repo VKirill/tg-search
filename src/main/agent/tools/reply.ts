@@ -22,6 +22,7 @@ export function createReplyTool(deps: ToolHostDeps): AgentTool {
       deps.turnState.replyUsed = true;
       deps.turnState.replyText = text;
       deps.turnState.replyVoice = !!args.voice;
+      if (ctx.subagent) return 'Текст результата зафиксирован';
       if (ctx.dryRun) return `[dryRun] Отправили бы клиенту: ${text.slice(0, 200)}`;
       const voice = !!args.voice && deps.speech;
       if (voice) {

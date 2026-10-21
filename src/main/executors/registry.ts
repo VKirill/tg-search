@@ -5,15 +5,16 @@ import { createHomeworkExecutor } from './homework';
 import { createImageGenExecutor } from './image_gen';
 import { createMarketplaceCardExecutor } from './marketplace_card';
 import { createAssistantExecutor } from './assistant';
+import { createAgentExecutor, type AgentExecutorDeps } from './agent';
 
-export function createExecutors(getSettings: () => Settings): ExecutorRegistry {
+export function createExecutors(getSettings: () => Settings, agentDeps?: AgentExecutorDeps): ExecutorRegistry {
   return {
     homework: createHomeworkExecutor(getSettings),
     marketplace_card: createMarketplaceCardExecutor(getSettings),
     image_gen: createImageGenExecutor(getSettings),
     copywriting: createCopywritingExecutor(getSettings),
     assistant: createAssistantExecutor(getSettings),
-    agent: notConnected('agent'), // generic executor by an agent file: agents worker
+    agent: agentDeps ? createAgentExecutor(agentDeps) : notConnected('agent'),
   };
 }
 

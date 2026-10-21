@@ -12,6 +12,8 @@ import type { ManagerTestResult } from '../../shared/types';
 import { createOperator } from '../agent/operator';
 import type { Operator, OperatorResult } from '../agent/types';
 import type { ExecutorRegistry } from '../executors/types';
+import type { AgentDefsApi } from '../agent/defs';
+import type { ApprovalsApi } from '../agent/approvals';
 
 export interface OrdersHooks {
   handlePostManagerReply(leadId: number, result: ManagerTestResult, lastClientText: string): Promise<void>;
@@ -29,6 +31,8 @@ export interface ManagerAgentDeps extends OutreachDeps {
   dataDir?: string;
   getSettings?: () => import('../../shared/types').Settings;
   executors?: ExecutorRegistry;
+  agents?: AgentDefsApi;
+  getApprovals?: () => ApprovalsApi | undefined;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -164,6 +168,8 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
             await doHandoff(p, l, reason, bridgeReply, buildDialogHistory(l, msgs), summary);
           },
         },
+        agents: deps.agents,
+        getApprovals: deps.getApprovals,
       });
     }
     return operatorInstance;

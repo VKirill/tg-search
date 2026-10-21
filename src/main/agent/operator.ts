@@ -1,4 +1,4 @@
-import type { AgentStep, ChatMessage, Lead, ManagerSettings, Project } from '../../shared/types';
+import type { AgentDef, AgentStep, ChatMessage, Lead, ManagerSettings, Project } from '../../shared/types';
 import type { ManagerAi } from '../ai/types';
 import type { Billing } from '../billing/types';
 import type { ExecutorRegistry } from '../executors/types';
@@ -11,6 +11,11 @@ import { insertAgentStep } from './store';
 import { ensureAgentSchema } from './schema';
 import { buildAgentTools, freshTurnState, toolsToLlmDefs, type HandoffActions, type OrderActions } from './tools';
 import type { Operator, OperatorResult, OperatorTurnOptions } from './types';
+import type { AgentDefsApi } from './defs';
+import type { ApprovalsApi } from './approvals';
+import { gateToolCall } from './approvals';
+import { resolveAgentModel } from './model';
+import { createDelegateTool } from './tools/delegate';
 
 const MAX_TOOL_ROUNDS = 8;
 const TURN_COST_CAP_USD = 0.15;
@@ -24,6 +29,10 @@ const OPERATOR_RULES =
   'Если клиент хочет регулярную помощь, ассистента на месяц или много поручений — назови тариф подписки из каталога ' +
   '(цена, квота поручений, что входит) и предложи оформить (инструмент offer_subscription после согласия).';
 
+const HARD_IDENTITY_RULES =
+  'Жёсткие правила (всегда): ты — только помощник владельца, не живой человек; не утверждай, что ты человек; ' +
+  'не говори «я не бот» и не оправдывайся; на «ты бот?» / «кто ты?» — коротко: помощник {owner} и возврат к задаче.';
+
 export interface OperatorDeps extends OutreachDeps {
   getSettings: () => import('../../shared/types').Settings;
   manager: ManagerAi;
@@ -33,11 +42,15 @@ export interface OperatorDeps extends OutreachDeps {
   orders?: OrderActions;
   handoff?: HandoffActions;
   dataDir?: string;
+  agents?: AgentDefsApi;
+  approvals?: ApprovalsApi;
+  getApprovals?: () => ApprovalsApi | undefined;
   /** Test hook: replace the operator LLM */
   complete?: (
     messages: AgentChatMessage[],
     tools: ReturnType<typeof toolsToLlmDefs>,
     mgr?: ManagerSettings,
+    agent?: AgentDef,
   ) => Promise<AgentCompletionResult>;
 }
 
@@ -52,7 +65,6 @@ function lastClientText(lead: Lead, messages: ChatMessage[]): string {
   return lastIn?.text ?? lead.text;
 }
 
-// Every enabled plan is on sale (a new client has no subscription yet), plus the client's current one if any
 function billingPlansText(billing?: Billing, clientId?: number | null): string {
   if (!billing) return '';
   const lines = billing
@@ -66,8 +78,17 @@ function billingPlansText(billing?: Billing, clientId?: number | null): string {
   return lines.join('\n');
 }
 
+function projectContextBlock(project: Project, owner: string): string {
+  const materials = project.materials.map((m) => m.text?.trim()).filter(Boolean).join('\n\n') || '—';
+  return `Контекст проекта «${project.name}»: задача ${project.task}; кого ищем: ${project.target}; оффер: ${project.offer}; материалы:\n${materials}`.replaceAll(
+    '{owner}',
+    owner || 'владельца',
+  );
+}
+
 export function createOperator(deps: OperatorDeps): Operator {
-  ensureAgentSchema(deps.db.raw); // the trace table must exist wherever an operator runs
+  ensureAgentSchema(deps.db.raw);
+
   async function runWithFallback(
     project: Project,
     lead: Lead,
@@ -75,14 +96,14 @@ export function createOperator(deps: OperatorDeps): Operator {
     mgr: ManagerSettings,
     card: import('../../shared/types').ClientCard | undefined,
     dryRun: boolean,
+    continuation?: OperatorTurnOptions['approvalContinuation'],
   ): Promise<OperatorResult> {
     let lastErr: unknown;
     for (let i = 0; i < 2; i++) {
       try {
-        return await runToolLoop(project, lead, history, mgr, card, dryRun);
+        return await runToolLoop(project, lead, history, mgr, card, dryRun, continuation);
       } catch (e) {
         lastErr = e;
-        // Never fail silently: the owner sees operator errors in the «Агент» tab and the log
         console.error('operator turn failed', e);
         try {
           const step = insertAgentStep(deps.db, {
@@ -91,7 +112,7 @@ export function createOperator(deps: OperatorDeps): Operator {
           });
           deps.emit({ type: 'agent:step', step });
         } catch (traceErr) {
-          console.error('agent trace', traceErr); // the trace must never break the fallback
+          console.error('agent trace', traceErr);
         }
       }
     }
@@ -112,22 +133,52 @@ export function createOperator(deps: OperatorDeps): Operator {
     mgr: ManagerSettings,
     card: import('../../shared/types').ClientCard | undefined,
     dryRun: boolean,
+    continuation?: OperatorTurnOptions['approvalContinuation'],
   ): Promise<OperatorResult> {
     const owner = deps.getSettings().ownerName;
     const messages = deps.db.listMessages(lead.id);
     const lastIn = lastClientText(lead, messages);
     const clientId = lead.clientId ?? deps.memory?.clientForLead(lead.id)?.id ?? null;
 
-    const persona = projectManagerPrompt(project, mgr.prompt, owner);
-    const rules = OPERATOR_RULES.replaceAll('{owner}', owner || 'владельца');
     const catalog = catalogContext(deps.db, lead.id, billingPlansText(deps.billing, clientId));
     const clientCtx = buildClientContext(deps.db, lead, lastIn, deps.memory, card);
 
-    const system = `${persona}\n\n${rules}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+    const agentName = (project.agent || 'manager').trim() || 'manager';
+    let agentDef: AgentDef | undefined;
+    let maxRounds = MAX_TOOL_ROUNDS;
+    let temperature = 0.3;
+    let modelOverride = undefined as ReturnType<typeof resolveAgentModel>;
+
+    let system: string;
+    if (deps.agents) {
+      agentDef = deps.agents.get(agentName);
+      maxRounds = agentDef.steps;
+      temperature = agentDef.temperature ?? 0.3;
+      modelOverride = resolveAgentModel(agentDef.model, deps.getSettings());
+      const companyRules = deps.agents.rules();
+      const identity = HARD_IDENTITY_RULES.replaceAll('{owner}', owner || 'владельца');
+      system = `${companyRules}\n\n${identity}\n\n${agentDef.prompt}\n\n${projectContextBlock(project, owner)}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+    } else {
+      const persona = projectManagerPrompt(project, mgr.prompt, owner);
+      const rules = OPERATOR_RULES.replaceAll('{owner}', owner || 'владельца');
+      system = `${persona}\n\n${rules}\n\n${catalog}\n\nКонтекст клиента:\n${clientCtx}`;
+    }
 
     const turnState = freshTurnState();
     const toolHost = { ...deps, turnState };
-    const tools = buildAgentTools(toolHost);
+    let tools = buildAgentTools(toolHost);
+    const approvalsApi = deps.getApprovals?.() ?? deps.approvals;
+    if (deps.agents && approvalsApi && agentDef?.mode === 'primary') {
+      tools.push(
+        createDelegateTool({
+          ...toolHost,
+          agents: deps.agents,
+          approvals: approvalsApi,
+          primaryAgent: agentName,
+          clientContext: clientCtx,
+        }),
+      );
+    }
     const toolMap = new Map(tools.map((t) => [t.name, t]));
     const llmTools = toolsToLlmDefs(tools);
 
@@ -138,6 +189,12 @@ export function createOperator(deps: OperatorDeps): Operator {
         content: t.text,
       })),
     ];
+    if (continuation) {
+      chatMessages.push({
+        role: 'user',
+        content: `Система: согласованное действие «${continuation.tool}» выполнено. Результат:\n${continuation.output}\n\nПродолжи диалог с клиентом.`,
+      });
+    }
 
     const steps: AgentStep[] = [];
     let turnCost = 0;
@@ -145,11 +202,20 @@ export function createOperator(deps: OperatorDeps): Operator {
 
     const complete =
       deps.complete ??
-      ((msgs, defs, m) => agentChatCompletion(deps.getSettings, msgs, defs, m));
+      ((msgs, defs, m, agent) =>
+        agentChatCompletion(
+          deps.getSettings,
+          msgs,
+          defs,
+          m,
+          agent ? resolveAgentModel(agent.model, deps.getSettings()) : modelOverride,
+          agent?.temperature ?? temperature,
+        ));
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    let exhausted = false;
+    for (let round = 0; round < maxRounds; round++) {
       if (turnCost >= TURN_COST_CAP_USD) break;
-      const result = await complete(chatMessages, llmTools, mgr);
+      const result = await complete(chatMessages, llmTools, mgr, agentDef);
       turnCost += result.usageCostUsd;
       const msg = result.message;
 
@@ -173,11 +239,31 @@ export function createOperator(deps: OperatorDeps): Operator {
           output = 'Ошибка: невалидные аргументы JSON';
         }
         if (tool) {
-          try {
-            output = await tool.run(args, ctx);
-            ok = !output.startsWith('Ошибка:');
-          } catch (e) {
-            output = `Ошибка: ${e instanceof Error ? e.message : String(e)}`;
+          const skipPerm = (ctx as { skipPermission?: boolean }).skipPermission;
+          if (deps.agents && approvalsApi && agentDef && !skipPerm) {
+            const gate = gateToolCall(agentName, agentDef, tc.name, args, ctx, {
+              db: deps.db,
+              agents: deps.agents,
+              approvals: approvalsApi,
+            });
+            if (gate.blocked) {
+              output = gate.output;
+              ok = gate.ok;
+            } else {
+              try {
+                output = await tool.run(args, ctx);
+                ok = !output.startsWith('Ошибка:');
+              } catch (e) {
+                output = `Ошибка: ${e instanceof Error ? e.message : String(e)}`;
+              }
+            }
+          } else {
+            try {
+              output = await tool.run(args, ctx);
+              ok = !output.startsWith('Ошибка:');
+            } catch (e) {
+              output = `Ошибка: ${e instanceof Error ? e.message : String(e)}`;
+            }
           }
         }
 
@@ -196,6 +282,20 @@ export function createOperator(deps: OperatorDeps): Operator {
       }
 
       if (turnState.replyUsed || turnState.handoff) break;
+      if (round === maxRounds - 1) exhausted = !turnState.replyUsed && !turnState.handoff;
+    }
+
+    if (!turnState.replyText && agentDef && exhausted) {
+      const summary = await complete(
+        [
+          ...chatMessages,
+          { role: 'user', content: 'Кратко перечисли, что осталось сделать (2–4 предложения) и как продолжишь с клиентом.' },
+        ],
+        [],
+        mgr,
+        agentDef,
+      );
+      if (summary.message.content?.trim()) turnState.replyText = summary.message.content.trim();
     }
 
     return {
@@ -223,7 +323,7 @@ export function createOperator(deps: OperatorDeps): Operator {
       }
       const servicesCtx = managerServicesContext(deps.db.listServices(), lead.id ? deps.db.listOrders(lead.id) : []);
       const mgrWithCatalog = { ...mgr, prompt: `${mgr.prompt}\n\n${servicesCtx}` };
-      return runWithFallback(project, lead, history, mgrWithCatalog, card, dryRun);
+      return runWithFallback(project, lead, history, mgrWithCatalog, card, dryRun, opts?.approvalContinuation);
     },
   };
 }

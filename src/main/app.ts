@@ -41,6 +41,10 @@ import { createMemoryStore } from './memory/store';
 import { ensureAgentSchema } from './agent/schema';
 import { listAgentSteps } from './agent/store';
 import { createDedupe, pruneFingerprints, PRUNE_INTERVAL_MS } from './dedupe';
+import { createAgentDefs } from './agent/defs';
+import { createApprovals, type RunApprovedTool } from './agent/approvals';
+import { executeApprovedTool, makeToolHost } from './agent/toolRunner';
+import { createExecutors } from './executors/registry';
 
 export interface AppDeps {
   db: Db;
@@ -124,7 +128,10 @@ export function createApp(deps: AppDeps): AppHandlers {
     },
   };
   // The dossier gets order changes from the 'order:update' route above; passing it here too would log them twice
-  const orders = createOrders({
+  const agentDefs = createAgentDefs(dataDir);
+  const approvalsHolder: { api?: ReturnType<typeof createApprovals> } = {};
+
+  const ordersDeps = {
     ...pipeline,
     dossier: undefined,
     dataDir,
@@ -132,7 +139,8 @@ export function createApp(deps: AppDeps): AppHandlers {
     executors: deps.executors ?? stubExecutorRegistry(),
     skipOrderPaymentPoll: true,
     billingRef,
-  });
+  };
+  const orders = createOrders(ordersDeps);
   const sendToClient = async (leadId: number, text: string) => {
     await sendMessage(pipeline, leadId, text, 'dm', true);
   };
@@ -167,7 +175,45 @@ export function createApp(deps: AppDeps): AppHandlers {
     },
     dataDir,
     getSettings,
-    executors: deps.executors ?? stubExecutorRegistry(),
+    executors: ordersDeps.executors,
+    agents: agentDefs,
+    getApprovals: () => approvalsHolder.api,
+  });
+
+  const makeHostForLead = (leadId: number) =>
+    makeToolHost({
+      db,
+      engine,
+      ai,
+      speech,
+      emit,
+      getSettings,
+      memory,
+      billing,
+      executors: ordersDeps.executors,
+      orders: {
+        applyManagerIntent: orders.applyManagerIntent.bind(orders),
+        requestPayment: orders.requestPayment.bind(orders),
+      },
+      dataDir,
+    });
+
+  approvalsHolder.api = createApprovals({
+    db,
+    emit,
+    agents: agentDefs,
+    getOperator: () => managerAgent.getOperator(),
+    runTool: ((tool, args, leadId, agentName) =>
+      executeApprovedTool(tool, args, leadId, agentName, makeHostForLead(leadId))) satisfies RunApprovedTool,
+  });
+
+  ordersDeps.executors = createExecutors(getSettings, {
+    getSettings,
+    agents: agentDefs,
+    approvals: approvalsHolder.api,
+    makeToolHost: makeHostForLead,
+    emit,
+    db,
   });
   const operator = managerAgent.getOperator();
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
@@ -498,11 +544,13 @@ export function createApp(deps: AppDeps): AppHandlers {
       checkPayment: async (paymentId) => billing!.check(paymentId),
     },
     agents: {
-      list: notYet('agents worker'),
-      save: notYet('agents worker'),
-      remove: notYet('agents worker'),
-      rules: notYet('agents worker'),
-      saveRules: notYet('agents worker'),
+      list: async () => agentDefs.list(),
+      save: async (def) => agentDefs.save(def),
+      remove: async (name) => {
+        agentDefs.remove(name);
+      },
+      rules: async () => agentDefs.rules(),
+      saveRules: async (text) => agentDefs.saveRules(text),
     },
     skills: {
       list: notYet('skills worker'),
@@ -516,8 +564,8 @@ export function createApp(deps: AppDeps): AppHandlers {
       setTemplateStatus: async (id, status) => dedupe.setTemplateStatus(id, status),
     },
     approvals: {
-      list: notYet('agents worker'),
-      decide: notYet('agents worker'),
+      list: async (status) => approvalsHolder.api!.list(status),
+      decide: async (id, approve) => approvalsHolder.api!.decide(id, approve),
     },
     agent: {
       trace: async (leadId, limit) => listAgentSteps(db, leadId, limit ?? 100),

@@ -7,6 +7,8 @@ export interface ToolContext {
   leadId: number;
   clientId: number | null;
   dryRun: boolean; // sandbox: tools describe what they would do and change nothing
+  subagent?: boolean; // delegate/subagent: reply does not send to Telegram
+  skipPermission?: boolean; // owner-approved replay
 }
 
 export interface AgentTool {
@@ -29,6 +31,8 @@ export interface OperatorTurnOptions {
   settings?: ManagerSettings;
   leadOverride?: Lead;
   projectOverride?: Project;
+  /** After owner approval/denial: one turn with the tool outcome injected. */
+  approvalContinuation?: { tool: string; output: string };
 }
 
 export interface Operator {
