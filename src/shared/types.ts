@@ -359,6 +359,7 @@ export interface SkillDef {
   status: 'active' | 'draft' | 'disabled'; // drafts (learned from repeated tasks) wait for the owner's approval
   source: 'builtin' | 'owner' | 'learned';
   uses: number;
+  lessons: string[]; // learned from finished orders (revisions, client feedback); appended when the skill is loaded
   updatedAt: number;
 }
 
@@ -745,9 +746,10 @@ export interface Api {
   };
   skills: {
     list(): Promise<SkillDef[]>;
-    save(skill: Omit<SkillDef, 'uses' | 'updatedAt'>): Promise<SkillDef>;
+    save(skill: Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'>): Promise<SkillDef>;
     remove(name: string): Promise<void>;
     approve(name: string): Promise<SkillDef>; // draft → active
+    removeLesson(name: string, index: number): Promise<SkillDef>; // a wrong lesson
   };
   spam: {
     templates(): Promise<SpamTemplate[]>;

@@ -20,7 +20,7 @@ export function SkillsView() {
   const toast = useToast();
   const [skills, setSkills] = useState<SkillDef[]>([]);
   const [tab, setTab] = useState<Tab>('active');
-  const [editing, setEditing] = useState<Omit<SkillDef, 'uses' | 'updatedAt'> | null>(null);
+  const [editing, setEditing] = useState<Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'> | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -130,7 +130,10 @@ export function SkillsView() {
                 <span className="badge">{sourceLabel(s.source)}</span>
               </div>
               <p className="skill-card__desc">{s.description}</p>
-              <div className="skill-card__meta">Использований: {s.uses}</div>
+              <div className="skill-card__meta">
+                Использований: {s.uses}
+                {s.lessons.length > 0 && ` · уроков: ${s.lessons.length}`}
+              </div>
               {s.status === 'draft' && (
                 <div className="skill-card__draft-actions">
                   <button type="button" className="btn btn--primary btn--sm" onClick={() => approve(s.name)}>Утвердить</button>
@@ -184,6 +187,26 @@ export function SkillsView() {
                 <label>Тело SKILL.md</label>
                 <textarea className="code-editor" value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} rows={18} spellCheck={false} />
               </div>
+              {(skills.find((s) => s.name === editing.name)?.lessons.length ?? 0) > 0 && (
+                <div className="field">
+                  <label>Уроки из прошлых заказов — добавляются к инструкции автоматически</label>
+                  <ul className="skill-lessons">
+                    {skills.find((s) => s.name === editing.name)!.lessons.map((l, i) => (
+                      <li key={i}>
+                        <span>{l}</span>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          aria-label="Удалить урок"
+                          onClick={() => getApi().skills.removeLesson(editing.name, i).then(() => load(), (e) => toast(e instanceof Error ? e.message : String(e)))}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="field">
                 <label>Статус</label>
                 <select

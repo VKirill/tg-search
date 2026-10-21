@@ -35,7 +35,7 @@ function parseSimpleYaml(fm: string): Record<string, string> {
   return out;
 }
 
-export function parseSkillMd(raw: string): Omit<SkillDef, 'uses' | 'updatedAt'> {
+export function parseSkillMd(raw: string): Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'> {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) throw new Error('SKILL.md must start with YAML front matter');
   const fields = parseSimpleYaml(m[1]);
@@ -55,7 +55,7 @@ export function parseSkillMd(raw: string): Omit<SkillDef, 'uses' | 'updatedAt'> 
   return { name, description: description.trim(), body, status, source };
 }
 
-export function serializeSkillMd(skill: Omit<SkillDef, 'uses' | 'updatedAt'>): string {
+export function serializeSkillMd(skill: Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'>): string {
   const esc = (s: string) => (s.includes('\n') || s.includes(':') ? JSON.stringify(s) : s);
   return `---
 name: ${esc(skill.name)}

@@ -982,6 +982,7 @@ const mockSkills: SkillDef[] = [
     status: 'active',
     source: 'builtin',
     uses: 14,
+    lessons: ['Сразу спрашивай площадки и частоту постов — без этого план переделывают', 'Предлагай обложки к постам вместе с планом'],
     updatedAt: now,
   },
   {
@@ -991,6 +992,7 @@ const mockSkills: SkillDef[] = [
     status: 'active',
     source: 'owner',
     uses: 6,
+    lessons: [],
     updatedAt: now,
   },
   {
@@ -1000,6 +1002,7 @@ const mockSkills: SkillDef[] = [
     status: 'draft',
     source: 'learned',
     uses: 0,
+    lessons: [],
     updatedAt: now,
   },
 ];
@@ -1856,7 +1859,7 @@ export function createMockApi(): Api {
         return mockSkills.map((x) => ({ ...x }));
       },
       async save(skill) {
-        const v = { ...skill, uses: 0, updatedAt: Date.now() };
+        const v = { ...skill, uses: 0, lessons: mockSkills.find((x) => x.name === skill.name)?.lessons ?? [], updatedAt: Date.now() };
         const i = mockSkills.findIndex((x) => x.name === skill.name);
         if (i >= 0) mockSkills[i] = v;
         else mockSkills.push(v);
@@ -1865,6 +1868,11 @@ export function createMockApi(): Api {
       async remove(name) {
         const i = mockSkills.findIndex((x) => x.name === name);
         if (i >= 0) mockSkills.splice(i, 1);
+      },
+      async removeLesson(name, index) {
+        const v = mockSkills.find((x) => x.name === name)!;
+        v.lessons = v.lessons.filter((_, i) => i !== index);
+        return { ...v };
       },
       async approve(name) {
         const v = mockSkills.find((x) => x.name === name)!;

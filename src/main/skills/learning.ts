@@ -1,6 +1,6 @@
 import type { Db } from '../db';
 import type { Order, Settings, SkillDef } from '../../shared/types';
-import { clusterBriefsAsync, briefSimilarity } from './similarity';
+import { clusterBriefsAsync, briefSimilarity, jaccard } from './similarity';
 import { clusterKey, type SkillsState } from './schema';
 import { parseSkillMd, serializeSkillMd } from './frontmatter';
 import { skillCoversTask, type SkillOption } from './jev';
@@ -68,7 +68,7 @@ async function generateSkillDraft(
             'Ты пишешь файл SKILL.md для агента-менеджера (формат opencode / Claude Code). Ответ — только полный текст файла, ' +
             'начинается с YAML front matter (---): обязательные поля name (латиница, дефисы), description (когда использовать, ≤1024 символов), ' +
             'metadata.status: draft, metadata.source: learned. Тело на русском: когда использовать, что спросить у клиента, как оценить цену ' +
-            `внутри вилки ${priceMin}–${priceMax} ₽, пошаговые действия, чеклист качества, формат сдачи. Имя умения — короткое, по смыслу задачи.`,
+            `внутри вилки ${priceMin}–${priceMax} ₽, пошаговые действия, чеклист качества, формат сдачи и раздел «Что предложить дальше» (1–3 сопутствующие услуги, которые клиенту понадобятся после этой задачи). Имя умения — короткое, по смыслу задачи.`,
         },
         {
           role: 'user',
@@ -136,7 +136,7 @@ export async function maybeLearnSkillFromOrders(deps: LearnDeps): Promise<SkillD
       );
       if (!raw) continue;
 
-      let parsed: Omit<SkillDef, 'uses' | 'updatedAt'>;
+      let parsed: Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'>;
       try {
         parsed = parseSkillMd(raw);
         parsed = { ...parsed, status: 'draft', source: 'learned' };
@@ -151,4 +151,79 @@ export async function maybeLearnSkillFromOrders(deps: LearnDeps): Promise<SkillD
     }
   }
   return null;
+}
+
+const MAX_LESSONS = 12;
+
+// After a finished order: what to do differently next time with this skill (revisions, client remarks).
+// 0–2 short lessons per skill the agent used for the lead; repeats of known lessons are dropped.
+export async function learnLessonsFromOrder(deps: {
+  db: Db;
+  getSettings: () => Settings;
+  order: Order;
+  readState: () => SkillsState;
+  writeState: (s: SkillsState) => void;
+  skillBody: (name: string) => string | null;
+  fetchAux?: FetchFn;
+}): Promise<number> {
+  const names = deps.readState().leadSkills[deps.order.leadId] ?? [];
+  if (!names.length) return 0;
+  const settings = deps.getSettings();
+  const base = settings.auxBaseUrl.replace(/\/$/, '');
+  const key = settings.auxApiKey.trim();
+  if (!base || !key || !settings.auxModel.trim()) return 0;
+  const fetchFn = deps.fetchAux ?? fetch;
+  const dialog = deps.db.listMessages(deps.order.leadId).slice(-30)
+    .map((m) => `${m.direction === 'in' ? 'Клиент' : 'Мы'}: ${m.text}`).join('\n');
+  let added = 0;
+  for (const name of names.slice(0, 2)) {
+    const body = deps.skillBody(name);
+    if (!body) continue;
+    const known = deps.readState().lessons[name] ?? [];
+    const res = await fetchFn(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: settings.auxModel,
+        stream: false,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Ты улучшаешь инструкцию агента-менеджера по итогам выполненного заказа. Найди, что стоит делать иначе в следующий ' +
+              'раз: что клиент просил переделать, чем был недоволен или что похвалил, какой вопрос стоило задать сразу, что ещё он ' +
+              'докупил. Ответ — только JSON {"lessons":["…"]}: 0–2 урока, каждый одно короткое правило на русском в повелительном ' +
+              'наклонении, применимое к будущим заказам, без имён и деталей этого клиента. Если учиться нечему — пустой список. ' +
+              'Не повторяй то, что уже есть в инструкции и в известных уроках.',
+          },
+          {
+            role: 'user',
+            content: `Инструкция «${name}»:\n${body.slice(0, 3000)}\n\nИзвестные уроки:\n${known.map((l) => `- ${l.text}`).join('\n') || '—'}\n\n` +
+              `Заказ: ${deps.order.brief}\nРезультат: ${(deps.order.result ?? '—').slice(0, 1500)}\nПравок: ${deps.order.revisionsUsed}\n\nПереписка:\n${dialog}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) continue;
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const raw = data.choices?.[0]?.message?.content ?? '';
+    let lessons: string[] = [];
+    try {
+      const m = /\{[\s\S]*\}/.exec(raw);
+      lessons = ((m ? JSON.parse(m[0]) : {}) as { lessons?: unknown }).lessons as string[] ?? [];
+    } catch {
+      continue;
+    }
+    const fresh = lessons.map((l) => String(l).trim()).filter((l) => l.length > 5)
+      .filter((l) => !known.some((k) => jaccard(k.text, l) >= 0.6)).slice(0, 2);
+    if (!fresh.length) continue;
+    const state = deps.readState();
+    state.lessons[name] = [...(state.lessons[name] ?? []), ...fresh.map((text) => ({ text, at: Date.now(), orderId: deps.order.id }))]
+      .slice(-MAX_LESSONS);
+    deps.writeState(state);
+    added += fresh.length;
+  }
+  return added;
 }

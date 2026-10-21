@@ -599,6 +599,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         skills.remove(name);
       },
       approve: async (name) => skills.approve(name),
+      removeLesson: async (name, index) => skills.removeLesson(name, index),
     },
     spam: {
       templates: async () => dedupe.listTemplates(),

@@ -8,6 +8,7 @@ import { createBillingTools } from './billing';
 import { createSendAssetTool } from './asset';
 import { createWebTools } from './web';
 import { createRunTaskTool } from './runTask';
+import { createOfferAddonTool } from './upsell';
 import { createSkillsTool } from './skills';
 
 export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
@@ -19,6 +20,7 @@ export function buildAgentTools(deps: ToolHostDeps): AgentTool[] {
     ...createOrderTools(deps),
     ...createBillingTools(deps),
     createRunTaskTool(deps),
+    createOfferAddonTool(deps),
     ...createWebTools(deps),
   ];
   if (deps.skills) tools.push(createSkillsTool(deps));

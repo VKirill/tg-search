@@ -6,17 +6,18 @@ import type { Db } from '../db';
 import { parseSkillMd, serializeSkillMd, validateSkillName } from './frontmatter';
 import { EMPTY_SKILLS_STATE, type SkillsState } from './schema';
 import { hintSkillsForMessage, type SkillOption } from './jev';
-import { maybeLearnSkillFromOrders, type FetchFn } from './learning';
+import { learnLessonsFromOrder, maybeLearnSkillFromOrders, type FetchFn } from './learning';
 import type { postSystemOne } from '../ai/jev';
 
 const STATE_FILE = '_state.json';
 
 export interface SkillsStore {
   list(): SkillDef[];
-  save(skill: Omit<SkillDef, 'uses' | 'updatedAt'>): SkillDef;
+  save(skill: Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'>): SkillDef;
   remove(name: string): void;
   approve(name: string): SkillDef;
-  loadSkillBody(name: string): string;
+  loadSkillBody(name: string, leadId?: number): string;
+  removeLesson(name: string, index: number): SkillDef;
   activeCatalog(): SkillOption[];
   formatAvailableBlock(): string;
   hintForClientMessage(text: string): Promise<string>;
@@ -100,6 +101,7 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
       ...parsed,
       source: parsed.source === 'owner' && sourceDefault === 'builtin' ? 'builtin' : parsed.source,
       uses: state.uses[parsed.name] ?? 0,
+      lessons: (state.lessons[parsed.name] ?? []).map((l) => l.text),
       updatedAt: fileMtime(path),
     };
     return def;
@@ -137,7 +139,7 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function writeUserSkill(skill: Omit<SkillDef, 'uses' | 'updatedAt'>): SkillDef {
+  function writeUserSkill(skill: Omit<SkillDef, 'uses' | 'updatedAt' | 'lessons'>): SkillDef {
     const err = validateSkillName(skill.name);
     if (err) throw new Error(err);
     const dir = skillDir(userRoot, skill.name);
@@ -148,6 +150,7 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
     const saved: SkillDef = {
       ...skill,
       uses: state.uses[skill.name] ?? 0,
+      lessons: (state.lessons[skill.name] ?? []).map((l) => l.text),
       updatedAt: Date.now(),
     };
     return saved;
@@ -178,7 +181,7 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
       return writeUserSkill({ ...sk, status: 'active' });
     },
 
-    loadSkillBody(name) {
+    loadSkillBody(name, leadId) {
       const sk = list().find((s) => s.name === name);
       if (!sk) throw new Error('Умение не найдено');
       if (sk.status !== 'active') throw new Error('Умение недоступно');
@@ -188,8 +191,24 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
       if (!existsSync(path)) throw new Error('Файл умения не найден');
       const state = readStateFile(userRoot);
       state.uses[name] = (state.uses[name] ?? 0) + 1;
+      if (leadId != null) {
+        const used = state.leadSkills[leadId] ?? [];
+        state.leadSkills[leadId] = [name, ...used.filter((n) => n !== name)].slice(0, 3);
+      }
       writeStateFile(userRoot, state);
-      return parseSkillMd(readFileSync(path, 'utf8')).body;
+      const body = parseSkillMd(readFileSync(path, 'utf8')).body;
+      const lessons = state.lessons[name] ?? [];
+      if (!lessons.length) return body;
+      return `${body}\n\n## Уроки из прошлых заказов\n\n${lessons.map((l) => `- ${l.text}`).join('\n')}`;
+    },
+
+    removeLesson(name, index) {
+      const state = readStateFile(userRoot);
+      state.lessons[name] = (state.lessons[name] ?? []).filter((_, i) => i !== index);
+      writeStateFile(userRoot, state);
+      const sk = list().find((s) => s.name === name);
+      if (!sk) throw new Error('Умение не найдено');
+      return sk;
     },
 
     activeCatalog() {
@@ -218,6 +237,18 @@ export function createSkillsStore(deps: CreateSkillsDeps): SkillsStore {
 
     async onOrderUpdated(order) {
       if (order.status !== 'done') return;
+      await learnLessonsFromOrder({
+        db: deps.db,
+        getSettings: deps.getSettings,
+        order,
+        readState: () => readStateFile(userRoot),
+        writeState: (s) => writeStateFile(userRoot, s),
+        skillBody: (name) => {
+          const sk = list().find((s) => s.name === name && s.status === 'active');
+          return sk?.body ?? null;
+        },
+        fetchAux: deps.fetchAux,
+      }).catch((err) => console.error('skill lessons', err));
       const draft = await maybeLearnSkillFromOrders({
         db: deps.db,
         getSettings: deps.getSettings,

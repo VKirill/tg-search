@@ -16,6 +16,7 @@ import type { ApprovalsApi } from './approvals';
 import { gateToolCall } from './approvals';
 import { resolveAgentModel } from './model';
 import { createDelegateTool } from './tools/delegate';
+import { upsellBlock } from './upsell';
 import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
@@ -148,7 +149,8 @@ export function createOperator(deps: OperatorDeps): Operator {
     const skillsBlock = deps.skills?.formatAvailableBlock() ?? '';
     const skillHint = deps.skills ? await deps.skills.hintForClientMessage(lastIn) : '';
     const skillsCtx = [skillsBlock, skillHint].filter(Boolean).join('\n\n');
-    const skillsPart = skillsCtx ? `${skillsCtx}\n\n` : '';
+    const upsell = upsellBlock(deps.db, lead.id);
+    const skillsPart = [skillsCtx, upsell].filter(Boolean).map((b) => `${b}\n\n`).join('');
 
     const agentName = (project.agent || 'manager').trim() || 'manager';
     let agentDef: AgentDef | undefined;

@@ -17,7 +17,7 @@ export function createSkillsTool(deps: ToolHostDeps & { skills?: SkillsStore }):
       if (!name) return 'Ошибка: укажите name';
       if (ctx.dryRun) return `[dryRun] Загрузили бы умение ${name}`;
       try {
-        const body = deps.skills.loadSkillBody(name);
+        const body = deps.skills.loadSkillBody(name, ctx.leadId);
         return body;
       } catch (e) {
         return `Ошибка: ${e instanceof Error ? e.message : String(e)}`;

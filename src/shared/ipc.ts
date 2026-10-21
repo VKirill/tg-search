@@ -24,7 +24,7 @@ export const API_METHODS: ApiMap = {
   billing: ['plans', 'savePlan', 'removePlan', 'subscriptions', 'subscribe', 'cancelSubscription', 'payments', 'checkPayment'],
   agent: ['trace'],
   agents: ['list', 'save', 'remove', 'rules', 'saveRules'],
-  skills: ['list', 'save', 'remove', 'approve'],
+  skills: ['list', 'save', 'remove', 'approve', 'removeLesson'],
   news: ['channels', 'addChannel', 'updateChannel', 'removeChannel', 'items', 'setStatus', 'draft', 'runNow'],
   approvals: ['list', 'decide'],
   spam: ['templates', 'markSpam', 'setTemplateStatus', 'chats', 'blockChat', 'unblockChat'],
