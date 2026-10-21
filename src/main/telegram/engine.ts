@@ -341,10 +341,47 @@ export class TdlEngine implements TelegramEngine {
 
   async react(accountId: number, chatId: number, messageId: number, emoji: string): Promise<void> {
     const slot = await this.requireAuthorizedSlot(accountId);
+    // TDLib checks the reaction against the message's available list — load it first (the message, then its reactions)
+    await this.invoke(slot, { _: 'getMessage', chat_id: chatId, message_id: messageId });
+    // TDLib loads the active reactions lazily: the first request may come back empty while the list loads
+    const offered = async () => {
+      const avail = await this.invoke(slot, { _: 'getMessageAvailableReactions', chat_id: chatId, message_id: messageId, row_size: 8 });
+      return [...avail.top_reactions, ...avail.recent_reactions, ...avail.popular_reactions]
+        .map((r) => (r.type._ === 'reactionTypeEmoji' ? r.type.emoji : '')).filter(Boolean);
+    };
+    let emojis = await offered();
+    for (let i = 0; i < 3 && !emojis.length; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      emojis = await offered();
+    }
+    if (!emojis.includes(emoji)) {
+      const chat = await this.invoke(slot, { _: 'getChat', chat_id: chatId });
+      console.warn(`reaction ${emoji} is not offered for ${chatId}/${messageId}; offered: ${emojis.slice(0, 12).join(' ') || 'none'}; chat allows: ${JSON.stringify(chat.available_reactions).slice(0, 200)}`);
+    }
     await this.invoke(slot, {
       _: 'addMessageReaction', chat_id: chatId, message_id: messageId,
       reaction_type: { _: 'reactionTypeEmoji', emoji }, is_big: false, update_recent_reactions: false,
     });
+  }
+
+  async sendPoll(accountId: number, chatId: number, replyToMessageId: number, question: string, options: string[]): Promise<TgMessage> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const text = (t: string) => ({ _: 'formattedText' as const, text: t, entities: [] });
+    return this.sendContent(slot, chatId, {
+      _: 'inputMessagePoll', question: text(question), options: options.map((o) => ({ _: 'inputPollOption', text: text(o) })),
+      is_anonymous: false, allows_multiple_answers: true, allows_revoting: true, type: { _: 'inputPollTypeRegular' },
+    } as never, replyToMessageId);
+  }
+
+  async pollVoters(accountId: number, chatId: number, messageId: number, optionId: number): Promise<number[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const res = await this.invoke(slot, { _: 'getPollVoters', chat_id: chatId, message_id: messageId, option_id: optionId, offset: 0, limit: 50 });
+    return res.voters.map((v) => (v.voter_id._ === 'messageSenderUser' ? v.voter_id.user_id : 0)).filter(Boolean);
+  }
+
+  async stopPoll(accountId: number, chatId: number, messageId: number): Promise<void> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, { _: 'stopPoll', chat_id: chatId, message_id: messageId });
   }
 
   async getChat(accountId: number, chatId: number): Promise<TgChat> {

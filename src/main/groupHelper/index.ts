@@ -7,10 +7,15 @@ import type { AppEvent, HelperChat, HelperRequest, Settings } from '../../shared
 import type { Db } from '../db';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { afterSend, canSend } from '../pipeline/limiter';
+import { trustedFor } from '../trusted';
 
 export const TASK_THRESHOLD = 0.5;
 const ASK_TTL_MS = 3 * 3600_000; // a «какую решить?» question waits this long for the answer
 const MAX_PARALLEL = 3;
+const POLL_TASKS_MAX = 9; // poll options: the tasks plus «Все»
+const ALL = 'Все';
+const POLL_CHECK_MS = 4000;
+const CATCH_UP_MS = 6 * 3600_000; // messages missed while the app was off: no older than this
 
 export interface GroupHelperDeps {
   db: Db;
@@ -58,7 +63,13 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     error TEXT,
     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
     UNIQUE(chat_id, message_id)
-  )`);
+  );
+  CREATE TABLE IF NOT EXISTS helper_seen (chat_id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL)`);
+  try {
+    db.raw.exec("ALTER TABLE helper_requests ADD COLUMN options TEXT"); // the poll's answer options, when we asked with a poll
+  } catch {
+    /* already there */
+  }
 
   const chats = (): HelperChat[] => {
     try {
@@ -121,6 +132,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       r.text.trim() ? `Сообщение ученика: ${r.text.trim()}` : '',
       JSON.parse(r.photos).length ? `На фото: ${r.picture}. Решить: ${which}.` : '',
       'Ответ увидят все участники чата ГДЗ: реши в обучающем формате, чтобы было понятно, как решать такие задачи.',
+      'Уровень — класс из описания фото или сообщения: методы его школьной программы, один основной способ, без лишнего.',
     ].filter(Boolean).join('\n');
     try {
       const dir = join(deps.dataDir, 'group', String(r.chat_id), String(r.message_id));
@@ -146,7 +158,11 @@ export function createGroupHelper(deps: GroupHelperDeps) {
 
   async function onMessage(accountId: number, msg: TgMessage) {
     const chat = chats().find((c) => c.enabled && c.chatId === msg.chatId && c.accountId === accountId);
-    if (!chat || msg.isOutgoing || msg.senderIsBot || msg.senderUserId == null) return;
+    if (!chat) return;
+    // the last message read: after a restart the helper reads on from here
+    db.raw.prepare(`INSERT INTO helper_seen(chat_id, message_id) VALUES(?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET message_id = MAX(message_id, excluded.message_id)`).run(msg.chatId, msg.messageId);
+    if (msg.isOutgoing || msg.senderIsBot || msg.senderUserId == null) return;
     if (db.raw.prepare('SELECT 1 FROM helper_requests WHERE chat_id = ? AND message_id = ?').get(msg.chatId, msg.messageId)) return;
     const userId = msg.senderUserId;
     const now = Date.now();
@@ -187,7 +203,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return;
     }
     const cap = Number(deps.getSettings().helperDailyPerUser || 0);
-    if (cap > 0 && solvedToday(msg.chatId, userId) >= cap) {
+    const own = trustedFor(db, { username: msg.senderUsername, userId }) != null; // «свои люди» have no daily cap
+    if (cap > 0 && !own && solvedToday(msg.chatId, userId) >= cap) {
       const already = db.raw.prepare(`SELECT 1 FROM helper_requests WHERE chat_id = ? AND user_id = ? AND status = 'limit' AND created_at > ?`)
         .get(msg.chatId, userId, now - 12 * 3600_000);
       const id = insert('limit');
@@ -199,24 +216,70 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     }
     const sel = parseSelection(msg.text);
     if (photos.length && tasks.length > 1 && !sel) {
+      // a poll for the author: only their vote counts; a text answer from them works too
       const id = insert('asked');
-      const list = tasks.slice(0, 12).join(', ');
-      const q = await sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId,
-        `вижу на фото задания ${list} — какое решить? напиши номер в ответ или «все»`));
-      set(id, { question_id: q.messageId });
+      const options = tasks.length <= POLL_TASKS_MAX ? [...tasks.map((t) => (/^№/.test(t) ? t : `№ ${t}`)), ALL] : null;
+      const who = (msg.senderName ?? '').split(' ')[0];
+      const question = `${who ? `${who}, к` : 'К'}акие задания решить? Можно выбрать несколько`.slice(0, 255);
+      let poll = false;
+      const q = await (options
+        ? sendLimited(accountId, () => deps.engine.sendPoll(accountId, msg.chatId, msg.messageId, question, options)).then((m) => ((poll = true), m))
+        : Promise.reject(new Error('слишком много заданий для опроса')))
+        .catch(() => sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId,
+          `вижу на фото задания ${tasks.slice(0, 20).join(', ')} — какое решить? напиши номер в ответ или «все»`)));
+      set(id, { question_id: q.messageId, options: poll ? JSON.stringify(options) : null });
       return;
     }
     const id = insert('queued', sel === 'all' || !sel ? 'all' : sel.join(', '));
     enqueue(id);
   }
 
+  // The author's vote in our poll: as soon as they choose, the poll closes and the solving starts
+  async function checkPolls() {
+    const rows = db.raw.prepare("SELECT * FROM helper_requests WHERE status = 'asked' AND options IS NOT NULL").all() as Row[];
+    for (const r of rows) {
+      if (r.created_at < Date.now() - ASK_TTL_MS) {
+        set(r.id, { status: 'ignored', error: 'не выбрал задания' });
+        await deps.engine.stopPoll(r.account_id, r.chat_id, r.question_id).catch(() => {});
+        continue;
+      }
+      const options: string[] = JSON.parse(r.options);
+      const chosen: string[] = [];
+      for (const [i, option] of options.entries()) {
+        const voters = await deps.engine.pollVoters(r.account_id, r.chat_id, r.question_id, i).catch(() => [] as number[]);
+        if (voters.includes(r.user_id)) chosen.push(option);
+      }
+      if (!chosen.length) continue;
+      set(r.id, { selection: chosen.includes(ALL) ? 'all' : chosen.join(', ') });
+      await deps.engine.stopPoll(r.account_id, r.chat_id, r.question_id).catch(() => {});
+      enqueue(r.id);
+    }
+  }
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
   return {
-    start() {
+    stop() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    },
+    async start() {
+      pollTimer = setInterval(() => void checkPolls().catch((err) => console.error('group helper polls', err)), POLL_CHECK_MS);
       deps.engine.onChatMessage((accountId, msg) => {
         onMessage(accountId, msg).catch((err) => console.error('group helper', msg.chatId, msg.messageId, err));
       });
       // interrupted by a restart: solve again
       for (const r of db.raw.prepare("SELECT id FROM helper_requests WHERE status IN ('queued', 'solving')").all() as { id: number }[]) enqueue(r.id);
+      // what came while the app was off or restarting (a task, the «все» to our question): read on, oldest first
+      for (const chat of chats().filter((c) => c.enabled)) {
+        const seen = db.raw.prepare('SELECT message_id FROM helper_seen WHERE chat_id = ?').get(chat.chatId) as { message_id: number } | undefined;
+        try {
+          const missed = await deps.engine.getHistory(chat.accountId, chat.chatId, Date.now() - CATCH_UP_MS, seen?.message_id ?? null, 100);
+          for (const m of missed) await onMessage(chat.accountId, m).catch((err) => console.error('group helper catch-up', m.messageId, err));
+          if (missed.length) console.log(`group helper: read ${missed.length} missed message(s) in ${chat.title}`);
+        } catch (err) {
+          console.error('group helper catch-up', chat.chatId, err);
+        }
+      }
     },
     chats,
     saveChats(list: HelperChat[]) {
@@ -227,6 +290,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return (db.raw.prepare('SELECT * FROM helper_requests ORDER BY id DESC LIMIT ?').all(limit) as Row[]).map(toRequest);
     },
     onMessage, // for tests
+    checkPolls, // for tests
   };
 }
 

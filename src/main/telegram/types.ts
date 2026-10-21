@@ -68,6 +68,10 @@ export interface TelegramEngine {
   markRead(accountId: number, chatId: number, messageIds: number[]): Promise<void>;
   // An emoji reaction on a message (🔥 — «взял в работу» in the homework chat)
   react(accountId: number, chatId: number, messageId: number, emoji: string): Promise<void>;
+  // A public (non-anonymous) poll with several answers as a reply; who voted for an option; closing it
+  sendPoll(accountId: number, chatId: number, replyToMessageId: number, question: string, options: string[]): Promise<TgMessage>;
+  pollVoters(accountId: number, chatId: number, messageId: number, optionId: number): Promise<number[]>; // user ids
+  stopPoll(accountId: number, chatId: number, messageId: number): Promise<void>;
   // t.me/<name>, t.me/<name>/<post>, t.me/c/<id>/<post>, tg://… → the chat and the message (if the link has one);
   // never joins: an invite link to a chat we are not in fails with a hint
   resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }>;

@@ -531,7 +531,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         }
       }
       if (unanswered.length) console.log(`resume: ${unanswered.length} dialog(s) waiting for an answer`);
-      groupHelper.start();
+      void groupHelper.start();
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
@@ -555,6 +555,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       orders.stopPoller();
       broadcaster.stop();
       realtime.stop();
+      groupHelper.stop();
       importer.stop();
       managerAgent.stop();
       autopilot.stop();

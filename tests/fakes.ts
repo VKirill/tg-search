@@ -68,6 +68,21 @@ export class FakeEngine implements TelegramEngine {
     return { chat, messageId: m?.[2] ? Number(m[2]) : null };
   }
   readMarks: { chatId: number; messageIds: number[] }[] = [];
+  polls: { chatId: number; messageId: number; replyTo: number; question: string; options: string[]; stopped: boolean }[] = [];
+  pollVotes = new Map<string, number[]>(); // `${messageId}:${optionId}` → user ids
+  async sendPoll(_accountId: number, chatId: number, replyTo: number, question: string, options: string[]): Promise<TgMessage> {
+    const messageId = 9000 + this.polls.length;
+    this.polls.push({ chatId, messageId, replyTo, question, options, stopped: false });
+    return { chatId, messageId, date: Date.now(), text: question, senderUserId: null, senderChatId: null, senderName: null, senderUsername: null,
+      senderIsBot: false, voice: null, photo: null, document: null, replyToMessageId: replyTo, link: null, isOutgoing: true };
+  }
+  async pollVoters(_accountId: number, _chatId: number, messageId: number, optionId: number): Promise<number[]> {
+    return this.pollVotes.get(`${messageId}:${optionId}`) ?? [];
+  }
+  async stopPoll(_accountId: number, _chatId: number, messageId: number): Promise<void> {
+    const p = this.polls.find((x) => x.messageId === messageId);
+    if (p) p.stopped = true;
+  }
   reactions: { chatId: number; messageId: number; emoji: string }[] = [];
   async react(_accountId: number, chatId: number, messageId: number, emoji: string): Promise<void> {
     this.reactions.push({ chatId, messageId, emoji });
