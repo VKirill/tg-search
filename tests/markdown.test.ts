@@ -32,3 +32,62 @@ describe('rich message text', () => {
     expect(richMessageText(blocks)).toBe('Что умею\nПоиск и тексты\nкарточки');
   });
 });
+
+describe('educational rich blocks', () => {
+  const solution = [
+    '## Задача 1',
+    '> Найдите корни $x^2 - 5x + 6 = 0$',
+    '1. Дискриминант $D = 25 - 24 = 1$',
+    '<details>',
+    '<summary>Почему так</summary>',
+    'Для $ax^2+bx+c$ дискриминант $D = b^2 - 4ac$.',
+    '</details>',
+    '$$',
+    'x = \\frac{5 \\pm 1}{2}',
+    '$$',
+    '**Ответ: 2 и 3**, проверка ||подставь сам||',
+    '<details open><summary>Проверка</summary>4 - 10 + 6 = 0</details>',
+  ].join('\n');
+
+  it('collapsible blocks, formulas and spoilers become Rich Message blocks', async () => {
+    const { markdownToBlocks, hasRichMarkup } = await import('../src/main/telegram/markdown');
+    expect(hasRichMarkup('<details><summary>a</summary>b</details>')).toBe(true);
+    const blocks = markdownToBlocks(solution) as any[];
+    expect(blocks.map((b) => b._)).toEqual([
+      'inputPageBlockSectionHeading', 'inputPageBlockBlockQuote', 'inputPageBlockList', 'inputPageBlockDetails',
+      'inputPageBlockMathematicalExpression', 'inputPageBlockParagraph', 'inputPageBlockDetails',
+    ]);
+    const why = blocks[3];
+    expect(why.header).toEqual({ _: 'richTextPlain', text: 'Почему так' });
+    expect(why.is_open).toBe(false);
+    expect(why.blocks[0].text.texts).toContainEqual({ _: 'richTextMathematicalExpression', expression: 'D = b^2 - 4ac' });
+    expect(blocks[4].expression).toBe('x = \\frac{5 \\pm 1}{2}');
+    expect(blocks[5].text.texts).toContainEqual({ _: 'richTextSpoiler', text: { _: 'richTextPlain', text: 'подставь сам' } });
+    expect(blocks[6].is_open).toBe(true);
+    expect(blocks[6].blocks[0].text).toEqual({ _: 'richTextPlain', text: '4 - 10 + 6 = 0' });
+  });
+
+  it('without Rich Messages the same text stays readable: no tags, formulas as code, spoiler entity', () => {
+    const f = markdownToFormatted(solution);
+    expect(f.text).not.toMatch(/<\/?(details|summary)/);
+    expect(f.text).toContain('Почему так');
+    expect(f.text).toContain('x = \\frac{5 \\pm 1}{2}');
+    expect(f.entities.some((e) => e.type._ === 'textEntityTypeSpoiler')).toBe(true);
+  });
+
+  it('prices with dollars are not formulas', () => {
+    expect(markdownToFormatted('стоит 5$ или $10 за $ штуку').entities).toEqual([]);
+  });
+});
+
+describe('rich message history text', () => {
+  it('a collapsible block reads heading first; formulas keep their LaTeX', async () => {
+    const { richMessageText } = await import('../src/main/telegram/mappers');
+    const plain = (text: string) => ({ _: 'richTextPlain', text });
+    const blocks = [
+      { _: 'pageBlockDetails', header: plain('Почему так'), page_blocks: [{ _: 'pageBlockParagraph', text: { _: 'richTexts', texts: [plain('D = '), { _: 'richTextMathematicalExpression', expression: 'b^2-4ac' }] } }], is_open: false },
+      { _: 'pageBlockMathematicalExpression', expression: 'x=1' },
+    ];
+    expect(richMessageText(blocks)).toBe('Почему так\nD = b^2-4ac\nx=1');
+  });
+});

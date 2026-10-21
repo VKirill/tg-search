@@ -107,7 +107,20 @@ export function richMessageText(node: unknown): string {
       return;
     }
     const isBlock = typeof o._ === 'string' && (o._.startsWith('pageBlock') || o._ === 'pageBlockListItem');
+    if (typeof o.expression === 'string') {
+      // formulas: richTextMathematicalExpression / pageBlockMathematicalExpression
+      if (isBlock) lines.push(o.expression);
+      else line.push(o.expression);
+      return;
+    }
     if (!isBlock) return Object.values(o).forEach((v) => walk(v, line));
+    if (o._ === 'pageBlockDetails') {
+      // the visible heading before the hidden content
+      const header: string[] = [];
+      walk(o.header, header);
+      if (header.join('').trim()) lines.push(header.join('').trim());
+      return walk(o.page_blocks, []);
+    }
     const own: string[] = [];
     for (const v of Object.values(o)) walk(v, own);
     const text = own.join('').trim();

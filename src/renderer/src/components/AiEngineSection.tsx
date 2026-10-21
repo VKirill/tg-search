@@ -12,7 +12,19 @@ const STATE: Record<AiStatus['state'], string> = {
   error: 'ошибка',
 };
 
-const price = (m: AiModel) => (m.costIn || m.costOut ? `$${m.costIn}/${m.costOut} за 1М` : 'бесплатно или по подписке');
+const price = (m: AiModel) => (m.costIn || m.costOut ? `$${m.costIn} / $${m.costOut}` : 'подписка');
+// catalog providers imported from OpenCode carry only their id
+const KNOWN: Record<string, string> = { openrouter: 'OpenRouter', deepseek: 'DeepSeek', 'zai-coding-plan': 'Z.ai (GLM)', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' };
+const plural = (n: number, one: string, few: string, many: string) =>
+  n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
+const modelsLabel = (n: number) => `${n} ${plural(n, 'модель', 'модели', 'моделей')}`;
+const contextLabel = (n: number) => (n >= 1_000_000 ? `${Math.round(n / 100_000) / 10}M` : `${Math.round(n / 1000)}K`);
+
+// «Gemini 4 Argon (OpenLux)» inside the OpenLux group reads as «Gemini 4 Argon»
+function shortName(m: AiModel, providerName: string) {
+  const suffix = /\s*\(([^)]+)\)\s*$/.exec(m.name);
+  return suffix && providerName.toLowerCase().includes(suffix[1].toLowerCase()) ? m.name.slice(0, suffix.index) : m.name;
+}
 
 // The app's own OpenCode v2: status, the main chat model, helper models the router may use, providers and keys
 export function AiEngineSection() {
@@ -22,6 +34,8 @@ export function AiEngineSection() {
   const [view, setView] = useState<AiModelsView | null>(null);
   const [providers, setProviders] = useState<AiProvider[]>([]);
   const [filter, setFilter] = useState('');
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [mainProvider, setMainProvider] = useState('');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ id: '', name: '', baseURL: '', apiKey: '', models: '' });
   const fail = useCallback((e: unknown) => toast(e instanceof Error ? e.message : String(e)), [toast]);
@@ -43,21 +57,35 @@ export function AiEngineSection() {
     });
   }, [api, load, fail]);
 
-  const byProvider = useMemo(() => {
-    const groups = new Map<string, AiModel[]>();
-    for (const m of view?.models ?? []) groups.set(m.providerID, [...(groups.get(m.providerID) ?? []), m]);
-    return groups;
-  }, [view]);
+  const providerName = useCallback((id: string) => {
+    const name = providers.find((p) => p.id === id)?.name ?? id;
+    return name === id ? KNOWN[id] ?? id : name;
+  }, [providers]);
 
-  const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const all = view?.models ?? [];
+  // provider → its models, providers with chosen models first, the huge OpenRouter catalog last
+  const groups = useMemo(() => {
     const chosen = new Set([view?.main, ...(view?.helpers ?? [])]);
-    const list = q ? all.filter((m) => `${m.ref} ${m.name}`.toLowerCase().includes(q)) : all.filter((m) => chosen.has(m.ref) || m.providerID !== 'openrouter');
-    return list.slice(0, 200);
-  }, [view, filter]);
+    const map = new Map<string, AiModel[]>();
+    for (const m of view?.models ?? []) map.set(m.providerID, [...(map.get(m.providerID) ?? []), m]);
+    return [...map.entries()]
+      .map(([id, models]) => ({ id, name: providerName(id), models, chosen: models.filter((m) => chosen.has(m.ref)).length }))
+      .sort((a, b) => Number(b.chosen > 0) - Number(a.chosen > 0) || a.models.length - b.models.length);
+  }, [view, providerName]);
+
+  const mainModel = view?.models.find((m) => m.ref === view.main);
+  const shownMainProvider = mainProvider || mainModel?.providerID || groups[0]?.id || '';
+  const mainOptions = groups.find((g) => g.id === shownMainProvider)?.models.filter((m) => m.tools) ?? [];
+
+  const q = filter.trim().toLowerCase();
+  const matches = (m: AiModel) => !q || `${m.ref} ${m.name}`.toLowerCase().includes(q);
 
   const setChoice = (main: string, helpers: string[]) => api.ai.setModels({ main, helpers }).then(setView, fail);
+  const toggleGroup = (id: string) => setOpen((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
 
   const run = async (fn: () => Promise<string | number>, done: (r: string | number) => string) => {
     setBusy(true);
@@ -81,91 +109,152 @@ export function AiEngineSection() {
   }, () => 'Провайдер добавлен');
 
   return (
-    <section className="ai-engine">
-      <h2 className="section-title">ИИ-движок (OpenCode)</h2>
-      <div className="ai-engine__status">
-        <span className={`tag${status?.state === 'ready' ? '' : ' tag--warn'}`}>{status ? STATE[status.state] : '…'}</span>
-        <span>OpenCode {status?.version ?? '—'}{status?.latest && status.latest !== status.version ? ` · доступна ${status.latest}` : ''}</span>
-        {status?.checkedAt && <span className="crm-muted">проверено {formatLeadDate(status.checkedAt)}</span>}
-        <button type="button" className="btn btn--sm" disabled={busy} onClick={() => run(() => api.ai.checkUpdate(), (r) => String(r))}>Проверить обновления</button>
-      </div>
-      {status?.message && <p className="crm-muted">{status.message}</p>}
-      <p className="crm-muted">Все запросы к моделям идут через собственный OpenCode приложения. Он обновляется сам раз в сутки.</p>
+    <div className="ai-engine">
+      <section className="settings-card">
+        <div className="settings-card__head">
+          <h2 className="settings-card__title">ИИ-движок</h2>
+          <span className={`status-dot${status?.state === 'ready' ? ' status-dot--ok' : status?.state === 'error' ? ' status-dot--err' : ''}`} />
+          <span className="settings-card__meta">
+            {status ? STATE[status.state] : '…'} · OpenCode {status?.version ?? '—'}
+            {status?.latest && status.latest !== status.version ? ` · доступна ${status.latest}` : ''}
+            {status?.checkedAt ? ` · проверено ${formatLeadDate(status.checkedAt)}` : ''}
+          </span>
+          <button type="button" className="btn btn--sm" disabled={busy} onClick={() => run(() => api.ai.checkUpdate(), (r) => String(r))}>
+            Проверить обновления
+          </button>
+        </div>
+        {status?.message && <p className="field-hint">{status.message}</p>}
+        <p className="field-hint">Все запросы к моделям идут через собственный OpenCode приложения. Он обновляется сам раз в сутки.</p>
+      </section>
 
-      <div className="field">
-        <label>Основная модель — общение с клиентами</label>
-        <select value={view?.main ?? ''} onChange={(e) => view && setChoice(e.target.value, view.helpers)}>
-          {!view?.main && <option value="">— выберите —</option>}
-          {[...byProvider.entries()].map(([pid, models]) => (
-            <optgroup key={pid} label={providers.find((p) => p.id === pid)?.name ?? pid}>
-              {models.filter((m) => m.tools).map((m) => (
-                <option key={m.ref} value={m.ref}>{m.name}{m.vision ? ' 👁' : ''}{m.variants.length ? ' 🧠' : ''}</option>
+      <section className="settings-card">
+        <h2 className="settings-card__title">Основная модель</h2>
+        <p className="field-hint">Ведёт переписку с клиентами. Нужна модель с инструментами.</p>
+        <div className="ai-main">
+          <div className="field">
+            <label>Провайдер</label>
+            <select value={shownMainProvider} onChange={(e) => setMainProvider(e.target.value)}>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name} ({g.models.filter((m) => m.tools).length})</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Модель</label>
+            <select value={mainOptions.some((m) => m.ref === view?.main) ? view?.main : ''} onChange={(e) => view && e.target.value && setChoice(e.target.value, view.helpers)}>
+              {!mainOptions.some((m) => m.ref === view?.main) && <option value="">— выберите —</option>}
+              {mainOptions.map((m) => (
+                <option key={m.ref} value={m.ref}>{shortName(m, providerName(m.providerID))}{m.vision ? ' · зрение' : ''}{m.variants.length ? ' · рассуждение' : ''}</option>
               ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
+            </select>
+          </div>
+        </div>
+        {mainModel && (
+          <div className="ai-main__current">
+            Сейчас: <b>{mainModel.name}</b> <span className="crm-muted">{providerName(mainModel.providerID)}</span>
+            <ModelBadges m={mainModel} />
+          </div>
+        )}
+      </section>
 
-      <div className="field">
-        <label>Вспомогательные модели — приложение само выбирает, кому что поручить и насколько думать</label>
-        <input value={filter} placeholder="Поиск модели (например, gemini, claude, deepseek)" onChange={(e) => setFilter(e.target.value)} />
-        <ul className="ai-models">
-          {visible.map((m) => {
-            const isMain = m.ref === view?.main;
-            const checked = isMain || !!view?.helpers.includes(m.ref);
+      <section className="settings-card">
+        <h2 className="settings-card__title">Вспомогательные модели</h2>
+        <p className="field-hint">
+          Приложение само выбирает, кому что поручить и насколько думать: картинки — моделям со зрением, сложные задачи (решения, Директ) —
+          самой сильной из отмеченных с высоким уровнем рассуждения, простые — самой дешёвой.
+        </p>
+        <input className="text-input" value={filter} placeholder="Поиск модели: gemini, claude, deepseek…" onChange={(e) => setFilter(e.target.value)} />
+        <div className="ai-groups">
+          {groups.map((g) => {
+            const list = g.models.filter(matches);
+            if (q && !list.length) return null;
+            const expanded = q ? true : open.has(g.id);
             return (
-              <li key={m.ref}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={isMain}
-                    onChange={(e) => view && setChoice(view.main, e.target.checked ? [...view.helpers, m.ref] : view.helpers.filter((h) => h !== m.ref))}
-                  />
-                  <span className="ai-models__name">{m.name}</span>
-                  <span className="crm-muted">{m.providerID}</span>
-                  {m.vision && <span className="tag" title="Видит картинки">👁 зрение</span>}
-                  {m.variants.length > 0 && <span className="tag" title={`Уровни рассуждения: ${m.variants.join(', ')}`}>🧠 {m.variants.length}</span>}
-                  {!m.tools && <span className="tag tag--warn">без инструментов</span>}
-                  <span className="crm-muted">{price(m)}</span>
-                  {isMain && <span className="tag">основная</span>}
-                </label>
-              </li>
+              <div key={g.id} className={`ai-group${expanded ? ' ai-group--open' : ''}`}>
+                <button type="button" className="ai-group__head" onClick={() => toggleGroup(g.id)}>
+                  <span className="ai-group__chevron">›</span>
+                  <span className="ai-group__name">{g.name}</span>
+                  <span className="crm-muted">{q ? `найдено ${list.length}` : modelsLabel(g.models.length)}</span>
+                  {g.chosen > 0 && <span className="tag tag--category">отмечено {g.chosen}</span>}
+                </button>
+                {expanded && (
+                  <ul className="ai-models">
+                    {list.slice(0, 300).map((m) => {
+                      const isMain = m.ref === view?.main;
+                      const checked = isMain || !!view?.helpers.includes(m.ref);
+                      return (
+                        <li key={m.ref}>
+                          <label className={checked ? 'ai-model--on' : ''}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isMain}
+                              onChange={(e) => view && setChoice(view.main, e.target.checked ? [...view.helpers, m.ref] : view.helpers.filter((h) => h !== m.ref))}
+                            />
+                            <span className="ai-models__name">{shortName(m, g.name)}</span>
+                            {isMain && <span className="tag tag--category">основная</span>}
+                            <ModelBadges m={m} />
+                          </label>
+                        </li>
+                      );
+                    })}
+                    {list.length > 300 && <li className="crm-muted">…ещё {list.length - 300} — уточните поиск</li>}
+                  </ul>
+                )}
+              </div>
             );
           })}
-        </ul>
-        <p className="crm-muted">Картинки — моделям с 👁; сложные задачи (решения, Директ) — самой сильной из отмеченных с высоким уровнем рассуждения; простые — самой дешёвой.</p>
-      </div>
+        </div>
+      </section>
 
-      <div className="field">
-        <label>Провайдеры</label>
+      <section className="settings-card">
+        <h2 className="settings-card__title">Провайдеры</h2>
         <ul className="ai-providers">
           {providers.map((p) => (
             <li key={p.id}>
-              <span className="ai-models__name">{p.name}</span>
-              <span className="crm-muted">{p.kind === 'catalog' ? 'каталог OpenCode' : p.baseURL}</span>
-              <span className={`tag${p.hasKey ? '' : ' tag--warn'}`}>{p.hasKey ? 'ключ есть' : 'нет ключа'}</span>
-              {p.models > 0 && <span className="crm-muted">моделей: {p.models}</span>}
-              <button type="button" className="btn btn--sm btn--ghost" onClick={() => confirm(`Убрать провайдера «${p.name}»?`) && run(async () => (await api.ai.removeProvider(p.id), 0), () => 'Провайдер убран')}>×</button>
+              <span className={`status-dot${p.hasKey ? ' status-dot--ok' : ' status-dot--err'}`} title={p.hasKey ? 'ключ есть' : 'нет ключа'} />
+              <span className="ai-models__name">{providerName(p.id)}</span>
+              <span className="crm-muted ai-providers__url">{p.kind === 'catalog' ? 'каталог OpenCode' : p.baseURL}</span>
+              <span className="crm-muted">{modelsLabel(groups.find((g) => g.id === p.id)?.models.length ?? p.models)}</span>
+              {!p.hasKey && <span className="tag tag--warn">нет ключа</span>}
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                title="Убрать провайдера"
+                onClick={() => confirm(`Убрать провайдера «${providerName(p.id)}»?`) && run(async () => (await api.ai.removeProvider(p.id), 0), () => 'Провайдер убран')}
+              >
+                ×
+              </button>
             </li>
           ))}
         </ul>
-        <button type="button" className="btn btn--sm" disabled={busy} onClick={() => run(() => api.ai.importOpencode(), (n) => `Импортировано провайдеров: ${n}`)}>
-          Импортировать из моего OpenCode
-        </button>
-      </div>
-
-      <details className="ai-engine__add">
-        <summary>Добавить OpenAI-совместимый провайдер</summary>
-        <div className="ai-engine__form">
-          <input placeholder="id (латиница), например openlux" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
-          <input placeholder="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input placeholder="https://…/v1" value={form.baseURL} onChange={(e) => setForm({ ...form, baseURL: e.target.value })} />
-          <input type="password" autoComplete="off" placeholder="API-ключ" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
-          <textarea rows={2} placeholder="Модели через запятую: gpt-6-sol, claude-sonnet-5-5" value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} />
-          <button type="button" className="btn btn--sm btn--primary" disabled={busy || !form.id || !form.baseURL || !form.models} onClick={addProvider}>Сохранить</button>
+        <div className="ai-providers__actions">
+          <button type="button" className="btn btn--sm" disabled={busy} onClick={() => run(() => api.ai.importOpencode(), (n) => `Импортировано провайдеров: ${n}`)}>
+            Импортировать из моего OpenCode
+          </button>
         </div>
-      </details>
-    </section>
+        <details className="ai-engine__add">
+          <summary>Добавить OpenAI-совместимый провайдер</summary>
+          <div className="ai-engine__form">
+            <input placeholder="id (латиница), например openlux" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
+            <input placeholder="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input placeholder="https://…/v1" value={form.baseURL} onChange={(e) => setForm({ ...form, baseURL: e.target.value })} />
+            <input type="password" autoComplete="off" placeholder="API-ключ" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
+            <textarea rows={2} placeholder="Модели через запятую: gpt-6-sol, claude-sonnet-5-5" value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} />
+            <button type="button" className="btn btn--sm btn--primary" disabled={busy || !form.id || !form.baseURL || !form.models} onClick={addProvider}>Сохранить</button>
+          </div>
+        </details>
+      </section>
+    </div>
+  );
+}
+
+function ModelBadges({ m }: { m: AiModel }) {
+  return (
+    <span className="ai-badges">
+      {m.vision && <span className="tag" title="Видит картинки">зрение</span>}
+      {m.variants.length > 0 && <span className="tag" title={`Уровни рассуждения: ${m.variants.join(', ')}`}>рассуждение ×{m.variants.length}</span>}
+      {!m.tools && <span className="tag tag--warn">без инструментов</span>}
+      {m.context > 0 && <span className="tag" title="Контекст, токенов">{contextLabel(m.context)}</span>}
+      <span className="ai-badges__price" title="$ за 1М токенов: вход / выход">{price(m)}</span>
+    </span>
   );
 }

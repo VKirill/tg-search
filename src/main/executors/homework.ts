@@ -10,6 +10,14 @@ import {
   type VisionContentPart,
 } from './shared';
 
+// Steps with the rule behind each one hidden in a collapsible block: the client learns, not just copies the answer
+const SOLUTION_FORMAT = [
+  '- `## Задача N`, под ним кратко условие строкой `> …`.',
+  '- Шаги нумерованным списком: одно действие с формулой на шаг. Формулы LaTeX: в строке `$…$`, крупные отдельной строкой `$$…$$`.',
+  '- Под каждым шагом свёрнутый блок с правилом, законом или определением, по которому он сделан:\n<details>\n<summary>Почему так</summary>\nПравило — 1–3 предложения.\n</details>',
+  '- В конце отдельной строкой **Ответ: …**, затем свёрнутый блок «Проверка» (подстановка или другой способ) и, если уместно, «Где обычно ошибаются».',
+].join('\n');
+
 function visionParts(text: string, dataUris: string[]): VisionContentPart[] {
   const parts: VisionContentPart[] = [{ type: 'text', text }];
   for (const url of dataUris) parts.push({ type: 'image_url', image_url: { url } });
@@ -26,8 +34,8 @@ async function solveHomework(
   const langHint = order.brief.match(/english|англ/i) ? 'английском' : 'языке клиента (обычно русский)';
   const intro =
     pass === 'solve'
-      ? `Реши задание по фото пошагово на ${langHint}. Формулы — в обычном тексте для Telegram: степени как x², корни как √, дроби как a/b. В конце отдельной строкой «Ответ: …».`
-      : `Ещё раз внимательно реши задание по фото на ${langHint} (независимая попытка). Те же правила оформления. В конце «Ответ: …».`;
+      ? `Реши задание по фото пошагово на ${langHint} и оформи Markdown для Telegram Rich Message в обучающем формате:\n${SOLUTION_FORMAT}`
+      : `Ещё раз внимательно реши задание по фото на ${langHint} (независимая попытка) и оформи Markdown для Telegram Rich Message в обучающем формате:\n${SOLUTION_FORMAT}`;
   return visionChat(
     getSettings,
     [
