@@ -383,3 +383,26 @@ describe('manager agent with operator fallback', () => {
     vi.useRealTimers();
   });
 });
+
+describe('read receipts', () => {
+  it('the client sees «read» when the agent takes the turn; nothing is marked when the manager is off', async () => {
+    vi.useFakeTimers();
+    const { db, engine, ai, manager, emit, lead } = setupDb();
+    manager.replyResult = { reply: 'ок, гляну', handoff: false, reason: '' };
+    const operator = createOperator({ db, engine, ai, manager, emit, getSettings: () => db.getSettings(), complete: async () => { throw new Error('off'); } });
+    db.addMessage({ leadId: lead.id, accountId: null, direction: 'in', where: 'dm', text: 'привет', tgChatId: 900, tgMessageId: 41, date: Date.now(), auto: false });
+    db.addMessage({ leadId: lead.id, accountId: null, direction: 'in', where: 'dm', text: 'есть кто?', tgChatId: 900, tgMessageId: 42, date: Date.now(), auto: false });
+    const project = db.getProject(lead.projectId);
+    db.updateProject(project.id, { manager: { ...project.manager, enabled: false } });
+    const agent = createManagerAgent({ db, engine, ai, manager, emit, operator });
+    agent.onIncoming(lead.id);
+    await vi.advanceTimersByTimeAsync(DEFAULT_MANAGER.replyDelaySec * 1000);
+    expect(engine.readMarks).toEqual([]);
+    db.updateProject(project.id, { manager: { ...project.manager, enabled: true } });
+    agent.onIncoming(lead.id);
+    await vi.advanceTimersByTimeAsync(DEFAULT_MANAGER.replyDelaySec * 1000);
+    expect(engine.readMarks).toEqual([{ chatId: 900, messageIds: [41, 42] }]);
+    agent.stop();
+    vi.useRealTimers();
+  });
+});

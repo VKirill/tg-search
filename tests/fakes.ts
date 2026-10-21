@@ -67,6 +67,10 @@ export class FakeEngine implements TelegramEngine {
     const chat = await this.resolveChat(accountId, `@${m?.[1] ?? url}`);
     return { chat, messageId: m?.[2] ? Number(m[2]) : null };
   }
+  readMarks: { chatId: number; messageIds: number[] }[] = [];
+  async markRead(_accountId: number, chatId: number, messageIds: number[]): Promise<void> {
+    this.readMarks.push({ chatId, messageIds });
+  }
   async getChat(_accountId: number, chatId: number): Promise<TgChat> {
     const c = this.chats.get(chatId);
     if (!c) throw new Error(`chat ${chatId}`);

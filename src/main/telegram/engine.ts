@@ -331,6 +331,14 @@ export class TdlEngine implements TelegramEngine {
     return { chat: await this.resolveChat(accountId, link), messageId: null };
   }
 
+  async markRead(accountId: number, chatId: number, messageIds: number[]): Promise<void> {
+    if (!messageIds.length) return;
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, {
+      _: 'viewMessages', chat_id: chatId, message_ids: messageIds, source: { _: 'messageSourceChatHistory' }, force_read: true,
+    });
+  }
+
   async getChat(accountId: number, chatId: number): Promise<TgChat> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const mapped = await this.loadTgChat(slot, chatId);

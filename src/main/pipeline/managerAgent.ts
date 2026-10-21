@@ -221,6 +221,14 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
       return;
     }
 
+    // like a person: the client sees «read» when the agent starts answering, not the moment the message arrives
+    const unread = messages.filter((m) => m.direction === 'in' && m.where === 'dm' && (m.tgMessageId ?? 0) > 0 && m.tgChatId != null);
+    const reader = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
+    if (unread.length && reader != null) {
+      const last = unread[unread.length - 1];
+      await deps.engine.markRead(reader, last.tgChatId!, unread.slice(-20).map((m) => m.tgMessageId!)).catch((err) => console.error('mark read', err));
+    }
+
     try {
       const op = await getOperator().turn(leadId, systemNote ? { systemNote } : undefined);
       const result = operatorToManagerResult(op);

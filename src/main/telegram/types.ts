@@ -64,6 +64,8 @@ export interface TelegramEngine {
   searchMessages(accountId: number, query: string, sinceMs: number, limit: number): Promise<TgMessage[]>; // chats the account is in
   resolveChat(accountId: number, linkOrUsername: string): Promise<TgChat>;
   getChat(accountId: number, chatId: number): Promise<TgChat>;
+  // The sender sees «read»: everything up to these messages in the chat is marked as viewed
+  markRead(accountId: number, chatId: number, messageIds: number[]): Promise<void>;
   // t.me/<name>, t.me/<name>/<post>, t.me/c/<id>/<post>, tg://… → the chat and the message (if the link has one);
   // never joins: an invite link to a chat we are not in fails with a hint
   resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }>;
