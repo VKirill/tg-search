@@ -1,4 +1,4 @@
-import type { Lead, Source } from '../../../shared/types';
+import type { Category, Lead, Source } from '../../../shared/types';
 import {
   avatarColor,
   displayName,
@@ -20,6 +20,7 @@ type LeadsPanelProps = {
   title?: string;
   leads: Lead[];
   sources: Source[];
+  categories: Category[];
   selectedLeadId: number | null;
   freshIds: Set<number>;
   search: string;
@@ -36,6 +37,7 @@ export function LeadsPanel({
   title = 'Лиды',
   leads,
   sources,
+  categories,
   selectedLeadId,
   freshIds,
   search,
@@ -102,6 +104,7 @@ export function LeadsPanel({
       <div className="scroll-list">
         {list.map((lead) => {
           const name = displayName(lead);
+          const category = categories.find((c) => c.id === lead.categoryId);
           return (
             <article
               key={lead.id}
@@ -127,6 +130,7 @@ export function LeadsPanel({
               </div>
               <p className="lead-card__text">{lead.text}</p>
               <div className="lead-card__badges">
+                {category && <span className="tag tag--category">{category.name}</span>}
                 {lead.handoff && <span className="tag tag--warn">передача</span>}
                 {lead.sequenceStep > 0 && lead.nextStepAt && <span className="tag">цепочка {lead.sequenceStep}</span>}
               </div>

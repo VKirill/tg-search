@@ -175,7 +175,7 @@ function toLead(r: Row): Lead {
     authorUserId: r.author_user_id, authorName: r.author_name, authorUsername: r.author_username, text: r.text,
     date: r.date, link: r.link, score: r.score, label: r.label, reason: r.reason, feedback: r.feedback,
     status: r.status, accountId: r.account_id, clientId: r.client_id ?? null, repeatCount: r.repeat_count ?? 0,
-    spamTemplateId: r.spam_template_id ?? null, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
+    spamTemplateId: r.spam_template_id ?? null, categoryId: r.category_id ?? null, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
     handoff: !!r.handoff, handoffReason: r.handoff_reason, createdAt: r.created_at,
   };
 }
@@ -258,7 +258,7 @@ const DEFAULT_SERVICES: { kind: ServiceKind; name: string; category: string; min
       'Правила WB: на изображениях нельзя цены, скидки, QR-коды, телефоны и призывы к покупке. Превью — один слайд инфографики.',
   },
   {
-    kind: 'image_gen', name: 'Нейрофото и генерация изображений', category: 'Фото, видео и дизайн', min: 500, max: 2500, preview: true,
+    kind: 'image_gen', name: 'Нейрофото и генерация изображений', category: 'Фото и видео', min: 500, max: 2500, preview: true,
     instructions:
       'Нейрофотосессии, обработка и генерация изображений по фото клиента или описанию: портреты, аватарки, обложки, фото для соцсетей. ' +
       'Спросить: 1–3 чётких фото лица (для нейрофото), стиль, количество образов. Цена: 500 ₽ за 1–3 изображения, до 2500 ₽ за 10 образов. ' +
@@ -274,9 +274,13 @@ const DEFAULT_SERVICES: { kind: ServiceKind; name: string; category: string; min
 ];
 
 const DEFAULT_CATEGORIES: [string, string][] = [
-  ['IT-разработка', 'Сайты, лендинги, Telegram-боты, приложения, интеграции, автоматизация, доработка и поддержка'],
-  ['Реклама и маркетинг', 'Таргет, контекст, SMM, продвижение, лидогенерация, маркетинговая стратегия'],
-  ['Фото, видео и дизайн', 'Генерация и обработка фото, видеомонтаж, нейрофото, логотипы, дизайн, инфографика'],
+  ['Сайты и лендинги', 'Сайты, лендинги, интернет-магазины, вёрстка, Тильда, WordPress, доработка и поддержка сайтов'],
+  ['Яндекс Директ и контекст', 'Настройка и ведение Яндекс Директа, Google Ads, контекстная реклама'],
+  ['Фото и видео', 'Нейрофото, генерация и обработка фото, видеомонтаж, рилсы'],
+  ['Telegram-боты и автоматизация', 'Telegram-боты, мини-приложения, приложения, автоматизация процессов, интеграции, ИИ-ассистенты'],
+  ['Таргет и SMM', 'Таргет ВК и Telegram Ads, ведение соцсетей, SMM, посевы, продвижение Telegram-каналов'],
+  ['SEO-продвижение', 'SEO сайта, вывод в топ, аудит, семантика, ссылки'],
+  ['Дизайн', 'Логотипы, фирменный стиль, баннеры, обложки, презентации, дизайн сайтов и интерфейсов'],
   ['Учёба и домашние задания', 'Помощь с домашним заданием, контрольные, курсовые, решение задач, репетиторство'],
   ['Карточки маркетплейсов', 'Карточки товаров для Wildberries, Ozon, Яндекс Маркета: тексты, фото, инфографика, SEO'],
   ['Тексты и копирайтинг', 'Статьи, посты, продающие тексты, переводы, редактура'],
@@ -306,6 +310,11 @@ export class Db {
     }
     const leadCols = this.all('PRAGMA table_info(leads)').map((c) => c.name);
     if (!leadCols.includes('client_id')) this.raw.exec('ALTER TABLE leads ADD COLUMN client_id INTEGER');
+    if (!leadCols.includes('category_id')) {
+      this.raw.exec(`ALTER TABLE leads ADD COLUMN category_id INTEGER;
+        UPDATE leads SET category_id = (SELECT c.category_id FROM classified c
+          WHERE c.tg_chat_id = leads.tg_chat_id AND c.tg_message_id = leads.tg_message_id);`);
+    }
     if (!leadCols.includes('repeat_count')) {
       this.raw.exec(`ALTER TABLE leads ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE leads ADD COLUMN spam_template_id INTEGER;`);
@@ -480,13 +489,14 @@ export class Db {
     return toLead(r);
   }
   // Returns the new lead, or undefined when this message is already a lead of the project.
-  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'clientId' | 'repeatCount' | 'spamTemplateId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
+  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'clientId' | 'repeatCount' | 'spamTemplateId' | 'categoryId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
     const res = this.run(
       `INSERT INTO leads(project_id, source_id, tg_chat_id, tg_message_id, author_user_id, author_name, author_username,
-       text, date, link, score, label, reason, created_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+       text, date, link, score, label, reason, created_at, category_id)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         (SELECT category_id FROM classified WHERE tg_chat_id = ? AND tg_message_id = ?)) ON CONFLICT DO NOTHING`,
       l.projectId, l.sourceId, l.tgChatId, l.tgMessageId, l.authorUserId, l.authorName, l.authorUsername,
-      l.text, l.date, l.link, l.score, l.label, l.reason, Date.now(),
+      l.text, l.date, l.link, l.score, l.label, l.reason, Date.now(), l.tgChatId, l.tgMessageId,
     );
     return res.changes ? this.getLead(Number(res.lastInsertRowid)) : undefined;
   }
@@ -616,9 +626,21 @@ export class Db {
   removeCategory(id: number) {
     this.run('DELETE FROM categories WHERE id = ?', id);
     this.run('UPDATE classified SET category_id = NULL WHERE category_id = ?', id);
+    this.run('UPDATE leads SET category_id = NULL WHERE category_id = ?', id);
   }
 
   // Classified messages (global, once per message)
+  leadsWithoutCategory(): Lead[] {
+    return this.all('SELECT * FROM leads WHERE category_id IS NULL ORDER BY id DESC LIMIT 500').map(toLead);
+  }
+  syncLeadCategory(leadId: number): Lead {
+    this.run(
+      `UPDATE leads SET category_id = (SELECT c.category_id FROM classified c
+        WHERE c.tg_chat_id = leads.tg_chat_id AND c.tg_message_id = leads.tg_message_id) WHERE id = ?`,
+      leadId,
+    );
+    return this.getLead(leadId);
+  }
   filterUnclassified<T extends { chatId: number; messageId: number }>(msgs: T[]): T[] {
     const stmt = this.raw.prepare('SELECT 1 FROM classified WHERE tg_chat_id = ? AND tg_message_id = ?');
     return msgs.filter((m) => !stmt.get(m.chatId, m.messageId));

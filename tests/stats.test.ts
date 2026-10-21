@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
-import { qualifyAndAddLeads } from '../src/main/pipeline/scanner';
+import { categorizeLeads, qualifyAndAddLeads } from '../src/main/pipeline/scanner';
 import { buildReport } from '../src/main/pipeline/stats';
 import { todayLocal } from '../src/main/pipeline/limiter';
 import { recordUsage, setUsageSink } from '../src/main/usage';
@@ -56,6 +56,41 @@ describe('demand map gate', () => {
     await qualifyAndAddLeads(deps, project, 1, [makeMsg(10, 3, 'нужен сайт для студии йоги'), makeMsg(10, 4, 'ищу дизайнера логотипа')]);
     expect(qualified).toBe(2);
   });
+
+  it('labels each lead with the category of its message', async () => {
+    const { db, ai, project, deps } = setup(new FakeCategorizer({ 5: 0.9 }));
+    ai.qualify = async (_p, msgs) => msgs.map((m) => ({ key: `${m.chatId}:${m.messageId}`, score: 90, label: 'demand' as const, reason: '' }));
+    const src = db.addSource({
+      projectId: project.id, tgChatId: 10, title: 'Чат', username: null, kind: 'group', memberCount: 100,
+      foundBy: 'manual', accountId: null, status: 'active',
+    });
+    await qualifyAndAddLeads(deps, project, src.id, [makeMsg(10, 5, 'нужен лендинг для кофейни')]);
+    const [lead] = db.listLeads(project.id);
+    expect(lead.categoryId).toBe(1);
+    db.removeCategory(1);
+    expect(db.getLead(lead.id).categoryId).toBeNull();
+  });
+
+  it('categorizes old leads that were never classified', async () => {
+    const cat = new FakeCategorizer({});
+    const { db, project } = setup(cat);
+    const src = db.addSource({
+      projectId: project.id, tgChatId: 11, title: 'Чат', username: null, kind: 'group', memberCount: 100,
+      foundBy: 'manual', accountId: null, status: 'active',
+    });
+    const lead = db.addLead({
+      projectId: project.id, sourceId: src.id, tgChatId: 11, tgMessageId: 1, authorUserId: 1, authorName: 'A',
+      authorUsername: null, text: 'настройте Яндекс Директ для салона', date: Date.now(), link: null, score: 90,
+      label: 'demand', reason: '',
+    })!;
+    expect(lead.categoryId).toBeNull();
+    const updates: number[] = [];
+    expect(await categorizeLeads({ db, emit: (e) => e.type === 'lead:update' && updates.push(e.lead.id) }, cat)).toBe(1);
+    expect(db.getLead(lead.id).categoryId).toBe(1);
+    expect(updates).toEqual([lead.id]);
+    await categorizeLeads({ db, emit: () => {} }, cat);
+    expect(cat.calls).toBe(1);
+  });
 });
 
 describe('statistics', () => {
@@ -76,7 +111,7 @@ describe('statistics', () => {
     expect(r.totals.costByKind.jev).toBeCloseTo(0.001);
     expect(r.totals.costUsd).toBeCloseTo(0.021);
     const it = r.categories.find((c) => c.categoryId === 1)!;
-    expect(it).toMatchObject({ name: 'IT-разработка', messages: 2, requests: 1 });
+    expect(it).toMatchObject({ name: 'Сайты и лендинги', messages: 2, requests: 1 });
     expect(it.examples.map((e) => e.text)).toEqual(['m1']);
   });
 

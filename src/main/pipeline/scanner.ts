@@ -62,27 +62,49 @@ export async function qualifyAndAddLeads(
 // project's qualification. Fails open: an unclassified message is qualified as before, so no lead is lost.
 async function categorizeAndGate(deps: ScannerDeps, categorizer: Categorizer, messages: TgMessage[]): Promise<TgMessage[]> {
   if (messages.length === 0) return messages;
-  const fresh = deps.db.filterUnclassified(messages);
-  if (fresh.length) {
-    try {
-      const results = new Map((await categorizer.classify(deps.db.listCategories(), fresh)).map((r) => [r.key, r]));
-      const day = todayLocal(Date.now());
-      for (const m of fresh) {
-        const r = results.get(`${m.chatId}:${m.messageId}`);
-        if (!r) continue;
-        deps.db.addClassified({
-          chatId: m.chatId, messageId: m.messageId, day, date: m.date, categoryId: r.categoryId,
-          categoryProb: r.categoryProb, requestProb: r.requestProb, text: m.text, link: m.link,
-        });
-      }
-    } catch (err) {
-      console.error('categorize', err);
-      return messages;
-    }
+  try {
+    await classifyFresh(deps.db, categorizer, messages);
+  } catch (err) {
+    console.error('categorize', err);
+    return messages;
   }
   const probs = deps.db.requestProbs(messages);
   const threshold = Number(deps.db.getSettings().requestThreshold || 0);
   return messages.filter((m) => (probs.get(`${m.chatId}:${m.messageId}`) ?? 1) >= threshold);
+}
+
+async function classifyFresh(db: Db, categorizer: Categorizer, messages: TgMessage[]) {
+  const fresh = db.filterUnclassified(messages);
+  if (fresh.length === 0) return;
+  const results = new Map((await categorizer.classify(db.listCategories(), fresh)).map((r) => [r.key, r]));
+  const day = todayLocal(Date.now());
+  for (const m of fresh) {
+    const r = results.get(`${m.chatId}:${m.messageId}`);
+    if (!r) continue;
+    db.addClassified({
+      chatId: m.chatId, messageId: m.messageId, day, date: m.date, categoryId: r.categoryId,
+      categoryProb: r.categoryProb, requestProb: r.requestProb, text: m.text, link: m.link,
+    });
+  }
+}
+
+// Leads found before the demand map existed (or while Jev was down) get their category once
+export async function categorizeLeads(deps: Pick<ScannerDeps, 'db' | 'emit'>, categorizer: Categorizer): Promise<number> {
+  const leads = deps.db.leadsWithoutCategory();
+  if (leads.length === 0) return 0;
+  await classifyFresh(deps.db, categorizer, leads.map((l) => ({
+    chatId: l.tgChatId, messageId: l.tgMessageId, date: l.date, text: l.text, senderUserId: l.authorUserId,
+    senderChatId: null, senderName: l.authorName, senderUsername: l.authorUsername, senderIsBot: false, voice: null,
+    photo: null, document: null, replyToMessageId: null, link: l.link, isOutgoing: false,
+  })));
+  let updated = 0;
+  for (const l of leads) {
+    const lead = deps.db.syncLeadCategory(l.id);
+    if (lead.categoryId == null) continue;
+    updated++;
+    deps.emit({ type: 'lead:update', lead });
+  }
+  return updated;
 }
 
 async function fetchHistory(

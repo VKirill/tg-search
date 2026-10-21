@@ -82,6 +82,7 @@ function sampleInput(over: Partial<ExecutorInput> = {}): ExecutorInput {
       clientId: null,
       repeatCount: 0,
       spamTemplateId: null,
+      categoryId: null,
       sequenceStep: 0,
       nextStepAt: null,
       handoff: false,

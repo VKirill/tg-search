@@ -1046,6 +1046,10 @@ select {
   background: rgba(0, 0, 0, 0.2);
 }
 
+.project-switcher + .project-switcher {
+  margin-top: 6px;
+}
+
 .list-column .panel--leads {
   width: 100%;
   border: none;
@@ -1078,6 +1082,11 @@ select {
 .tag--warn {
   background: rgba(255, 107, 107, 0.15);
   color: #ff8a8a;
+}
+
+.tag--category {
+  background: rgba(91, 141, 239, 0.15);
+  color: #8fb0f5;
 }
 
 .lead-card__badges {
@@ -1959,6 +1968,14 @@ button.chip:hover {
 .order-new__title {
   font-size: 12px;
   font-weight: 600;
+}
+
+.order-new select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .manager-catalog {

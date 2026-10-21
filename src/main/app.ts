@@ -19,7 +19,7 @@ import {
   updateAccount,
 } from './pipeline/accounts';
 import { discover } from './pipeline/discovery';
-import { scan } from './pipeline/scanner';
+import { categorizeLeads, scan } from './pipeline/scanner';
 import type { SpeechService } from './ai/speech';
 import { mediaUrlFromPath, storeMediaCopy, writeCallRecording } from './media';
 import type { TgChat, TgMessage } from './telegram/types';
@@ -231,6 +231,9 @@ export function createApp(deps: AppDeps): AppHandlers {
           managerAgent.onIncoming(lead.id);
         })().catch((err) => console.error('private message', err));
       });
+      if (deps.categorizer) {
+        categorizeLeads({ db, emit }, deps.categorizer).catch((err) => console.error('categorize leads', err));
+      }
       realtime.start();
       autopilot.start();
       broadcaster.start();
@@ -436,6 +439,7 @@ export function createApp(deps: AppDeps): AppHandlers {
           clientId: null,
           repeatCount: 0,
           spamTemplateId: null,
+          categoryId: null,
           sequenceStep: 0,
           nextStepAt: null,
           handoff: false,

@@ -149,6 +149,7 @@ export interface Lead {
   clientId: number | null; // long-term client (null until the author is known)
   repeatCount: number; // times the same author re-posted (near-)the same text after this lead; not new leads
   spamTemplateId: number | null; // the text matches a spam template (many authors, same text) — hidden from inboxes
+  categoryId: number | null; // demand category of the message (Директ, сайты, дизайн…); null = not classified or none fits
   sequenceStep: number; // index of the next chain step to send (0 = nothing sent yet)
   nextStepAt: number | null; // unix ms when the next chain step is due; null = chain finished or stopped
   handoff: boolean; // a human handles this dialog: the AI manager stays silent

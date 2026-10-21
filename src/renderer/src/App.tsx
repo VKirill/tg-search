@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Account, Lead, Project, Source } from '../../shared/types';
+import type { Account, Category, Lead, Project, Source } from '../../shared/types';
 import { AccountsDialog } from './components/AccountsDialog';
 import { BroadcastsView } from './components/BroadcastsView';
 import { ChatPanel } from './components/ChatPanel';
@@ -47,6 +47,8 @@ function AppInner() {
   const [allSources, setAllSources] = useState<Source[]>([]);
   const [leads, setLeads] = useState<Lead[]>(shotSeed?.leads ?? []);
   const [projectFilterId, setProjectFilterId] = useState<number | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<number | 'none' | null>(null);
   const [leadId, setLeadId] = useState<number | null>(hashLeadId());
   const [leadSearch, setLeadSearch] = useState('');
   const [leadFilters, setLeadFilters] = useState<LeadFilters>({ chip: null, sort: 'newest' });
@@ -95,6 +97,12 @@ function AppInner() {
       }
     })();
   }, [refreshProjects, refreshAccounts, refreshLeads, refreshAllSources, toast]);
+
+  // Categories are edited in Statistics; reload when coming back to the lists
+  useEffect(() => {
+    if (!['inbox', 'leads'].includes(view)) return;
+    getApi().categories.list().then(setCategories, () => {});
+  }, [view]);
 
   useEffect(() => {
     if (projects.length === 0) return;
@@ -161,7 +169,7 @@ function AppInner() {
     if (map[shot]) setView(map[shot]);
   }, []);
 
-  const filteredLeads = useMemo(() => {
+  const scopedLeads = useMemo(() => {
     let list = [...leads];
     if (projectFilterId != null) list = list.filter((l) => l.projectId === projectFilterId);
     if (view === 'inbox') {
@@ -169,6 +177,21 @@ function AppInner() {
     }
     return list;
   }, [leads, projectFilterId, view]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<number | 'none', number>();
+    for (const l of scopedLeads) {
+      if (l.status === 'hidden') continue;
+      const k = l.categoryId ?? 'none';
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [scopedLeads]);
+
+  const filteredLeads = useMemo(() => {
+    if (categoryFilter == null) return scopedLeads;
+    return scopedLeads.filter((l) => (l.categoryId ?? 'none') === categoryFilter);
+  }, [scopedLeads, categoryFilter]);
 
   const visibleLeads = useMemo(() => {
     let list = [...filteredLeads];
@@ -249,20 +272,38 @@ function AppInner() {
               <div className="list-column__head no-drag">
                 <select
                   className="project-switcher"
-                  value={projectFilterId ?? ''}
-                  onChange={(e) => setProjectFilterId(e.target.value ? Number(e.target.value) : null)}
+                  value={categoryFilter == null ? '' : `c:${categoryFilter}`}
+                  onChange={(e) => {
+                    const v = e.target.value.slice(2);
+                    setCategoryFilter(!v ? null : v === 'none' ? 'none' : Number(v));
+                  }}
                   aria-label="Тематика"
                 >
-                  <option value="">Все тематики</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                  <option value="">Все тематики · {[...categoryCounts.values()].reduce((a, b) => a + b, 0)}</option>
+                  {categories.filter((c) => c.enabled || categoryCounts.has(c.id)).map((c) => (
+                    <option key={c.id} value={`c:${c.id}`}>{c.name} · {categoryCounts.get(c.id) ?? 0}</option>
                   ))}
+                  {categoryCounts.has('none') && <option value="c:none">Без тематики · {categoryCounts.get('none')}</option>}
                 </select>
+                {projects.length > 1 && (
+                  <select
+                    className="project-switcher"
+                    value={projectFilterId ?? ''}
+                    onChange={(e) => setProjectFilterId(e.target.value ? Number(e.target.value) : null)}
+                    aria-label="Поиск"
+                  >
+                    <option value="">Все поиски</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <LeadsPanel
                 title={listTitle}
                 leads={visibleLeads}
                 sources={sourcesForLeads}
+                categories={categories}
                 selectedLeadId={leadId}
                 freshIds={freshIds}
                 search={leadSearch}
