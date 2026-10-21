@@ -6,8 +6,16 @@ import { sendMessage, sendVoiceMessage, type OutreachDeps } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
+import { managerServicesContext } from '../ai/manager';
+import type { ManagerTestResult } from '../../shared/types';
+
+export interface OrdersHooks {
+  handlePostManagerReply(leadId: number, result: ManagerTestResult, lastClientText: string): Promise<void>;
+}
+
 export interface ManagerAgentDeps extends OutreachDeps {
   manager: ManagerAi;
+  orders?: OrdersHooks;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -134,11 +142,25 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
 
     try {
       const card = deps.db.getCard(leadId);
-      const result = await deps.manager.reply(project, lead, history, undefined, card);
+      const servicesCtx = managerServicesContext(
+        deps.db.listServices(),
+        deps.db.listOrders(leadId),
+      );
+      const mgrSettings = {
+        ...project.manager,
+        prompt: `${project.manager.prompt}\n\n${servicesCtx}`,
+      };
+      const result = await deps.manager.reply(project, lead, history, mgrSettings, card);
       if (result.handoff) {
         await doHandoff(project, lead, result.reason || 'Передача менеджеру', result.reply, history);
         return;
       }
+
+      const lastIn = [...messages].reverse().find((m) => m.direction === 'in');
+      if (deps.orders) {
+        await deps.orders.handlePostManagerReply(leadId, result, lastIn?.text ?? '');
+      }
+
       if (!result.reply.trim()) return;
 
       const now = Date.now();
@@ -156,7 +178,6 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
         }
       }
 
-      const lastIn = [...messages].reverse().find((m) => m.direction === 'in');
       const mirrorVoice =
         project.manager.voiceReplies === 'mirror' && lastIn?.kind === 'voice' && deps.speech;
       if (mirrorVoice) {

@@ -31,6 +31,9 @@ import { createImporter } from './pipeline/importer';
 import { createManagerAgent } from './pipeline/managerAgent';
 import { stopChainOnIncoming } from './pipeline/sequence';
 import type { Lead } from '../shared/types';
+import type { ExecutorRegistry } from './executors/types';
+import type { PaymentProvider } from './payments/types';
+import { createOrders, stubExecutorRegistry } from './pipeline/orders';
 
 export interface AppDeps {
   db: Db;
@@ -44,6 +47,9 @@ export interface AppDeps {
   dataDir: string;
   emit: (e: AppEvent) => void;
   openExternal: (url: string) => Promise<void>;
+  executors?: ExecutorRegistry;
+  payments?: PaymentProvider;
+  dossier?: { onOrder?(order: import('../shared/types').Order): void | Promise<void> };
 }
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void> };
@@ -60,8 +66,23 @@ export function createApp(deps: AppDeps): AppHandlers {
   };
   const spinner = deps.spinner ?? passthroughSpinner;
   const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer };
+  const payments = deps.payments ?? {
+    create: async () => {
+      throw new Error('Платежи не настроены');
+    },
+    status: async () => {
+      throw new Error('Платежи не настроены');
+    },
+  };
+  const orders = createOrders({
+    ...pipeline,
+    dataDir,
+    payments,
+    executors: deps.executors ?? stubExecutorRegistry(),
+    dossier: deps.dossier,
+  });
   const autopilot = createAutopilot(pipeline);
-  const managerAgent = createManagerAgent({ ...pipeline, manager, crm });
+  const managerAgent = createManagerAgent({ ...pipeline, manager, crm, orders });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
   const realtime = createRealtime({ ...pipeline, dataDir });
   const importer = createImporter({ db, engine, emit });
@@ -95,6 +116,10 @@ export function createApp(deps: AppDeps): AppHandlers {
             mediaPath = ingested.mediaPath;
             durationSec = ingested.durationSec;
             kind = 'voice';
+          } else if (msg.photo || msg.document) {
+            await orders.ingestPrivateMedia(lead.id, accountId, msg);
+            if (!text.trim() && msg.photo) text = '[фото]';
+            if (!text.trim() && msg.document) text = `[файл: ${msg.document.name}]`;
           }
           const message = db.addMessage({
             leadId: lead.id,
@@ -120,9 +145,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       realtime.start();
       autopilot.start();
       broadcaster.start();
+      orders.startPoller();
     },
 
     async stop() {
+      orders.stopPoller();
       broadcaster.stop();
       realtime.stop();
       importer.stop();
@@ -345,10 +372,10 @@ export function createApp(deps: AppDeps): AppHandlers {
         emit({ type: 'order:update', order });
         return order;
       },
-      requestPayment: notYet('orders worker'),
-      markPaid: notYet('orders worker'),
-      run: notYet('orders worker'),
-      deliver: notYet('orders worker'),
+      requestPayment: (id) => orders.requestPayment(id),
+      markPaid: (id) => orders.markPaid(id),
+      run: (id) => orders.run(id),
+      deliver: (id) => orders.deliver(id),
       cancel: async (id) => {
         const order = db.updateOrder(id, { status: 'cancelled' });
         emit({ type: 'order:update', order });

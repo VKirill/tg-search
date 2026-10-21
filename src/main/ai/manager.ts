@@ -1,4 +1,14 @@
-import type { ClientCard, Lead, ManagerSettings, ManagerTestResult, Project, Settings } from '../../shared/types';
+import type {
+  ClientCard,
+  Lead,
+  ManagerOrderIntent,
+  ManagerSettings,
+  ManagerTestResult,
+  Order,
+  Project,
+  Service,
+  Settings,
+} from '../../shared/types';
 import { chatCompletion, chatJsonCompletion, type LlmOverride } from './llm';
 import type { DialogTurn, ManagerAi } from './types';
 
@@ -7,7 +17,11 @@ const MANAGER_RULES =
   'не выдумывай цены и условия, которых нет в оффере и промпте; ты — помощник человека по имени {owner} (в тексте склоняй имя: «помощник Кирилла»). ' +
   'На вопросы «ты бот?», «ты человек?», «кто ты?» отвечай только, что ты его помощник и собираешь заявку, и возвращайся к задаче; ' +
   'не называй себя живым человеком и не говори «я не бот». ' +
-  'Ответ строго JSON: {"reply": "...", "handoff": true|false, "reason": "короткая причина на русском"}. ' +
+  'Ответ строго JSON: {"reply": "...", "handoff": true|false, "reason": "короткая причина на русском", "order": null или объект заказа}. ' +
+  'Поле order (опционально): {"serviceId": число, "brief": "хотелки и твои допущения", "agreedPrice": число|null, "wantsPreview": true|false, "readyToPay": true|false, "photoConsent": true|false}. ' +
+  'Цену называй только внутри вилки услуги; не выдумывай цену вне каталога. Клиенты редко дают бриф — формулируй допущения и предлагай, не допрашивай. ' +
+  'Перед использованием фото или аватара клиента спроси согласие; photoConsent=true только после явного «да». ' +
+  'wantsPreview — бесплатное превью, если услуга это позволяет; readyToPay — клиент согласен платить при указанной agreedPrice. ' +
   'handoff=true, если цель из промпта достигнута (собраны требования, готов к заказу/оплате, договорились о созвоне), ' +
   'полнота анамнеза в карточке ≥ 80%, человек просит человека/договор/смету/цену, злится или тема вне компетенции. При handoff=true reply — короткий мост ' +
   '(например «Передаю коллеге, он свяжется в ближайшее время») или пустая строка.';
@@ -78,13 +92,46 @@ function toChatMessages(history: DialogTurn[]): { role: 'user' | 'assistant'; co
   }));
 }
 
+function parseOrderIntent(raw: unknown): ManagerOrderIntent | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const serviceId = o.serviceId;
+  if (typeof serviceId !== 'number') return null;
+  return {
+    serviceId,
+    brief: typeof o.brief === 'string' ? o.brief : '',
+    agreedPrice: typeof o.agreedPrice === 'number' ? o.agreedPrice : o.agreedPrice === null ? null : null,
+    wantsPreview: !!o.wantsPreview,
+    readyToPay: !!o.readyToPay,
+    photoConsent: !!o.photoConsent,
+  };
+}
+
 function parseManagerReply(data: unknown): ManagerTestResult {
-  const o = data as { reply?: string; handoff?: boolean; reason?: string };
+  const o = data as { reply?: string; handoff?: boolean; reason?: string; order?: unknown };
+  const order = parseOrderIntent(o.order);
   return {
     reply: typeof o.reply === 'string' ? o.reply : '',
     handoff: !!o.handoff,
     reason: typeof o.reason === 'string' ? o.reason : '',
+    ...(order !== undefined ? { order } : {}),
   };
+}
+
+export function managerServicesContext(services: Service[], orders: Order[]): string {
+  const catalog = services
+    .filter((s) => s.enabled)
+    .map(
+      (s) =>
+        `id=${s.id}: ${s.name}, ${s.priceMin}–${s.priceMax} ₽, превью: ${s.previewEnabled ? 'да' : 'нет'}\nИнструкция: ${s.instructions.slice(0, 500)}`,
+    )
+    .join('\n\n');
+  const open = orders
+    .filter((o) => !['done', 'cancelled', 'failed'].includes(o.status))
+    .map((o) => `#${o.id} услуга ${o.serviceId}, статус ${o.status}, цена ${o.price ?? '—'}, бриф: ${o.brief.slice(0, 200)}`)
+    .join('\n');
+  return `Каталог услуг (цена только внутри вилки):\n${catalog || '—'}\n\nОткрытые заказы лида:\n${open || 'нет'}`;
 }
 
 function parseWriteStep(data: unknown): string {
