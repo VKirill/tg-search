@@ -1,3 +1,4 @@
+# TG Search release pipeline
 # Builds TG Search for macOS (Apple Silicon and Intel) and publishes a GitHub Release for every «v*» tag.
 # A manual run (Actions → Release → Run workflow) only builds and keeps the files as workflow artifacts.
 name: Release
