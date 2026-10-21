@@ -32,6 +32,31 @@ export async function tavilySearch(apiKey: string, query: string, maxResults = 5
   }));
 }
 
+// Web search through Gemini with Google Search grounding: an answer with its sources (redirect URLs that open the page)
+export async function geminiSearch(apiKey: string, query: string): Promise<TavilyResult[]> {
+  const key = apiKey.trim();
+  if (!key) throw new Error('Укажите ключ Gemini (Google AI Studio) в настройках');
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `Найди в интернете и коротко ответь по фактам, со ссылками на источники: ${query}` }] }],
+      tools: [{ google_search: {} }],
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!res.ok) throw new Error(`Gemini search: HTTP ${res.status} ${(await res.text()).slice(0, 150)}`);
+  const data = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] }; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] } }[];
+  };
+  const c = data.candidates?.[0];
+  const answer = (c?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim();
+  const sources = (c?.groundingMetadata?.groundingChunks ?? []).map((ch) => ({
+    title: String(ch.web?.title ?? '').trim(), url: String(ch.web?.uri ?? '').trim(), content: '',
+  })).filter((r) => r.url);
+  return [{ title: 'Ответ по поиску Google', url: '', content: answer }, ...sources];
+}
+
 function isPrivateHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   if (h === 'localhost' || h.endsWith('.local')) return true;

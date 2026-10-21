@@ -136,6 +136,10 @@ export function SettingsView() {
             <label>API key</label>
             <input type="password" autoComplete="off" value={s.tavilyApiKey} onChange={(e) => setS({ ...s, tavilyApiKey: e.target.value })} />
           </div>
+          <div className="field">
+            <label>Ключ Gemini (Google AI Studio) — запасной поиск через Google</label>
+            <input type="password" autoComplete="off" value={s.geminiApiKey} onChange={(e) => setS({ ...s, geminiApiKey: e.target.value })} />
+          </div>
         </section>
         <section>
           <h2 className="section-title">Оплата (ЮKassa)</h2>

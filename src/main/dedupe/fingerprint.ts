@@ -7,6 +7,10 @@ export const MAX_HAMMING = 3;
 // word order: measured on live spam, variants overlap 0.22–0.39 by word stems, real requests ≤ 0.11 against them.
 export const TEMPLATE_JACCARD = 0.3;
 export const MIN_TEMPLATE_STEMS = 8; // short texts overlap by chance
+// Mentions, links and emoji are stripped by normalization; what is left of «@bot @user» is an empty string, and
+// every empty text would be «the same template» — a personal chat with an empty publication was hidden as spam
+export const MIN_SPAM_TEXT = 5;
+export const tooShortForSpam = (fp: TextFingerprint) => fp.normalized.trim().length < MIN_SPAM_TEXT;
 
 export interface TextFingerprint {
   normalized: string;

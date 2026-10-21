@@ -220,6 +220,7 @@ export interface Settings {
   operatorApiKey: string;
   operatorModel: string; // model override for any provider ('' = provider default)
   tavilyApiKey: string; // web search for the assistant
+  geminiApiKey: string; // Google AI Studio: web search with Google grounding when Tavily is out of quota or unset
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)

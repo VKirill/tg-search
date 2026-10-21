@@ -220,3 +220,22 @@ describe('dedupe pipeline', () => {
     expect(rows.n).toBe(1);
   });
 });
+
+describe('texts with nothing left after normalization', () => {
+  it('mention-only messages never make a template and never hide a personal chat with an empty publication', () => {
+    const db = new Db(':memory:');
+    const dedupe = createDedupe({ db, emit: () => {} });
+    const project = db.createProject({
+      name: 'P', task: 'clients', target: 't', offer: 'o', criteria: '', sequence: [], manager: DEFAULT_MANAGER,
+      geo: [], languages: [], accountIds: [], materials: [], keywords: [],
+    });
+    const personal = db.addLead({
+      projectId: project.id, sourceId: null, tgChatId: 7, tgMessageId: 0, authorUserId: 7, authorName: 'A',
+      authorUsername: null, text: '', date: Date.now(), link: null, score: 100, label: 'demand', reason: '',
+    })!;
+    db.updateLead(personal.id, { status: 'dialog' });
+    for (let u = 0; u < 6; u++) dedupe.learn(project.id, [makeMsg(100, u + 1, `@bot_${u} @user_${u}`, { senderUserId: 3000 + u })]);
+    expect(dedupe.listTemplates()).toEqual([]);
+    expect(db.getLead(personal.id).status).toBe('dialog');
+  });
+});

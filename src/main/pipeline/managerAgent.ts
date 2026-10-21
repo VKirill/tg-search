@@ -119,7 +119,8 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     history: DialogTurn[],
     summaryOverride?: string,
   ) {
-    const updated = deps.db.updateLead(lead.id, { handoff: true, handoffReason: reason });
+    // with «свои люди» the owner is the one asking: he gets the note, the agent keeps the dialog
+    const updated = isTrustedLead(deps.db, lead) ? lead : deps.db.updateLead(lead.id, { handoff: true, handoffReason: reason });
     deps.emit({ type: 'lead:update', lead: updated });
 
     if (bridgeReply.trim()) {

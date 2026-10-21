@@ -86,6 +86,7 @@ let settings: Settings = {
   operatorApiKey: '',
   operatorModel: '',
   tavilyApiKey: '',
+  geminiApiKey: '',
 };
 
 const accounts: Account[] = [

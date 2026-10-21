@@ -33,6 +33,8 @@ export interface OrdersDeps extends OutreachDeps {
   skipOrderPaymentPoll?: boolean;
 }
 
+const RUN_TIMEOUT_MS = 10 * 60_000;
+
 // what a person writes when handing work over
 const DELIVERY_INTROS = ['готово, смотри', 'вот что получилось', 'лови', 'готово, глянь'];
 
@@ -175,7 +177,11 @@ export function createOrders(deps: OrdersDeps) {
     const photoPath = await clientPhotoPath(deps, lead, order);
     const input = buildExecutorInput(deps, order, service, lead, history, photoPath);
     try {
-      const output = await getExecutor(service).run(input);
+      // a provider that never answers must not leave the order «in progress» forever
+      const output = await Promise.race([
+        getExecutor(service).run(input),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('исполнитель не ответил за 10 минут')), RUN_TIMEOUT_MS).unref?.()),
+      ]);
       const outputs = output.files.filter((f) => f.role === 'output' || f.role === 'preview');
       order = patchOrder(orderId, {
         files: [...order.files.filter((f) => f.role === 'input' || f.role === 'preview'), ...outputs],
@@ -282,9 +288,11 @@ export function createOrders(deps: OrdersDeps) {
 
   // Photos and files the client sent before the order existed (usually with the request itself) become its inputs
   function attachRecentMedia(order: Order): Order {
-    const since = Date.now() - 24 * 3600_000;
+    // only what came for this order: after the previous order of the lead (a new task's photo, not last task's beds)
+    const previous = deps.db.listOrders(order.leadId).filter((o) => o.id !== order.id).reduce((t, o) => Math.max(t, o.createdAt), 0);
+    const since = Math.max(Date.now() - 24 * 3600_000, previous);
     const media = deps.db.listMessages(order.leadId)
-      .filter((m) => m.direction === 'in' && m.mediaPath && m.kind !== 'voice' && m.date >= since && existsSync(m.mediaPath));
+      .filter((m) => m.direction === 'in' && m.mediaPath && m.kind !== 'voice' && m.date > since && existsSync(m.mediaPath));
     if (!media.length) return order;
     const dir = workDir(deps.dataDir, order.leadId, order.id);
     const files: OrderFile[] = media.map((m) => {

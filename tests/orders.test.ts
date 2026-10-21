@@ -422,3 +422,28 @@ describe('app orders API', () => {
     expect(paid.paymentUrl).toContain('https://pay.test');
   });
 });
+
+describe('photos attached to a new order', () => {
+  it('only what came after the previous order — not last task\'s pictures', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'tg-orders-media-'));
+    const { db, lead, service } = setupDb();
+    const { orders } = ordersPipeline(db, new FakeEngine(), new FakePayments(), makeExecutors(async () => ({ text: '', files: [] })), dataDir);
+    const photo = (name: string, date: number) => {
+      const path = join(dataDir, name);
+      writeFileSync(path, 'x');
+      db.addMessage({ leadId: lead.id, accountId: null, direction: 'in', where: 'dm', kind: 'text', text: '[фото]', mediaPath: path,
+        tgChatId: 1, tgMessageId: date, date, auto: false });
+    };
+    const now = Date.now();
+    photo('bed.jpg', now - 60_000);
+    const first = db.createOrder(lead.id, service.id, 'карточка');
+    db.raw.prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(now - 30_000, first.id);
+    db.updateOrder(first.id, { status: 'done' });
+    photo('homework.jpg', now - 10_000);
+    await orders.applyManagerIntent(lead.id, {
+      serviceId: db.listServices()[1].id, brief: 'задача 10', agreedPrice: null, wantsPreview: false, readyToPay: false, photoConsent: false,
+    });
+    const created = db.listOrders(lead.id).find((o) => o.id !== first.id)!;
+    expect(created.files.map((f) => f.name)).toEqual(['homework.jpg']);
+  });
+});

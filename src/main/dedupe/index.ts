@@ -6,6 +6,7 @@ import {
   isNearDuplicate,
   isSameTemplate,
   simhashFromDb,
+  tooShortForSpam,
   simhashToDb,
   type TextFingerprint,
 } from './fingerprint';
@@ -92,6 +93,7 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
   }
 
   function matchesTemplate(fp: TextFingerprint, row: TemplateRow): boolean {
+    if (tooShortForSpam(fp) || tooShortForSpam(templateFp(row))) return false;
     if (isSameTemplate(fp, templateFp(row))) return true;
     if (!row.cluster_id) return false;
     const variants = db.raw.prepare('SELECT sample FROM message_fingerprints WHERE cluster_id = ? ORDER BY id DESC LIMIT 50')
@@ -217,6 +219,7 @@ export function createDedupe(deps: { db: Db; emit: (e: AppEvent) => void }): Ded
     if (exists) return;
 
     const fp = fingerprintText(m.text);
+    if (tooShortForSpam(fp)) return; // nothing left to compare
     const since = Date.now() - FP_LOOKBACK_MS;
     const clusterId = findClusterId(fp, since);
     const now = Date.now();
