@@ -339,6 +339,14 @@ export class TdlEngine implements TelegramEngine {
     });
   }
 
+  async react(accountId: number, chatId: number, messageId: number, emoji: string): Promise<void> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, {
+      _: 'addMessageReaction', chat_id: chatId, message_id: messageId,
+      reaction_type: { _: 'reactionTypeEmoji', emoji }, is_big: false, update_recent_reactions: false,
+    });
+  }
+
   async getChat(accountId: number, chatId: number): Promise<TgChat> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const mapped = await this.loadTgChat(slot, chatId);

@@ -66,6 +66,8 @@ export interface TelegramEngine {
   getChat(accountId: number, chatId: number): Promise<TgChat>;
   // The sender sees «read»: everything up to these messages in the chat is marked as viewed
   markRead(accountId: number, chatId: number, messageIds: number[]): Promise<void>;
+  // An emoji reaction on a message (🔥 — «взял в работу» in the homework chat)
+  react(accountId: number, chatId: number, messageId: number, emoji: string): Promise<void>;
   // t.me/<name>, t.me/<name>/<post>, t.me/c/<id>/<post>, tg://… → the chat and the message (if the link has one);
   // never joins: an invite link to a chat we are not in fails with a hint
   resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }>;

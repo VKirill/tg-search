@@ -95,6 +95,9 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   const waiting: number[] = [];
   function enqueue(id: number) {
     set(id, { status: 'queued' });
+    // 🔥 on the task message: the author sees at once that it is taken (the solution takes a minute or two)
+    const r = get(id);
+    deps.engine.react(r.account_id, r.chat_id, r.message_id, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
     waiting.push(id);
     pump();
   }

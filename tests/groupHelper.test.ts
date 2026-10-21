@@ -54,6 +54,7 @@ describe('homework helper in a group', () => {
     await helper.onMessage(acc.id, makeMsg(CHAT, 3, 'все', { senderUserId: 900 }));
     await tick();
     expect(solved[0]).toContain('Решить: все задачи с фото');
+    expect(engine.reactions).toEqual([{ chatId: CHAT, messageId: 2, emoji: '🔥' }]); // on the task photo, once taken
     expect(engine.sent.at(-1)?.text).toBe('## Решение\n**Ответ: 42**');
     expect(helper.requests(10).map((r) => r.status)).toEqual(['done', 'ignored']);
   });

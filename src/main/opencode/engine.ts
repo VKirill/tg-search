@@ -325,7 +325,7 @@ export function createAiEngine(deps: {
 
   // The verifier: the owner's choice in Settings, else a strong ticked subscription (Gemini 3.8 Flash High if ticked);
   // never the model that did the work; one that sees images when the job has them
-  function verifierFor(producer: ModelRef, vision: boolean): ModelRef | null {
+  function verifiersFor(producer: ModelRef, vision: boolean): ModelRef[] {
     const byRef = new Map(catalog.map((m) => [refString(m), m]));
     const usable = (ref: string) => {
       const m = byRef.get(ref);
@@ -335,16 +335,26 @@ export function createAiEngine(deps: {
     const preferred = [deps.getSettings().aiVerifierModel, ...c.helpers.filter((r) => /gemini-3\.8-flash-high/.test(r))].filter(Boolean);
     const ticked = [...c.helpers, c.main].map(usable).filter((m): m is CatalogModel => !!m)
       .sort((a, b) => Number(isSubscriptionModel(b)) - Number(isSubscriptionModel(a)) || (b.costIn + b.costOut) - (a.costIn + a.costOut));
-    const m = preferred.map(usable).find(Boolean) ?? ticked[0];
-    return m ? { providerID: m.providerID, id: m.id, variant: m.variants.includes('high') ? 'high' : undefined } : null;
+    // medium reasoning: at «high» a model may spend the whole output on thinking and answer nothing
+    const list = [...preferred.map(usable).filter((m): m is CatalogModel => !!m), ...ticked];
+    return [...new Map(list.map((m) => [refString(m), m])).values()].slice(0, 2)
+      .map((m) => ({ providerID: m.providerID, id: m.id, variant: m.variants.includes('medium') ? 'medium' : undefined }));
   }
 
   async function verifyWith(producer: ModelRef, job: { task: string; images?: string[] }, result: string, check: string): Promise<(Verdict & { verifier: string }) | null> {
-    const v = verifierFor(producer, !!job.images?.length);
-    if (!v) return null;
-    const raw = await sessions.oneShot({ model: v, text: verifyPrompt(job.task, result, check), files: job.images, title: 'verify' });
-    recordUsage({ kind: 'llm', model: refOf(v) });
-    return { ...parseVerdict(raw), verifier: refOf(v) };
+    let lastError: unknown = null;
+    for (const v of verifiersFor(producer, !!job.images?.length)) {
+      try {
+        const raw = await sessions.oneShot({ model: v, text: verifyPrompt(job.task, result, check), files: job.images, title: 'verify' });
+        recordUsage({ kind: 'llm', model: refOf(v) });
+        return { ...parseVerdict(raw), verifier: refOf(v) };
+      } catch (err) {
+        lastError = err; // the next verifier
+        failed(v, err instanceof Error ? err.message : String(err));
+      }
+    }
+    if (lastError) throw lastError;
+    return null;
   }
 
   function agentNeeds(name: string): Skill[] | undefined {

@@ -68,6 +68,11 @@ export class FakeEngine implements TelegramEngine {
     return { chat, messageId: m?.[2] ? Number(m[2]) : null };
   }
   readMarks: { chatId: number; messageIds: number[] }[] = [];
+  reactions: { chatId: number; messageId: number; emoji: string }[] = [];
+  async react(_accountId: number, chatId: number, messageId: number, emoji: string): Promise<void> {
+    this.reactions.push({ chatId, messageId, emoji });
+  }
+
   async markRead(_accountId: number, chatId: number, messageIds: number[]): Promise<void> {
     this.readMarks.push({ chatId, messageIds });
   }
