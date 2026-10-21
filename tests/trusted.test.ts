@@ -39,7 +39,7 @@ describe('trusted contacts', () => {
     expect(checkins).toHaveLength(0);
     await trusted.checkinTick(day(11));
     expect(checkins).toHaveLength(1);
-    expect(checkins[0].note).toMatch(/представься/);
+    expect(checkins[0].note).toMatch(/Вы ещё не общались/);
     await trusted.checkinTick(day(15));
     expect(checkins).toHaveLength(1); // once a day
 
@@ -50,7 +50,7 @@ describe('trusted contacts', () => {
     expect(checkins).toHaveLength(1); // talked today already
     await trusted.checkinTick(day(12, 23));
     expect(checkins).toHaveLength(2);
-    expect(checkins[1].note).not.toMatch(/представься/);
+    expect(checkins[1].note).not.toMatch(/Вы ещё не общались/);
   });
 
   it('finds dialogs whose fresh last message is incoming (a reply lost on restart)', () => {
@@ -65,5 +65,15 @@ describe('trusted contacts', () => {
     add('in', now - 30_000);
     expect(db.leadsAwaitingReply(now - 3600_000)).toEqual([lead.id]);
     expect(db.leadsAwaitingReply(now)).toEqual([]); // too old
+  });
+});
+
+describe('human-like replies', () => {
+  it('a reply with [next] goes as separate messages; a structured result stays one', async () => {
+    const { splitReply } = await import('../src/main/agent/style');
+    expect(splitReply('понял, береза и подъемник\n[next]\nпеределаю, через полчасика скину')).toEqual([
+      'понял, береза и подъемник', 'переделаю, через полчасика скину',
+    ]);
+    expect(splitReply('## Карточка\n\n- пункт\n- пункт')).toHaveLength(1);
   });
 });

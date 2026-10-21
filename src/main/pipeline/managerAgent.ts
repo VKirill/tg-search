@@ -4,7 +4,7 @@ import type { ChatMessage, ClientCard, Lead, Project } from '../../shared/types'
 import type { ManagerAi } from '../ai/types';
 import type { Db } from '../db';
 import type { TelegramEngine } from '../telegram/types';
-import { sendMessage, sendVoiceMessage, type OutreachDeps, isReplyTo } from './outreach';
+import { sendMessage, sendReplyParts, sendVoiceMessage, type OutreachDeps, isReplyTo } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
@@ -15,6 +15,7 @@ import type { ExecutorRegistry } from '../executors/types';
 import type { AgentDefsApi } from '../agent/defs';
 import type { ApprovalsApi } from '../agent/approvals';
 import { isTrustedLead } from '../trusted';
+import { splitReply } from '../agent/style';
 import type { SkillsStore } from '../skills';
 
 export interface OrdersHooks {
@@ -253,9 +254,9 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
       const mirrorVoice =
         project.manager.voiceReplies === 'mirror' && lastIn?.kind === 'voice' && deps.speech;
       if (mirrorVoice) {
-        await sendVoiceMessage(deps, leadId, result.reply.trim(), 'dm', true);
+        await sendVoiceMessage(deps, leadId, splitReply(result.reply).join(' '), 'dm', true);
       } else {
-        await sendMessage(deps, leadId, result.reply.trim(), 'dm', true);
+        await sendReplyParts(deps, leadId, result.reply.trim(), true);
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);

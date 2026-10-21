@@ -48,3 +48,13 @@ describe('text with a set of pictures', () => {
     expect(engine.sent.at(-1)?.text).toBe(long);
   });
 });
+
+describe('reply in several messages', () => {
+  it('sends each part as its own message, one limiter tick', async () => {
+    const { sendReplyParts } = await import('../src/main/pipeline/outreach');
+    const { db, engine, deps, lead } = setup();
+    await sendReplyParts(deps, lead.id, 'понял, 200 на 200\n[next]\nк вечеру скину', true, () => 0);
+    expect(engine.sent.map((s) => s.text)).toEqual(['понял, 200 на 200', 'к вечеру скину']);
+    expect(db.listMessages(lead.id).map((m) => m.text)).toEqual(['понял, 200 на 200', 'к вечеру скину']);
+  });
+});

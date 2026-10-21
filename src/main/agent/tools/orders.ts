@@ -149,7 +149,7 @@ export function createOrderTools(deps: ToolHostDeps): AgentTool[] {
         return `Заказ #${orderId} уже ${order.status === 'delivered' || order.status === 'done' ? 'выполнен' : 'в работе'} — повторно не запускаю`;
       }
       void deps.orders.requestPayment(orderId).catch((e) => console.error('start_work', e));
-      return `Заказ #${orderId} в работе: исполнитель пришлёт результат клиенту сам. Скажи клиенту, что взял в работу и примерно когда будет.`;
+      return `Заказ #${orderId} в работе, результат придёт клиенту сам. Скажи клиенту коротко по-человечески, что взял в работу и когда примерно скинешь (без слов «заказ», «запущен», «статус»).`;
     },
   };
 

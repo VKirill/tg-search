@@ -18,23 +18,18 @@ import { resolveAgentModel } from './model';
 import { createDelegateTool } from './tools/delegate';
 import { upsellBlock } from './upsell';
 import { freeClientBlock, isFreeLead } from '../trusted';
+import { CHAT_STYLE, HONESTY_RULE } from './style';
 import type { SkillsStore } from '../skills';
 
 const MAX_TOOL_ROUNDS = 8;
 const TURN_COST_CAP_USD = 0.15;
 const OPERATOR_RULES =
-  'Правила: пиши как живой человек на языке собеседника; 1–4 коротких предложения; один вопрос за раз; ' +
-  'не выдумывай цены и условия, которых нет в оффере и каталоге; ты — помощник человека по имени {owner} (в тексте склоняй имя: «помощник Кирилла»). ' +
-  'На вопросы «ты бот?», «ты человек?», «кто ты?» отвечай только, что ты его помощник и помогаешь с задачей; ' +
-  'не называй себя живым человеком и не говори «я не бот». ' +
+  'Правила: один вопрос за раз; не выдумывай цены и условия, которых нет в оффере и каталоге. ' +
   'Завершай ход инструментом reply с текстом для клиента. Цену называй только внутри вилки услуги. ' +
   'Клиенты редко дают бриф — формулируй допущения. Перед использованием фото клиента спроси согласие. ' +
   'Если клиент хочет регулярную помощь, ассистента на месяц или много поручений — назови тариф подписки из каталога ' +
   '(цена, квота поручений, что входит) и предложи оформить (инструмент offer_subscription после согласия).';
 
-const HARD_IDENTITY_RULES =
-  'Жёсткие правила (всегда): ты — только помощник владельца, не живой человек; не утверждай, что ты человек; ' +
-  'не говори «я не бот» и не оправдывайся; на «ты бот?» / «кто ты?» — коротко: помощник {owner} и возврат к задаче.';
 
 export interface OperatorDeps extends OutreachDeps {
   getSettings: () => import('../../shared/types').Settings;
@@ -169,11 +164,11 @@ export function createOperator(deps: OperatorDeps): Operator {
       temperature = agentDef.temperature ?? 0.3;
       modelOverride = resolveAgentModel(agentDef.model, deps.getSettings());
       const companyRules = deps.agents.rules();
-      const identity = HARD_IDENTITY_RULES.replaceAll('{owner}', owner || 'владельца');
+      const identity = `${CHAT_STYLE}\n\n${HONESTY_RULE.replaceAll('{owner}', owner || 'владельца')}`;
       system = `${companyRules}\n\n${identity}\n\n${agentDef.prompt}\n\n${projectContextBlock(project, owner)}\n\n${catalog}\n\n${skillsPart}Контекст клиента:\n${clientCtx}`;
     } else {
       const persona = projectManagerPrompt(project, mgr.prompt, owner);
-      const rules = OPERATOR_RULES.replaceAll('{owner}', owner || 'владельца');
+      const rules = `${OPERATOR_RULES}\n\n${CHAT_STYLE}\n\n${HONESTY_RULE.replaceAll('{owner}', owner || 'владельца')}`;
       system = `${persona}\n\n${rules}\n\n${catalog}\n\n${skillsPart}Контекст клиента:\n${clientCtx}`;
     }
 

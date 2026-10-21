@@ -143,7 +143,7 @@ Body line`;
     });
     await operator.turn(lead.id);
     expect(seenSystem).toContain('Unique rule marker XYZ');
-    expect(seenSystem).toContain('не говори «я не бот»');
+    expect(seenSystem).toContain('не ври');
     rmSync(dataDir, { recursive: true, force: true });
   });
 });

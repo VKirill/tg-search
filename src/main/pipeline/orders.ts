@@ -33,6 +33,9 @@ export interface OrdersDeps extends OutreachDeps {
   skipOrderPaymentPoll?: boolean;
 }
 
+// what a person writes when handing work over
+const DELIVERY_INTROS = ['готово, смотри', 'вот что получилось', 'лови', 'готово, глянь'];
+
 function workDir(dataDir: string, leadId: number, orderId: number): string {
   const dir = join(dataDir, 'clients', String(leadId), 'orders', String(orderId));
   mkdirSync(dir, { recursive: true });
@@ -194,7 +197,8 @@ export function createOrders(deps: OrdersDeps) {
     // the result text and every output file in one go: albums with the text under them
     const outputs = order.files.filter((f) => f.role === 'output');
     if (order.result?.trim() || outputs.length) {
-      await sendMediaMessage(deps, order.leadId, order.result?.trim() ?? '', outputs, true);
+      const intro = DELIVERY_INTROS[order.id % DELIVERY_INTROS.length];
+      await sendMediaMessage(deps, order.leadId, order.result?.trim() ? `${intro}\n\n${order.result.trim()}` : intro, outputs, true);
     }
     return patchOrder(orderId, { status: 'delivered' });
   }

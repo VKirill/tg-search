@@ -7,6 +7,7 @@ import { listAuthorizedProjectAccounts } from './accounts';
 import { afterSend, canSend, limiterErrorMessage } from './limiter';
 import { markdownToFormatted } from '../telegram/markdown';
 import { isTrustedLead } from '../trusted';
+import { splitReply } from '../agent/style';
 import { maybeStartChainAfterFirstSend } from './sequence';
 
 export interface OutreachDeps {
@@ -141,6 +142,39 @@ export async function sendMessage(
   deps.emit({ type: 'lead:update', lead: updatedLead });
   deps.emit({ type: 'account:update', account: patched });
   return message;
+}
+
+// A chat reply as a person types it: a few short messages in a row with a pause «while typing». The daily cap and the
+// pause between sends are checked once for the whole reply.
+export async function sendReplyParts(
+  deps: OutreachDeps,
+  leadId: number,
+  text: string,
+  auto = false,
+  typingMs = (chars: number) => Math.min(5000, 1200 + chars * 30),
+): Promise<import('../../shared/types').ChatMessage> {
+  const parts = splitReply(text);
+  if (parts.length <= 1) return sendMessage(deps, leadId, parts[0] ?? text, 'dm', auto);
+  const lead = deps.db.getLead(leadId);
+  if (lead.authorUserId == null) throw new Error('Контакт не определён — ответьте в чате');
+  const project = deps.db.getProject(lead.projectId);
+  const now = Date.now();
+  const { accountId } = pickSendingAccount(deps.db, project.accountIds, lead, now);
+  let last: import('../../shared/types').ChatMessage | undefined;
+  for (const [i, part] of parts.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, typingMs(part.length)));
+    const tgMsg = await deps.engine.sendDirect(accountId, lead.authorUserId, part);
+    last = deps.db.addMessage({
+      leadId, accountId, direction: 'out', where: 'dm', text: part, tgChatId: tgMsg.chatId, tgMessageId: tgMsg.messageId,
+      date: tgMsg.date, auto,
+    });
+    deps.emit({ type: 'message:new', message: last });
+  }
+  const updatedLead = deps.db.updateLead(leadId, { status: 'replied', accountId });
+  const patched = deps.db.updateAccount(accountId, afterSend(deps.db.getAccount(accountId), Date.now(), isReplyTo(deps.db, lead)));
+  deps.emit({ type: 'lead:update', lead: updatedLead });
+  deps.emit({ type: 'account:update', account: patched });
+  return last!;
 }
 
 const CAPTION_MAX = 1024; // Telegram caption limit; a longer text goes as its own message right before the album

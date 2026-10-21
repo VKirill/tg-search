@@ -1,5 +1,6 @@
 import type { AgentTool, ToolContext } from '../types';
-import { sendMessage, sendVoiceMessage } from '../../pipeline/outreach';
+import { sendReplyParts, sendVoiceMessage } from '../../pipeline/outreach';
+import { splitReply } from '../style';
 import type { ToolHostDeps } from './deps';
 
 export function createReplyTool(deps: ToolHostDeps): AgentTool {
@@ -10,7 +11,7 @@ export function createReplyTool(deps: ToolHostDeps): AgentTool {
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: 'Текст ответа клиенту' },
+        text: { type: 'string', description: 'Текст ответа клиенту; несколько коротких сообщений подряд — разделяй строкой [next]' },
         voice: { type: 'boolean', description: 'Отправить голосом вместо текста' },
       },
       required: ['text'],
@@ -26,9 +27,9 @@ export function createReplyTool(deps: ToolHostDeps): AgentTool {
       if (ctx.dryRun) return `[dryRun] Отправили бы клиенту: ${text.slice(0, 200)}`;
       const voice = !!args.voice && deps.speech;
       if (voice) {
-        await sendVoiceMessage(deps, ctx.leadId, text, 'dm', true);
+        await sendVoiceMessage(deps, ctx.leadId, splitReply(text).join(' '), 'dm', true);
       } else {
-        await sendMessage(deps, ctx.leadId, text, 'dm', true);
+        await sendReplyParts(deps, ctx.leadId, text, true);
       }
       return 'Сообщение отправлено';
     },
