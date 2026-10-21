@@ -1,6 +1,7 @@
 import type { AppEvent, Project } from '../../shared/types';
 import type { Db } from '../db';
 import type { Categorizer, LeadAi } from '../ai/types';
+import type { Dedupe } from '../dedupe';
 import { todayLocal } from './limiter';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { listAuthorizedProjectAccounts } from './accounts';
@@ -11,6 +12,7 @@ export interface ScannerDeps {
   ai: LeadAi;
   emit: (e: AppEvent) => void;
   categorizer?: Categorizer;
+  dedupe?: Dedupe;
 }
 
 const MIN_TEXT_LEN = 15;
@@ -26,8 +28,15 @@ export async function qualifyAndAddLeads(
   sourceId: number,
   messages: TgMessage[],
 ): Promise<number> {
+  const indexed = messages;
+  if (deps.dedupe && messages.length) {
+    messages = deps.dedupe.messagesForQualify(project.id, messages);
+  }
   if (deps.categorizer) messages = await categorizeAndGate(deps, deps.categorizer, messages);
-  if (messages.length === 0) return 0;
+  if (messages.length === 0) {
+    if (deps.dedupe && indexed.length) deps.dedupe.learn(project.id, indexed);
+    return 0;
+  }
   const examples = deps.db.feedbackExamples(project.id);
   const quals = await deps.ai.qualify(project, messages, examples);
   const byKey = new Map(quals.map((q) => [q.key, q]));
@@ -55,6 +64,7 @@ export async function qualifyAndAddLeads(
       deps.emit({ type: 'lead:new', lead });
     }
   }
+  if (deps.dedupe && indexed.length) deps.dedupe.learn(project.id, indexed);
   return added;
 }
 
