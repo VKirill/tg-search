@@ -35,6 +35,8 @@ import type { ExecutorRegistry } from './executors/types';
 import type { PaymentProvider } from './payments/types';
 import { createOrders, stubExecutorRegistry } from './pipeline/orders';
 import { createDossier } from './dossier';
+import { ensureAgentSchema } from './agent/schema';
+import { listAgentSteps } from './agent/store';
 
 export interface AppDeps {
   db: Db;
@@ -57,6 +59,8 @@ export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(
 
 export function createApp(deps: AppDeps): AppHandlers {
   const { db, engine, ai, openExternal, speech, dataDir } = deps;
+  ensureAgentSchema(db.raw, db);
+  const getSettings = () => db.getSettings();
   const manager = deps.manager ?? stubManagerAi();
   const crmAi = deps.crmAi ?? stubCrmAi();
   const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
@@ -92,7 +96,21 @@ export function createApp(deps: AppDeps): AppHandlers {
     executors: deps.executors ?? stubExecutorRegistry(),
   });
   const autopilot = createAutopilot(pipeline);
-  const managerAgent = createManagerAgent({ ...pipeline, manager, crm, orders });
+  const managerAgent = createManagerAgent({
+    ...pipeline,
+    manager,
+    crm,
+    orders: {
+      ...orders,
+      handlePostManagerReply: orders.handlePostManagerReply.bind(orders),
+      applyManagerIntent: orders.applyManagerIntent.bind(orders),
+      requestPayment: orders.requestPayment.bind(orders),
+    },
+    dataDir,
+    getSettings,
+    executors: deps.executors ?? stubExecutorRegistry(),
+  });
+  const operator = managerAgent.getOperator();
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
   const realtime = createRealtime({ ...pipeline, dataDir });
   const importer = createImporter({ db, engine, emit });
@@ -355,8 +373,13 @@ export function createApp(deps: AppDeps): AppHandlers {
           handoffReason: null,
           createdAt: Date.now(),
         };
-        const dialog: DialogTurn[] = [{ direction: 'in', text: leadText }, ...history];
-        return manager.reply(project, lead, dialog, settings);
+        const op = await operator.turn(0, { dryRun: true, settings, leadOverride: lead, projectOverride: project });
+        return {
+          reply: op.reply ?? '',
+          handoff: op.handoff,
+          reason: op.reason,
+          ...(op.order !== undefined ? { order: op.order } : {}),
+        };
       },
     },
     broadcasts: {
@@ -390,7 +413,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       checkPayment: notYet('billing worker'),
     },
     agent: {
-      trace: notYet('agent worker'),
+      trace: async (leadId, limit) => listAgentSteps(db, leadId, limit ?? 100),
     },
     services: {
       list: async () => db.listServices(),

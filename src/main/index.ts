@@ -72,6 +72,8 @@ app.whenReady().then(async () => {
     yookassaSecretKey: s.yookassaSecretKey || process.env.YOOKASSA_SECRET_KEY || '',
     auxApiKey: s.auxApiKey || process.env.NINEROUTER_API_KEY || '',
     falKey: s.falKey || process.env.FAL_KEY || '',
+    operatorApiKey: s.operatorApiKey || process.env.DEEPSEEK_API_KEY || '',
+    tavilyApiKey: s.tavilyApiKey || process.env.TAVILY_API_KEY || '',
   });
 
   const emit = (e: AppEvent) => {
