@@ -172,7 +172,7 @@ describe('createDossier', () => {
         usage: { prompt_tokens: 10, completion_tokens: 20 },
       }),
     });
-    const auxSettings = () => ({ ...db.getSettings(), auxApiKey: 'test-key' });
+    const auxSettings = () => ({ ...db.getSettings(), auxBaseUrl: 'https://aux.test/v1', auxApiKey: 'test-key' });
     const dossier = createDossier({ db, dataDir, settings: auxSettings, fetchFn });
     dossier.onMessage(msg(lead, { text: 'msg1' }));
     dossier.onMessage(msg(lead, { id: 2, text: 'msg2' }));
@@ -194,7 +194,7 @@ describe('createDossier', () => {
     const dir = resolveClientDir(dataDir, lead.id, lead);
     writeFileSync(join(dir, 'profile.md'), '---\nleadId: 1\n---\n\nСтарое досье\n', 'utf8');
     const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'err' });
-    const auxSettings = () => ({ ...db.getSettings(), auxApiKey: 'test-key' });
+    const auxSettings = () => ({ ...db.getSettings(), auxBaseUrl: 'https://aux.test/v1', auxApiKey: 'test-key' });
     const dossier = createDossier({ db, dataDir, settings: auxSettings, fetchFn });
     await dossier.refreshProfile(lead.id);
     expect(readFileSync(join(dir, 'profile.md'), 'utf8')).toContain('Старое досье');
@@ -251,7 +251,7 @@ describe.skipIf(!process.env.NINEROUTER_API_KEY)('live aux profile', () => {
       const dossier = createDossier({
         db,
         dataDir,
-        settings: () => ({ ...db.getSettings(), auxApiKey: process.env.NINEROUTER_API_KEY! }),
+        settings: () => ({ ...db.getSettings(), auxBaseUrl: process.env.NINEROUTER_BASE_URL ?? '', auxApiKey: process.env.NINEROUTER_API_KEY! }),
       });
       const base = Date.parse('2026-10-20T10:00:00+03:00');
       dialog.forEach((line, i) => {
