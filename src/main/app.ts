@@ -35,6 +35,8 @@ import type { ExecutorRegistry } from './executors/types';
 import type { PaymentProvider } from './payments/types';
 import { createOrders, stubExecutorRegistry } from './pipeline/orders';
 import { createDossier } from './dossier';
+import { createBilling } from './billing/billing';
+import type { BillingApi } from './billing/billing';
 
 export interface AppDeps {
   db: Db;
@@ -74,7 +76,21 @@ export function createApp(deps: AppDeps): AppHandlers {
     if (e.type === 'order:update') dossier.onOrder(e.order);
   };
   const spinner = deps.spinner ?? passthroughSpinner;
-  const pipeline = { db, engine, ai, speech, emit, manager, categorizer: deps.categorizer, dossier };
+  let billing: BillingApi | undefined;
+  const billingRef: { current?: BillingApi } = {};
+  const pipeline = {
+    db,
+    engine,
+    ai,
+    speech,
+    emit,
+    manager,
+    categorizer: deps.categorizer,
+    dossier,
+    get billing() {
+      return billing;
+    },
+  };
   const payments = deps.payments ?? {
     create: async () => {
       throw new Error('Платежи не настроены');
@@ -90,7 +106,29 @@ export function createApp(deps: AppDeps): AppHandlers {
     dataDir,
     payments,
     executors: deps.executors ?? stubExecutorRegistry(),
+    skipOrderPaymentPoll: true,
+    billingRef,
   });
+  const sendToClient = async (leadId: number, text: string) => {
+    await sendMessage(pipeline, leadId, text, 'dm', true);
+  };
+  const leadForClient = (clientId: number): number | null => {
+    const row = db.raw.prepare('SELECT id FROM leads WHERE client_id = ? ORDER BY id DESC LIMIT 1').get(clientId) as
+      | { id: number }
+      | undefined;
+    return row?.id ?? null;
+  };
+  billing = createBilling({
+    db,
+    payments,
+    emit,
+    sendToClient,
+    leadForClient,
+    onOrderPaid: async (orderId) => {
+      await orders.markPaid(orderId);
+    },
+  });
+  billingRef.current = billing;
   const autopilot = createAutopilot(pipeline);
   const managerAgent = createManagerAgent({ ...pipeline, manager, crm, orders });
   const broadcaster = createBroadcaster({ db, engine, spinner, emit });
@@ -156,9 +194,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
+      billing?.start();
     },
 
     async stop() {
+      billing?.stop();
       orders.stopPoller();
       broadcaster.stop();
       realtime.stop();
@@ -380,14 +420,16 @@ export function createApp(deps: AppDeps): AppHandlers {
       sendAsset: notYet('memory worker'),
     },
     billing: {
-      plans: notYet('billing worker'),
-      savePlan: notYet('billing worker'),
-      removePlan: notYet('billing worker'),
-      subscriptions: notYet('billing worker'),
-      subscribe: notYet('billing worker'),
-      cancelSubscription: notYet('billing worker'),
-      payments: notYet('billing worker'),
-      checkPayment: notYet('billing worker'),
+      plans: async () => billing!.listPlans(),
+      savePlan: async (plan) => billing!.savePlan(plan),
+      removePlan: async (planId) => {
+        billing!.removePlan(planId);
+      },
+      subscriptions: async (clientId) => billing!.listSubscriptions(clientId),
+      subscribe: async (clientId, planId) => billing!.subscribe(clientId, planId),
+      cancelSubscription: async (subscriptionId) => billing!.cancelSubscription(subscriptionId),
+      payments: async (clientId) => billing!.listPayments(clientId),
+      checkPayment: async (paymentId) => billing!.check(paymentId),
     },
     agent: {
       trace: notYet('agent worker'),
