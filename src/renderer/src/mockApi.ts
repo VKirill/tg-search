@@ -94,6 +94,7 @@ let settings: Settings = {
   aiMainModel: 'zai-coding-plan/glm-5.3-flash',
   aiHelperModels: '["router9/ag/gemini-3.8-flash"]',
   aiUseFree: '1',
+  aiVerifierModel: '',
 };
 
 const accounts: Account[] = [
@@ -992,6 +993,8 @@ const builtinAgentDefaults: AgentDef[] = [
     temperature: 0.4,
     steps: 8,
     needs: [],
+    verify: 'off',
+    check: '',
     permission: { '*': 'allow', request_payment: 'ask' },
     prompt:
       'Ты — помощник Кирилла. Собираешь заявку, продаёшь услуги из каталога, предлагаешь подписку. ' +
@@ -1006,6 +1009,8 @@ const builtinAgentDefaults: AgentDef[] = [
     temperature: 0.2,
     steps: 12,
     needs: ['research', 'russian'],
+    verify: 'free',
+    check: '',
     permission: { web_search: 'allow', fetch_url: 'allow', '*': 'deny' },
     prompt: 'Ты — исследователь. Ищи в сети, читай страницы, отвечай со ссылками на источники.',
     builtIn: true,
@@ -1984,6 +1989,12 @@ export function createMockApi(): Api {
       },
       async checkUpdate() {
         return 'OpenCode 2.1.2 — последняя версия';
+      },
+      async stats() {
+        return [
+          { model: 'router9/ag/gemini-3.8-flash-high', agent: 'solver', runs: 12, ok: 10, failed: 0, rejected: 1, redone: 1, clientFixes: 0, avgScore: 0.88, avgMs: 41000 },
+          { model: 'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free', agent: 'solver', runs: 7, ok: 4, failed: 1, rejected: 2, redone: 0, clientFixes: 0, avgScore: 0.71, avgMs: 63000 },
+        ];
       },
       async route() {
         return {

@@ -226,7 +226,8 @@ export interface Settings {
   aiProviders: string;
   aiMainModel: string;
   aiHelperModels: string;
-  aiUseFree: string; // '1' — OpenRouter's free models go first for helper jobs
+  aiUseFree: string;
+  aiVerifierModel: string; // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
@@ -365,6 +366,8 @@ export interface AgentDef {
   model: string; // 'glm' | 'deepseek' | '<provider>/<model>' | '' (= operator provider switch)
   temperature: number | null;
   steps: number; // max tool iterations per turn; at the limit the agent summarizes what is left
+  verify: 'always' | 'free' | 'off'; // a second model checks the result: always, only a free model's, never
+  check: string; // what that check covers for this agent's work, «; »-separated
   needs: string[]; // what a model must be good at for this agent's jobs (reasoning, writing, russian, vision…) — the router matches them
   permission: Record<string, ToolPermission>; // tool name or glob ('*', 'order_*') → permission; last match wins
   prompt: string; // the body: role, how to talk, what to do and never do
@@ -427,6 +430,20 @@ export interface AiProvider {
   baseURL: string | null;
   hasKey: boolean; // keys never leave the main process
   models: number;
+}
+
+// A model's record on one kind of job (an agent or an executor), from the ledger
+export interface AiModelStat {
+  model: string;
+  agent: string;
+  runs: number;
+  ok: number;
+  failed: number;
+  rejected: number;
+  redone: number;
+  clientFixes: number;
+  avgScore: number | null;
+  avgMs: number;
 }
 
 // How the router would place a task: Jev's probabilities for the first line, then the order of attempts
@@ -850,7 +867,8 @@ export interface Api {
     removeProvider(id: string): Promise<AiProvider[]>;
     importOpencode(): Promise<number>; // from the user's own OpenCode config; returns providers found
     checkUpdate(): Promise<string>;
-    route(agent: string, task: string): Promise<AiRoute>; // which model an agent's task would go to, and why
+    route(agent: string, task: string): Promise<AiRoute>;
+    stats(sinceDays: number): Promise<AiModelStat[]>; // how each model did each kind of job // which model an agent's task would go to, and why
   };
   trusted: {
     list(): Promise<TrustedContact[]>;

@@ -15,6 +15,8 @@ import { TOOL_PREFIX, writeOpencodeConfig, type AgentConfig, type ProviderConfig
 import { importFromUserOpencode, mergeProviders, providersFromSettings } from './importProviders';
 import { isFreeModel, isSubscriptionModel, pickModel, poolModels, rankModels, ROLE_NEEDS, refString, toCatalog, type CatalogModel, type ModelRole } from './models';
 import { jevRankModels } from './jevRoute';
+import { createLedger, currentJob, type RunOutcome } from './ledger';
+import { parseVerdict, verifyPrompt, type Verdict, type VerifyMode } from './verify';
 import { createProfiles, fetchOpenRouterMeta, fromOpenRouter, matchOpenRouter, SKILL_LABELS, SKILLS, type ProfileInput, type Skill } from './profiles';
 import { createOpencodeRuntime } from './runtime';
 import { createOpencodeServer, type OpencodeStatus } from './server';
@@ -66,6 +68,7 @@ export function createAiEngine(deps: {
   });
   const sessions = createSessions(server, bridge);
   const profiles = createProfiles(deps.db);
+  const ledger = createLedger(deps.db);
 
   function providers(): ProviderConfig[] {
     try {
@@ -178,18 +181,25 @@ export function createAiEngine(deps: {
 
   // The models to try for a job, best first. With the task text, Jev picks the order of the first line (subscriptions
   // and free models) by their descriptions; without Jev — by their profiles.
-  async function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[], task?: string): Promise<ModelRef[]> {
+  // The models to try for a job, best first: Jev's fit for this very task times the model's track record with this kind
+  // of job (ledger: done, turned down by the verifier, sent back by the agent, corrected by the client)
+  async function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[], task?: string, agent = 'gateway'): Promise<ModelRef[]> {
     const opts = routeOpts(needs);
-    let poolOrder: string[] | undefined;
-    const pool = task && deps.getSettings().jevApiKey.trim() ? poolModels(catalog, choice(), role, need, opts).slice(0, 10) : [];
-    if (pool.length > 1) {
+    const pool = poolModels(catalog, choice(), role, need, opts).slice(0, 10);
+    let fit = new Map(pool.map((m, i) => [refString(m), 1 / (i + 2)])); // the profiles' order when Jev is not asked
+    if (task && pool.length > 1 && deps.getSettings().jevApiKey.trim()) {
       try {
-        const ranked = await jevRankModels(deps.getSettings, task!, needs?.length ? needs : ROLE_NEEDS[role], pool.map((m) => ({ ref: refString(m), text: modelText(m) })));
-        poolOrder = ranked.map((r) => r.ref);
-        console.log(`route ${role} [${(needs ?? ROLE_NEEDS[role]).join(',')}]: ${ranked.slice(0, 3).map((r) => `${r.ref} ${r.p.toFixed(2)}`).join(' | ')}`);
+        const ranked = await jevRankModels(deps.getSettings, task, needs?.length ? needs : ROLE_NEEDS[role], pool.map((m) => ({ ref: refString(m), text: modelText(m) })));
+        fit = new Map(ranked.map((r) => [r.ref, r.p]));
       } catch (err) {
-        console.warn('jev route', err); // the profiles' order still works
+        console.warn('jev route', err);
       }
+    }
+    const trust = ledger.reliability(agent);
+    const score = (ref: string) => (fit.get(ref) ?? 0) * 2 * (trust.get(ref) ?? 0.5); // 0.5 = no history: neutral
+    const poolOrder = [...fit.keys()].sort((a, b) => score(b) - score(a));
+    if (pool.length) {
+      console.log(`route ${agent} (${role}): ${poolOrder.slice(0, 3).map((r) => `${r} fit ${(fit.get(r) ?? 0).toFixed(2)} trust ${(trust.get(r) ?? 0.5).toFixed(2)}`).join(' | ')}`);
     }
     const list = rankModels(catalog, choice(), role, need, { ...opts, poolOrder }).slice(0, MAX_ATTEMPTS);
     return list.length ? list : [model(role, need)];
@@ -202,14 +212,20 @@ export function createAiEngine(deps: {
       let lastError: unknown;
       const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
       const task = [req.title, req.system?.slice(0, 500), lastUser.slice(0, 1500)].filter(Boolean).join('\n');
-      for (const m of await candidates(req.role, { vision: !!req.images?.length }, undefined, task)) {
+      const job = currentJob();
+      const agent = job?.agent ?? 'gateway';
+      for (const m of await candidates(req.role, { vision: !!req.images?.length }, undefined, task, agent)) {
+        const started = Date.now();
         try {
           const text = await sessions.oneShot({ model: m, text: gatewayPrompt(req), files: req.images, title: req.title });
           recordUsage({ kind: 'llm', model: refOf(m) });
+          if (req.role !== 'chat') ledger.record({ model: refOf(m), agent, outcome: 'ok', task: lastUser, ms: Date.now() - started, ...job });
           return text;
         } catch (err) {
           lastError = err;
-          failed(m, err instanceof Error ? err.message : String(err));
+          const error = err instanceof Error ? err.message : String(err);
+          if (req.role !== 'chat') ledger.record({ model: refOf(m), agent, outcome: /пустой/.test(error) ? 'empty' : 'error', error, task: lastUser, ms: Date.now() - started, ...job });
+          failed(m, error);
         }
       }
       throw lastError;
@@ -229,12 +245,16 @@ export function createAiEngine(deps: {
     parentKey?: string;
     requireText?: boolean; // the turn's text is the result (subagents): an empty one counts as a failure
     canRetry?: () => boolean;
-  }): Promise<TurnResult & { model: string }> {
+    taskId?: number; // a background task: its runs are reviewed later by the primary agent
+    verify?: { task: string; images?: string[] }; // check the result with a second model (by the agent's `verify` mode)
+  }): Promise<TurnResult & { model: string; score?: number }> {
     const row = opts.key
       ? deps.db.raw.prepare('SELECT session_id, synced_message_id FROM opencode_sessions WHERE key = ?').get(opts.key) as { session_id: string; synced_message_id: number } | undefined
       : undefined;
     const { text, lastMessageId } = opts.prompt(row?.synced_message_id ?? 0);
-    const models = await candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName), text);
+    const models = await candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName), text, opts.agentName);
+    const policy = agentPolicy(opts.agentName);
+    const leadId = opts.binding.ctx.leadId || undefined;
     let sessionID = row?.session_id;
     if (!sessionID) {
       const parent = opts.parentKey
@@ -245,23 +265,85 @@ export function createAiEngine(deps: {
     }
     try {
       let result: TurnResult = { outcome: 'failed', text: '', error: 'нет модели', costUsd: 0 };
+      let best: (TurnResult & { model: string; score?: number }) | null = null; // every model turned down: the best of them
+      let prompt = text;
       for (const [i, m] of models.entries()) {
         if (i > 0 || row) await sessions.setModel(sessionID, m); // the owner may have switched models since the last turn
-        result = await sessions.runTurn(sessionID, { text, files: opts.files }, opts.binding, opts.timeoutMs);
+        const started = Date.now();
+        result = await sessions.runTurn(sessionID, { text: prompt, files: opts.files }, opts.binding, opts.timeoutMs);
         recordUsage({ kind: 'llm', model: refOf(m), costUsd: result.costUsd });
         const ok = result.outcome === 'succeeded' && (!opts.requireText || !!result.text.trim());
+        const track = opts.role !== 'chat'; // client chat is the main model's, not a routed job
+        const outcome: RunOutcome = ok ? 'ok' : result.outcome === 'timeout' ? 'timeout' : result.outcome === 'succeeded' ? 'empty' : 'error';
+        const runId = track ? ledger.record({
+          model: refOf(m), agent: opts.agentName, outcome, error: result.error, task: opts.verify?.task ?? text, ms: Date.now() - started,
+          cost: result.costUsd, leadId, taskId: opts.taskId,
+        }) : 0;
         if (ok) {
-          if (opts.key) deps.db.raw.prepare('UPDATE opencode_sessions SET synced_message_id = ? WHERE key = ?').run(lastMessageId, opts.key);
-          return { ...result, model: refOf(m) };
+          const verdict = opts.verify && shouldVerify(policy.mode, m) ? await verifyWith(m, opts.verify, result.text, policy.check).catch((err) => {
+            console.warn('verify', err);
+            return null;
+          }) : null;
+          if (verdict && runId) ledger.verdict(runId, { ...verdict, verifier: verdict.verifier });
+          if (!verdict || verdict.ok || !(opts.canRetry?.() ?? true) || i === models.length - 1) {
+            if (opts.key) deps.db.raw.prepare('UPDATE opencode_sessions SET synced_message_id = ? WHERE key = ?').run(lastMessageId, opts.key);
+            const done = { ...result, model: refOf(m), score: verdict?.score };
+            if (!verdict || verdict.ok || !best || (best.score ?? 0) < verdict.score) return done;
+            return best;
+          }
+          // turned down: the next model sees the previous answer in the session and the verifier's notes
+          console.warn(`verify: ${refOf(m)} scored ${verdict.score.toFixed(2)} on ${opts.agentName} — ${verdict.note.slice(0, 200)}`);
+          if (!best || (best.score ?? 0) < verdict.score) best = { ...result, model: refOf(m), score: verdict.score };
+          prompt = `Проверяющий отклонил предыдущий ответ: ${verdict.note || 'есть ошибки по существу'}\n\nСделай задачу заново полностью, исправив это. Исходное поручение — выше.`;
+          continue;
         }
         if (result.outcome === 'interrupted') break;
         failed(m, result.error ?? (result.outcome === 'succeeded' ? 'пустой ответ' : result.outcome));
         if (opts.canRetry && !opts.canRetry()) break;
       }
+      if (best) {
+        if (opts.key) deps.db.raw.prepare('UPDATE opencode_sessions SET synced_message_id = ? WHERE key = ?').run(lastMessageId, opts.key);
+        return best;
+      }
       return { ...result, model: '' };
     } finally {
       if (!opts.key) void sessions.remove(sessionID);
     }
+  }
+
+  function agentPolicy(name: string): { mode: VerifyMode; check: string } {
+    try {
+      const a = deps.agents().get(name);
+      return { mode: a.verify, check: a.check };
+    } catch {
+      return { mode: 'off', check: '' };
+    }
+  }
+
+  const shouldVerify = (mode: VerifyMode, m: ModelRef) => mode === 'always' || (mode === 'free' && isFreeModel(m));
+
+  // The verifier: the owner's choice in Settings, else a strong ticked subscription (Gemini 3.8 Flash High if ticked);
+  // never the model that did the work; one that sees images when the job has them
+  function verifierFor(producer: ModelRef, vision: boolean): ModelRef | null {
+    const byRef = new Map(catalog.map((m) => [refString(m), m]));
+    const usable = (ref: string) => {
+      const m = byRef.get(ref);
+      return m && m.enabled && ref !== refOf(producer) && (!vision || m.vision) ? m : null;
+    };
+    const c = choice();
+    const preferred = [deps.getSettings().aiVerifierModel, ...c.helpers.filter((r) => /gemini-3\.8-flash-high/.test(r))].filter(Boolean);
+    const ticked = [...c.helpers, c.main].map(usable).filter((m): m is CatalogModel => !!m)
+      .sort((a, b) => Number(isSubscriptionModel(b)) - Number(isSubscriptionModel(a)) || (b.costIn + b.costOut) - (a.costIn + a.costOut));
+    const m = preferred.map(usable).find(Boolean) ?? ticked[0];
+    return m ? { providerID: m.providerID, id: m.id, variant: m.variants.includes('high') ? 'high' : undefined } : null;
+  }
+
+  async function verifyWith(producer: ModelRef, job: { task: string; images?: string[] }, result: string, check: string): Promise<(Verdict & { verifier: string }) | null> {
+    const v = verifierFor(producer, !!job.images?.length);
+    if (!v) return null;
+    const raw = await sessions.oneShot({ model: v, text: verifyPrompt(job.task, result, check), files: job.images, title: 'verify' });
+    recordUsage({ kind: 'llm', model: refOf(v) });
+    return { ...parseVerdict(raw), verifier: refOf(v) };
   }
 
   function agentNeeds(name: string): Skill[] | undefined {
@@ -318,6 +400,7 @@ export function createAiEngine(deps: {
     bridge,
     profileView,
     refreshProfiles,
+    ledger,
 
     // Settings → «Кому достанется задача»: the same routing a real task of this agent gets
     async route(agentName: string, task: string): Promise<AiRoute> {

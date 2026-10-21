@@ -3,6 +3,8 @@ description: Поиск в интернете и исследование со �
 mode: subagent
 model: fast
 needs: research, agentic, russian
+verify: free
+check: у каждого факта, компании, контакта и цены есть ссылка на источник; ссылки похожи на настоящие, а не придуманные; данные свежие; нет «примерных» компаний вместо найденных
 temperature: 0.2
 steps: 12
 permission:

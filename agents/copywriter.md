@@ -3,6 +3,8 @@ description: Тексты, посты и контент-планы для соц
 mode: subagent
 model: fast
 needs: writing, russian
+verify: free
+check: соблюдён бриф: площадка, тон, объём; нет канцелярита и штампов нейросетей; нет фактов о клиенте и продукте, которых нет в поручении; есть призыв к действию, если он нужен
 temperature: 0.5
 steps: 10
 permission:

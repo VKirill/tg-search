@@ -165,6 +165,9 @@ export function parseAgentFile(name: string, raw: string, builtIn: boolean): Age
     model: String(meta.model ?? ''),
     temperature: temp === null || temp === undefined ? null : Number(temp),
     steps: Math.max(1, Number(meta.steps ?? 8)),
+    // results are checked by a second model: subagents' when a free model did them, unless the file says otherwise
+    verify: meta.verify === 'always' || meta.verify === 'off' || meta.verify === 'free' ? meta.verify : mode === 'subagent' ? 'free' : 'off',
+    check: String(meta.check ?? '').trim(),
     needs: (Array.isArray(meta.needs) ? meta.needs.map(String) : String(meta.needs ?? '').split(',')).map((x) => x.trim()).filter(Boolean),
     permission,
     prompt: body,
@@ -181,6 +184,8 @@ function serializeAgentFile(def: AgentDef): string {
     `temperature: ${def.temperature ?? ''}`,
     `steps: ${def.steps}`,
     ...(def.needs?.length ? [`needs: ${def.needs.join(', ')}`] : []),
+    `verify: ${def.verify}`,
+    ...(def.check ? [`check: ${def.check}`] : []),
     'permission:',
   ];
   for (const [k, v] of Object.entries(def.permission)) {

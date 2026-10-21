@@ -828,6 +828,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         if (!aiEngine) throw new Error('ИИ-движок не подключён');
         return aiEngine.update();
       },
+      stats: async (sinceDays) => aiEngine?.ledger.stats(Date.now() - sinceDays * 86400_000) ?? [],
       route: async (agent, task) => {
         if (!aiEngine) throw new Error('ИИ-движок не подключён');
         return aiEngine.route(agent, task);

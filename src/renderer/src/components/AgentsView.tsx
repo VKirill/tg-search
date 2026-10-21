@@ -28,6 +28,8 @@ function emptyAgent(): AgentDef {
     temperature: 0.4,
     steps: 8,
     needs: [],
+    verify: 'free',
+    check: '',
     permission: { '*': 'allow' },
     prompt: '',
     builtIn: false,

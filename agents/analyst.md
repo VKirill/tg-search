@@ -3,6 +3,8 @@ description: Разбор картинок и документов — фото 
 mode: subagent
 model: vision
 needs: vision, reasoning
+verify: free
+check: выводы опираются на то, что действительно видно на картинке; цифры со скриншота прочитаны верно; рекомендации конкретные и выполнимые
 temperature: 0.3
 steps: 8
 permission:

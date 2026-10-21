@@ -1,7 +1,7 @@
 // «Статистика»: analyzed messages, requests vs chatter, leads, sends, AI spend and the demand map by category.
 // Colors are validated for the dark surface (dataviz validator): requests #3d8bfd, chatter #d0752e.
 import { useCallback, useEffect, useState } from 'react';
-import type { Category, StatsDay, StatsReport } from '../../../shared/types';
+import type { AiModelStat, Category, StatsDay, StatsReport } from '../../../shared/types';
 import { getApi } from '../hooks/useApi';
 import { useToast } from './Toast';
 
@@ -245,6 +245,8 @@ export function StatsView() {
         </div>
       </section>
 
+      <ModelRecords days={period === 'day' ? 1 : period === 'week' ? 7 : 30} />
+
       <section className="stats-card">
         <h2 className="section-title">Расходы по моделям</h2>
         <table className="stats-table">
@@ -270,5 +272,48 @@ export function StatsView() {
         <div className="crm-muted">Jev и речь — оценка по ценам из настроек; LLM через OpenRouter — точная стоимость из ответа.</div>
       </section>
     </div>
+  );
+}
+
+const JOB_LABEL: Record<string, string> = {
+  solver: 'решатель', copywriter: 'копирайтер', researcher: 'исследователь', analyst: 'аналитик', directologist: 'директолог',
+  homework: 'заказ: задачи', copywriting: 'заказ: тексты', marketplace_card: 'заказ: карточки', image_gen: 'заказ: картинки', assistant: 'ассистент',
+  gateway: 'служебное', group: 'чат ГДЗ',
+};
+
+// How each model did each kind of job: accepted, turned down by the verifier, sent back by the agent, fixed for the client
+function ModelRecords({ days }: { days: number }) {
+  const [rows, setRows] = useState<AiModelStat[]>([]);
+  useEffect(() => {
+    getApi().ai.stats(days).then(setRows, () => setRows([]));
+  }, [days]);
+  const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  return (
+    <section className="stats-card">
+      <h2 className="section-title">Модели в работе</h2>
+      <table className="stats-table">
+        <thead>
+          <tr><th>Модель</th><th>Работа</th><th>Задач</th><th>Принято</th><th>Отклонил проверяющий</th><th>Переделка</th><th>Правки клиента</th><th>Сбои</th><th>Оценка</th><th>Время</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.model}-${r.agent}`}>
+              <td>{r.model.split('/').slice(1).join('/')}</td>
+              <td>{JOB_LABEL[r.agent] ?? r.agent}</td>
+              <td>{num(r.runs)}</td>
+              <td>{pct(r.ok, r.runs)}</td>
+              <td>{r.rejected || '—'}</td>
+              <td>{r.redone || '—'}</td>
+              <td>{r.clientFixes || '—'}</td>
+              <td>{r.failed || '—'}</td>
+              <td>{r.avgScore == null ? '—' : r.avgScore.toFixed(2)}</td>
+              <td>{Math.round(r.avgMs / 1000)} с</td>
+            </tr>
+          ))}
+          {!rows.length && <tr><td colSpan={10} className="crm-muted">Поручений моделям за период не было</td></tr>}
+        </tbody>
+      </table>
+      <div className="crm-muted">По этим данным маршрутизатор понижает модели, которые часто ошибаются на этой работе, и поднимает надёжные.</div>
+    </section>
   );
 }

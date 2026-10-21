@@ -61,6 +61,8 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
       prompt: () => ({ text: `Контекст:\n${input.context}\n\nЗадача:\n${input.task}`, lastMessageId: 0 }),
       timeoutMs: 15 * 60_000,
       requireText: true, // the text is the result: an empty one goes to the next model
+      taskId: input.sessionKey?.startsWith('task:') ? Number(input.sessionKey.slice(5)) : undefined,
+      verify: { task: input.task, images: input.images }, // checked by a second model per the agent's `verify`
     });
     if (result.outcome !== 'succeeded') throw new Error(`OpenCode: ${result.error ?? result.outcome}`);
     const steps = listAgentSteps(input.db, input.leadId, 100).filter((s) => s.ts >= started && s.tool.startsWith(`${input.agentName}:`)).reverse();

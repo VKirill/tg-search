@@ -18,6 +18,7 @@ import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { sendMediaMessage, sendMessage, type OutreachDeps } from './outreach';
 import { isFreeLead, isTrustedLead } from '../trusted';
 import { listAuthorizedProjectAccounts } from './accounts';
+import { createLedger, withJob } from '../opencode/ledger';
 
 const POLL_MS = 30_000;
 const PAYMENT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -179,7 +180,8 @@ export function createOrders(deps: OrdersDeps) {
     try {
       // a provider that never answers must not leave the order «in progress» forever
       const output = await Promise.race([
-        getExecutor(service).run(input),
+        // its model requests go to the ledger under the service kind and this order
+        withJob({ agent: service.kind, leadId: lead.id, orderId }, () => getExecutor(service).run(input)),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('исполнитель не ответил за 10 минут')), RUN_TIMEOUT_MS).unref?.()),
       ]);
       const outputs = output.files.filter((f) => f.role === 'output' || f.role === 'preview');
@@ -219,6 +221,7 @@ export function createOrders(deps: OrdersDeps) {
     if (order.revisionsUsed >= service.revisions) {
       throw new Error('Лимит бесплатных правок исчерпан');
     }
+    createLedger(deps.db).clientFix(orderId); // the models that made it get a correction on their record
     const brief = `${order.brief}\n\nПравки клиента: ${addition.trim()}`;
     patchOrder(orderId, {
       status: 'revision',

@@ -4,6 +4,8 @@ import type { ToolHostDeps } from './deps';
 import { writeXlsx, type Sheet } from '../../files/xlsx';
 import { isFreeLead } from '../../trusted';
 import { sendMediaMessage, waitForSendWindow } from '../../pipeline/outreach';
+import { createLedger } from '../../opencode/ledger';
+import type { Db } from '../../db';
 
 // The primary agent hands bigger work to a subagent in the background and keeps talking to the client
 export function createAssignTaskTool(deps: ToolHostDeps): AgentTool {
@@ -38,6 +40,7 @@ export function createAssignTaskTool(deps: ToolHostDeps): AgentTool {
         if (original.redoOf != null) return 'Ошибка: это поручение уже переделывали — отправь лучшее через send_task_result или передай владельцу (handoff)';
         if (original.deliveredAt) return `Ошибка: поручение #${redoOf} уже у клиента — для доработки по его просьбе дай новое поручение`;
         tasks.markDelivered(redoOf);
+        createLedger(deps.db as Db).review(redoOf, 'redo'); // the model that did it gets the miss on its record
       } else if (!isFreeLead(deps.db, lead) && (ctx.clientId == null || !deps.billing?.consumeTask(ctx.clientId))) {
         // free for «свои люди»; a paying client spends a subscription task, otherwise it is an order
         return 'Ошибка: у клиента нет подписки с квотой — оформи заказ на услугу из каталога';
@@ -79,6 +82,7 @@ export function createSendTaskResultTool(deps: ToolHostDeps): AgentTool {
       await waitForSendWindow(deps, ctx.leadId); // the agent may have just written «взял» — the pause runs out first
       await sendMediaMessage(deps, ctx.leadId, text, tasks.files(task), true);
       tasks.markDelivered(task.id);
+      createLedger(deps.db as Db).review(task.id, 'accepted');
       if (deps.turnState) deps.turnState.replyUsed = true; // the client got this turn's message
       return `Результат поручения #${task.id} отправлен клиенту`;
     },
