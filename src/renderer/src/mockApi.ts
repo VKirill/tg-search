@@ -29,6 +29,7 @@ import type {
   ProjectInput,
   Settings,
   SkillDef,
+  SpamTemplate,
   StatsReport,
   Source,
   Subscription,
@@ -273,6 +274,8 @@ const leads: Lead[] = [
     status: 'dialog',
     accountId: 1,
     clientId: 1,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 1,
     nextStepAt: null,
     handoff: false,
@@ -298,6 +301,8 @@ const leads: Lead[] = [
     status: 'replied',
     accountId: 1,
     clientId: null,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 2,
     nextStepAt: now + 18 * 3600_000,
     handoff: false,
@@ -323,6 +328,8 @@ const leads: Lead[] = [
     status: 'new',
     accountId: null,
     clientId: null,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 0,
     nextStepAt: now + 2 * 3600_000,
     handoff: false,
@@ -348,6 +355,8 @@ const leads: Lead[] = [
     status: 'dialog',
     accountId: 1,
     clientId: 2,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 3,
     nextStepAt: null,
     handoff: true,
@@ -373,6 +382,8 @@ const leads: Lead[] = [
     status: 'hidden',
     accountId: null,
     clientId: null,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 0,
     nextStepAt: null,
     handoff: false,
@@ -398,6 +409,8 @@ const leads: Lead[] = [
     status: 'new',
     accountId: null,
     clientId: null,
+    repeatCount: 0,
+    spamTemplateId: null,
     sequenceStep: 0,
     nextStepAt: null,
     handoff: false,
@@ -914,6 +927,10 @@ const mockSkills: SkillDef[] = [
   { name: 'wb-card', description: 'Карточка товара для Wildberries: SEO, характеристики, инфографика без запрещённых элементов', body: '…', status: 'active', source: 'builtin', uses: 14, updatedAt: now },
   { name: 'content-plan-week', description: 'Контент-план на неделю для малого бизнеса по нише и ссылкам', body: '…', status: 'active', source: 'owner', uses: 6, updatedAt: now },
   { name: 'supplier-search', description: 'Поиск поставщиков по городу и категории со сравнением цен', body: '…', status: 'draft', source: 'learned', uses: 0, updatedAt: now },
+];
+
+const mockSpamTemplates: SpamTemplate[] = [
+  { id: 1, sample: 'Всем привет! Нужно помочь с парой карточек. Оплата по результату. Пишите в личку — объясню все подробности', authors: 23, messages: 41, status: 'spam', source: 'auto', createdAt: now - 86_400_000, lastSeenAt: now - 600_000 },
 ];
 
 const mockApprovals: Approval[] = [
@@ -1686,6 +1703,23 @@ export function createMockApi(): Api {
         return { ...v };
       },
     },
+    spam: {
+      async templates() {
+        return mockSpamTemplates.map((t) => ({ ...t }));
+      },
+      async markSpam(leadId) {
+        const l = leads.find((x) => x.id === leadId)!;
+        const t = { id: nid(), sample: l.text, authors: 1, messages: 1, status: 'spam' as const, source: 'owner' as const, createdAt: Date.now(), lastSeenAt: Date.now() };
+        mockSpamTemplates.unshift(t);
+        Object.assign(l, { spamTemplateId: t.id, status: 'hidden' });
+        return { ...l };
+      },
+      async setTemplateStatus(id, status) {
+        const t = mockSpamTemplates.find((x) => x.id === id)!;
+        t.status = status;
+        return { ...t };
+      },
+    },
     approvals: {
       async list(status) {
         return mockApprovals.filter((a) => !status || a.status === status).map((a) => ({ ...a }));
@@ -1827,6 +1861,10 @@ export function createMockApi(): Api {
         await delay(200);
         const i = mockChats.findIndex((c) => c.chatId === chatId);
         if (i >= 0) mockChats.splice(i, 1);
+      },
+      async around(_accountId, chatId) {
+        await delay(150);
+        return mockChatItems(chatId);
       },
       async media() {
         return mockWavDataUrl();

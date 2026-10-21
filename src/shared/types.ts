@@ -147,6 +147,8 @@ export interface Lead {
   status: LeadStatus;
   accountId: number | null; // account that talks to this lead
   clientId: number | null; // long-term client (null until the author is known)
+  repeatCount: number; // times the same author re-posted (near-)the same text after this lead; not new leads
+  spamTemplateId: number | null; // the text matches a spam template (many authors, same text) — hidden from inboxes
   sequenceStep: number; // index of the next chain step to send (0 = nothing sent yet)
   nextStepAt: number | null; // unix ms when the next chain step is due; null = chain finished or stopped
   handoff: boolean; // a human handles this dialog: the AI manager stays silent
@@ -355,6 +357,18 @@ export interface SkillDef {
   source: 'builtin' | 'owner' | 'learned';
   uses: number;
   updatedAt: number;
+}
+
+// Near-identical texts from many authors (bot campaigns, bait posts), learned automatically or marked by the owner.
+export interface SpamTemplate {
+  id: number;
+  sample: string; // one original text
+  authors: number; // distinct authors seen with this text
+  messages: number;
+  status: 'spam' | 'allowed'; // allowed: the owner said «не спам» — never auto-hidden again
+  source: 'auto' | 'owner';
+  createdAt: number;
+  lastSeenAt: number;
 }
 
 export interface Approval {
@@ -686,6 +700,11 @@ export interface Api {
     remove(name: string): Promise<void>;
     approve(name: string): Promise<SkillDef>; // draft → active
   };
+  spam: {
+    templates(): Promise<SpamTemplate[]>;
+    markSpam(leadId: number): Promise<Lead>; // learn: this text (and look-alikes) is spam from now on
+    setTemplateStatus(id: number, status: SpamTemplate['status']): Promise<SpamTemplate>; // «не спам» → allowed
+  };
   approvals: {
     list(status?: Approval['status']): Promise<Approval[]>;
     decide(id: number, approve: boolean): Promise<Approval>; // approved → the tool runs and the agent continues the dialog
@@ -728,6 +747,8 @@ export interface Api {
     search(accountId: number, query: string): Promise<ChatInfo[]>; // the account's chats + public chats/channels
     join(accountId: number, chatIdOrLink: number | string): Promise<ChatInfo>; // id, @username, t.me link or invite link
     leave(accountId: number, chatId: number): Promise<void>;
+    // Messages around a message (e.g. «Открыть публикацию» of a lead): ~20 before and ~20 after, oldest first
+    around(accountId: number, chatId: number, messageId: number): Promise<ChatItem[]>;
     media(accountId: number, fileId: number): Promise<string>; // download a voice note; returns a tgmedia:// URL
   };
   shell: {

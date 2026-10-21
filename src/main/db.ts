@@ -174,7 +174,8 @@ function toLead(r: Row): Lead {
     id: r.id, projectId: r.project_id, sourceId: r.source_id, tgChatId: r.tg_chat_id, tgMessageId: r.tg_message_id,
     authorUserId: r.author_user_id, authorName: r.author_name, authorUsername: r.author_username, text: r.text,
     date: r.date, link: r.link, score: r.score, label: r.label, reason: r.reason, feedback: r.feedback,
-    status: r.status, accountId: r.account_id, clientId: r.client_id ?? null, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
+    status: r.status, accountId: r.account_id, clientId: r.client_id ?? null, repeatCount: r.repeat_count ?? 0,
+    spamTemplateId: r.spam_template_id ?? null, sequenceStep: r.sequence_step, nextStepAt: r.next_step_at,
     handoff: !!r.handoff, handoffReason: r.handoff_reason, createdAt: r.created_at,
   };
 }
@@ -305,6 +306,10 @@ export class Db {
     }
     const leadCols = this.all('PRAGMA table_info(leads)').map((c) => c.name);
     if (!leadCols.includes('client_id')) this.raw.exec('ALTER TABLE leads ADD COLUMN client_id INTEGER');
+    if (!leadCols.includes('repeat_count')) {
+      this.raw.exec(`ALTER TABLE leads ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN spam_template_id INTEGER;`);
+    }
     if (!leadCols.includes('sequence_step')) {
       this.raw.exec(`ALTER TABLE leads ADD COLUMN sequence_step INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE leads ADD COLUMN next_step_at INTEGER;
@@ -475,7 +480,7 @@ export class Db {
     return toLead(r);
   }
   // Returns the new lead, or undefined when this message is already a lead of the project.
-  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'clientId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
+  addLead(l: Omit<Lead, 'id' | 'createdAt' | 'feedback' | 'status' | 'accountId' | 'clientId' | 'repeatCount' | 'spamTemplateId' | 'sequenceStep' | 'nextStepAt' | 'handoff' | 'handoffReason'>): Lead | undefined {
     const res = this.run(
       `INSERT INTO leads(project_id, source_id, tg_chat_id, tg_message_id, author_user_id, author_name, author_username,
        text, date, link, score, label, reason, created_at)

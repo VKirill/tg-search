@@ -26,12 +26,13 @@ export const API_METHODS: ApiMap = {
   agents: ['list', 'save', 'remove', 'rules', 'saveRules'],
   skills: ['list', 'save', 'remove', 'approve'],
   approvals: ['list', 'decide'],
+  spam: ['templates', 'markSpam', 'setTemplateStatus'],
   services: ['list', 'create', 'update', 'remove'],
   orders: ['list', 'create', 'update', 'requestPayment', 'markPaid', 'run', 'deliver', 'cancel'],
   dossier: ['path', 'open'],
   stats: ['report'],
   categories: ['list', 'create', 'update', 'remove'],
-  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media'],
+  chats: ['list', 'history', 'send', 'search', 'join', 'leave', 'media', 'around'],
   shell: ['openExternal'],
 };
 

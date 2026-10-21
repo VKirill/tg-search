@@ -204,6 +204,9 @@ export class FakeEngine implements TelegramEngine {
   async searchChats(_accountId: number, query: string): Promise<TgChat[]> {
     return [...this.chats.values()].filter((c) => c.title.toLowerCase().includes(query.toLowerCase()));
   }
+  async getMessagesAround(_accountId: number, chatId: number, _messageId: number, limit: number): Promise<TgMessage[]> {
+    return (this.history.get(String(chatId)) ?? []).slice(-limit);
+  }
   leftChats: number[] = [];
   async leaveChat(_accountId: number, chatId: number): Promise<void> {
     this.leftChats.push(chatId);

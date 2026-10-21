@@ -434,6 +434,8 @@ export function createApp(deps: AppDeps): AppHandlers {
           status: 'dialog',
           accountId: null,
           clientId: null,
+          repeatCount: 0,
+          spamTemplateId: null,
           sequenceStep: 0,
           nextStepAt: null,
           handoff: false,
@@ -495,6 +497,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       save: notYet('skills worker'),
       remove: notYet('skills worker'),
       approve: notYet('skills worker'),
+    },
+    spam: {
+      templates: notYet('dedupe worker'),
+      markSpam: notYet('dedupe worker'),
+      setTemplateStatus: notYet('dedupe worker'),
     },
     approvals: {
       list: notYet('agents worker'),
@@ -561,6 +568,8 @@ export function createApp(deps: AppDeps): AppHandlers {
         return chatInfo(await engine.getChat(accountId, chat.chatId));
       },
       leave: (accountId, chatId) => engine.leaveChat(accountId, chatId),
+      around: async (accountId, chatId, messageId) =>
+        (await engine.getMessagesAround(accountId, chatId, messageId, 40)).map(chatItem),
       media: async (accountId, fileId) =>
         mediaUrlFromPath(storeMediaCopy(dataDir, await engine.downloadFile(accountId, fileId), `chat-${fileId}`)),
     },

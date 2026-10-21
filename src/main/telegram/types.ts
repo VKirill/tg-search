@@ -88,6 +88,7 @@ export interface TelegramEngine {
   getMessagesBefore(accountId: number, chatId: number, beforeMessageId: number | null, limit: number): Promise<TgMessage[]>;
   searchChats(accountId: number, query: string): Promise<TgChat[]>; // own chats + public chats/channels
   leaveChat(accountId: number, chatId: number): Promise<void>;
+  getMessagesAround(accountId: number, chatId: number, messageId: number, limit: number): Promise<TgMessage[]>; // oldest first
 
   // New incoming messages in private chats (lead answers) for all accounts
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;

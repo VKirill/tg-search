@@ -441,6 +441,18 @@ export class TdlEngine implements TelegramEngine {
     return out;
   }
 
+  async getMessagesAround(accountId: number, chatId: number, messageId: number, limit: number): Promise<TgMessage[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.ensureChatAccessible(slot, chatId);
+    // negative offset returns newer messages too: from_message_id sits in the middle of the page
+    const half = Math.floor(limit / 2);
+    const page = await this.invoke(slot, {
+      _: 'getChatHistory', chat_id: chatId, from_message_id: messageId, offset: -half, limit, only_local: false,
+    });
+    const msgs = page.messages.filter((m): m is message => m !== null).sort((a, b) => a.id - b.id);
+    return await this.mapMessages(slot, msgs);
+  }
+
   async leaveChat(accountId: number, chatId: number): Promise<void> {
     const slot = await this.requireAuthorizedSlot(accountId);
     await this.invoke(slot, { _: 'leaveChat', chat_id: chatId });

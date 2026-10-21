@@ -218,6 +218,8 @@ describe('OpenAiManagerAi', () => {
       status: 'dialog' as const,
       accountId: null,
       clientId: null,
+      repeatCount: 0,
+      spamTemplateId: null,
       sequenceStep: 0,
       nextStepAt: null,
       handoff: false,
