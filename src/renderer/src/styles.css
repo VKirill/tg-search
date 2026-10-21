@@ -3466,3 +3466,44 @@ button.chip:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.helper-chat {
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.helper-chat__head,
+.helper-chat__opts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  margin-bottom: var(--space-2);
+}
+
+.helper-chat__head .btn {
+  margin-left: auto;
+}
+
+.helper-chat__opts label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.helper-chat__opts input[type='checkbox'] {
+  width: auto;
+}
+
+.helper-chat__cap {
+  width: 56px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}

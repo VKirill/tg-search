@@ -1,15 +1,31 @@
-// The homework helper in a public group (t.me/gdz_chat_all): it listens to the chat, Jev decides whether a message
-// asks to solve a task, a page with several tasks gets a question («какую? номер или «все»»), and the solution goes
-// as a reply to the author's message. Requests live in the database, so a restart picks them up.
+// The group assistant: in the groups the owner connects, it listens to members and answers by the group's scenario —
+// «tasks» (solves tasks sent as text or photo; a page with several gets a poll for its author) or «questions» (answers
+// questions on the group's topic). Jev decides whether a message is a request at all, so the agent is not woken for
+// chatter; the answer goes as a reply to the author. Requests live in the database, so a restart picks them up.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AppEvent, HelperChat, HelperRequest, Settings } from '../../shared/types';
+import type { AppEvent, HelperChat, HelperRequest, HelperScenario, Settings } from '../../shared/types';
 import type { Db } from '../db';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
 import { afterSend, canSend } from '../pipeline/limiter';
 import { trustedFor } from '../trusted';
 
 export const TASK_THRESHOLD = 0.5;
+export const scenarioOf = (chat: HelperChat): HelperScenario => chat.scenario ?? 'tasks';
+
+// What the helper says, by scenario
+const TEXTS: Record<HelperScenario, { ack: string; fail: string; limit: (cap: number) => string }> = {
+  tasks: {
+    ack: '🔥 взял задачу, решаю — минутку',
+    fail: 'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом',
+    limit: (cap) => `на сегодня бесплатные решения закончились (${cap} в день) — завтра продолжим 🙂`,
+  },
+  questions: {
+    ack: '🔥 смотрю, сейчас отвечу',
+    fail: 'не получилось ответить 😕 попробуй переформулировать вопрос',
+    limit: (cap) => `на сегодня бесплатные ответы закончились (${cap} в день) — завтра продолжим 🙂`,
+  },
+};
 const ASK_TTL_MS = 3 * 3600_000; // a «какую решить?» question waits this long for the answer
 const MAX_PARALLEL = 3;
 const POLL_TASKS_MAX = 9; // poll options: the tasks plus «Все»
@@ -24,9 +40,9 @@ export interface GroupHelperDeps {
   emit: (e: AppEvent) => void;
   getSettings: () => Settings;
   setSettings: (patch: Partial<Settings>) => void;
-  isTaskRequest: (message: string, picture: string) => Promise<number>; // Jev: probability the author wants a task solved
+  isRequest: (chat: HelperChat, message: string, picture: string) => Promise<number>; // Jev: probability it is a request for this group
   describePhoto: (path: string) => Promise<{ caption: string; tasks: string[] }>; // vision: what is on it, task labels
-  solve: (job: { key: string; task: string; photos: string[]; dir: string }) => Promise<string>; // solver → Markdown
+  answer: (chat: HelperChat, job: { key: string; task: string; photos: string[]; dir: string }) => Promise<string>; // the agent → Markdown
 }
 
 // «все», «реши всё», «3», «№ 2 и 5», «задачи 1, 4», «упр. 12б»
@@ -112,7 +128,9 @@ export function createGroupHelper(deps: GroupHelperDeps) {
 
   let running = 0;
   const waiting: number[] = [];
-  const asGroup = (chatId: number) => chats().find((c) => c.chatId === chatId)?.asGroup !== false;
+  const chatOf = (chatId: number) => chats().find((c) => c.chatId === chatId);
+  const asGroup = (chatId: number) => chatOf(chatId)?.asGroup !== false;
+  const textsOf = (chatId: number) => TEXTS[scenarioOf(chatOf(chatId) ?? ({} as HelperChat))];
 
   function enqueue(id: number) {
     set(id, { status: 'queued' });
@@ -120,7 +138,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     // instead, deleted when the solution comes
     const r = get(id);
     if (asGroup(r.chat_id) && !r.ack_id) {
-      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, '🔥 взял задачу, решаю — минутку'))
+      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, textsOf(r.chat_id).ack))
         .then((m) => set(id, { ack_id: m.messageId }))
         .catch((err) => console.warn('group helper ack', err instanceof Error ? err.message : err));
     }
@@ -142,16 +160,11 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     const r = get(id);
     if (!r || r.status === 'done') return;
     set(id, { status: 'solving' });
-    const which = r.selection === 'all' || !r.selection ? 'все задачи с фото' : `задачи ${r.selection}`;
-    const task = [
-      r.text.trim() ? `Сообщение ученика: ${r.text.trim()}` : '',
-      JSON.parse(r.photos).length ? `На фото: ${r.picture}. Решить: ${which}.` : '',
-      'Ответ увидят все участники чата ГДЗ: реши в обучающем формате, чтобы было понятно, как решать такие задачи.',
-      'Уровень — класс из описания фото или сообщения: методы его школьной программы, один основной способ, без лишнего.',
-    ].filter(Boolean).join('\n');
+    const chat = chatOf(r.chat_id);
+    if (!chat) return;
     try {
       const dir = join(deps.dataDir, 'group', String(r.chat_id), String(r.message_id));
-      const text = await deps.solve({ key: `group:${r.chat_id}:${r.message_id}`, task, photos: JSON.parse(r.photos), dir });
+      const text = await deps.answer(chat, { key: `group:${r.chat_id}:${r.message_id}`, task: taskText(chat, r), photos: JSON.parse(r.photos), dir });
       if (!text.trim()) throw new Error('пустое решение');
       await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, text));
       set(id, { status: 'done', error: null });
@@ -160,10 +173,27 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`group helper: request ${id} failed`, error);
       set(id, { status: 'failed', error });
-      await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id,
-        'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом')).catch(() => {});
+      await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, textsOf(r.chat_id).fail)).catch(() => {});
       await dropAck(id);
     }
+  }
+
+  // The job for the agent: the member's message, the photo, the group's topic and rules
+  function taskText(chat: HelperChat, r: Row): string {
+    const photo = JSON.parse(r.photos).length ? r.picture : '';
+    const group = [chat.about?.trim() ? `О группе: ${chat.about.trim()}` : '', chat.instructions?.trim() ? `Как отвечать: ${chat.instructions.trim()}` : ''];
+    if (scenarioOf(chat) === 'questions') {
+      return [
+        `Вопрос участника группы: ${r.text.trim() || '(без текста)'}`, photo ? `К сообщению приложено фото: ${photo}.` : '', ...group,
+        'Ответ увидят все участники группы: коротко и по делу.',
+      ].filter(Boolean).join('\n');
+    }
+    const which = r.selection === 'all' || !r.selection ? 'все задачи с фото' : `задачи ${r.selection}`;
+    return [
+      r.text.trim() ? `Сообщение участника: ${r.text.trim()}` : '', photo ? `На фото: ${photo}. Решить: ${which}.` : '', ...group,
+      'Ответ увидят все участники группы: реши в обучающем формате, чтобы было понятно, как решать такие задачи.',
+      'Уровень — класс из описания фото или сообщения: методы его школьной программы, один основной способ, без лишнего.',
+    ].filter(Boolean).join('\n');
   }
 
   async function dropAck(id: number) {
@@ -216,8 +246,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       photos = [path];
       ({ caption: picture, tasks } = await deps.describePhoto(path).catch(() => ({ caption: '', tasks: [] as string[] })));
     }
-    // Jev decides whether this is a request at all — the solving agent is not woken for chatter
-    const p = await deps.isTaskRequest(msg.text, picture).catch(() => 0);
+    // Jev decides whether this is a request at all — the agent is not woken for chatter
+    const p = await deps.isRequest(chat, msg.text, picture).catch(() => 0);
     const insert = (status: HelperRequest['status'], selection: string | null = null) => Number(db.raw.prepare(`INSERT INTO helper_requests
       (chat_id, message_id, account_id, user_id, user_name, text, photos, tasks, picture, selection, status, created_at, updated_at)
       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(msg.chatId, msg.messageId, accountId, userId, msg.senderName ?? msg.senderUsername ?? '',
@@ -228,20 +258,20 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     }
     // 🔥 right away: the author sees the task is noticed while the photo is read and the question or solution comes
     if (!asGroup(msg.chatId)) void deps.engine.react(accountId, msg.chatId, msg.messageId, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
-    const cap = Number(deps.getSettings().helperDailyPerUser || 0);
+    const cap = chat.dailyCap ?? Number(deps.getSettings().helperDailyPerUser || 0);
     const own = trustedFor(db, { username: msg.senderUsername, userId }) != null; // «свои люди» have no daily cap
     if (cap > 0 && !own && solvedToday(msg.chatId, userId) >= cap) {
       const already = db.raw.prepare(`SELECT 1 FROM helper_requests WHERE chat_id = ? AND user_id = ? AND status = 'limit' AND created_at > ?`)
         .get(msg.chatId, userId, now - 12 * 3600_000);
       const id = insert('limit');
       if (!already) {
-        await sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId,
-          `на сегодня бесплатные решения закончились (${cap} в день) — завтра продолжим. если срочно, напиши мне в личку 🙂`)).catch((err) => set(id, { error: String(err) }));
+        await sendLimited(accountId, () => deps.engine.replyInChat(accountId, msg.chatId, msg.messageId, TEXTS[scenarioOf(chat)].limit(cap)))
+          .catch((err) => set(id, { error: String(err) }));
       }
       return;
     }
-    const sel = parseSelection(msg.text);
-    if (photos.length && tasks.length > 1 && !sel) {
+    const sel = scenarioOf(chat) === 'tasks' ? parseSelection(msg.text) : null;
+    if (scenarioOf(chat) === 'tasks' && chat.askWhich !== false && photos.length && tasks.length > 1 && !sel) {
       // a poll for the author: only their vote counts; a text answer from them works too
       const id = insert('asked');
       const options = tasks.length <= POLL_TASKS_MAX ? [...tasks.map((t) => (/^№/.test(t) ? t : `№ ${t}`)), ALL] : null;

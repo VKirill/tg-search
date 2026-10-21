@@ -11,7 +11,7 @@ const TTS_VOICES = ['alloy', 'nova', 'shimmer', 'echo', 'onyx', 'fable', 'sage',
 // Settings by area; «ИИ-движок» saves on every change, the rest with the «Сохранить» button
 const TABS = [
   { id: 'ai', label: 'ИИ-движок', hint: 'Модели, провайдеры и сам OpenCode' },
-  { id: 'agent', label: 'Агент', hint: 'От чьего имени пишет агент, кому задания бесплатно и в каких группах он решает задачи' },
+  { id: 'agent', label: 'Агент', hint: 'От чьего имени пишет агент, кому задания бесплатно и в каких группах он помогает участникам' },
   { id: 'telegram', label: 'Telegram', hint: 'Доступ к Telegram API для аккаунтов' },
   { id: 'search', label: 'Поиск и анализ', hint: 'Квалификация лидов (Jev) и поиск в интернете' },
   { id: 'media', label: 'Медиа и голос', hint: 'Картинки, распознавание и озвучка голосовых' },

@@ -535,7 +535,7 @@ const mockAiProviders: AiProvider[] = [
   { id: 'deepseek', name: 'DeepSeek', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
   { id: 'zai-coding-plan', name: 'Z.ai (GLM)', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
 ];
-const mockHelperChats: HelperChat[] = [{ chatId: -1003776810481, title: 'Чат | ГДЗ | Контрольные', username: 'gdz_chat_all', accountId: 1, enabled: true }];
+const mockHelperChats: HelperChat[] = [{ chatId: -1001234567890, title: 'Помощь с уроками', username: 'study_help_chat', accountId: 1, enabled: true, scenario: 'tasks', about: 'помощь с домашкой для школьников' }];
 const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'], useFree: true };
 function mockAiModels(): AiModelsView {
   const m = (ref: string, name: string, vision: boolean, costIn: number, costOut: number, variants: string[] = []): AiModel => ({
@@ -1973,8 +1973,8 @@ export function createMockApi(): Api {
       },
       async requests() {
         return [
-          { id: 2, chatId: -1003776810481, messageId: 41, accountId: 1, userId: 9, userName: 'Аня', text: '', photos: ['/tmp/p.jpg'], tasks: ['1', '2', '3'], selection: 'all', status: 'done', error: null, createdAt: Date.now() - 600_000, updatedAt: Date.now() - 300_000 },
-          { id: 1, chatId: -1003776810481, messageId: 40, accountId: 1, userId: 8, userName: 'Петя', text: 'всем привет', photos: [], tasks: [], selection: null, status: 'ignored', error: null, createdAt: Date.now() - 900_000, updatedAt: Date.now() - 900_000 },
+          { id: 2, chatId: -1001234567890, messageId: 41, accountId: 1, userId: 9, userName: 'Аня', text: '', photos: ['/tmp/p.jpg'], tasks: ['1', '2', '3'], selection: 'all', status: 'done', error: null, createdAt: Date.now() - 600_000, updatedAt: Date.now() - 300_000 },
+          { id: 1, chatId: -1001234567890, messageId: 40, accountId: 1, userId: 8, userName: 'Петя', text: 'всем привет', photos: [], tasks: [], selection: null, status: 'ignored', error: null, createdAt: Date.now() - 900_000, updatedAt: Date.now() - 900_000 },
         ] as HelperRequest[];
       },
     },

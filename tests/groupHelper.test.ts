@@ -7,17 +7,17 @@ import { createGroupHelper, parseSelection } from '../src/main/groupHelper';
 import { FakeEngine, makeMsg } from './fakes';
 import { createTrusted } from '../src/main/trusted';
 
-const CHAT = -1003776810481;
+const CHAT = -1001234567890;
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-function setup(opts: { cap?: string; asGroup?: boolean } = {}) {
+function setup(opts: { cap?: string; asGroup?: boolean; scenario?: 'tasks' | 'questions' } = {}) {
   const db = new Db(':memory:');
-  const dataDir = mkdtempSync(join(tmpdir(), 'gdz-'));
+  const dataDir = mkdtempSync(join(tmpdir(), 'group-helper-'));
   const acc = db.upsertAccountByPhone('+79990001122');
   db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 1, pauseSec: 0 });
-  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'ГДЗ', username: 'gdz_chat_all', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false }]), helperDailyPerUser: opts.cap ?? '5' });
+  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'Учебный чат', username: 'study_help_chat', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false, scenario: opts.scenario, about: 'помощь с уроками и вопросы по учёбе' }]), helperDailyPerUser: opts.cap ?? '5' });
   const engine = new FakeEngine();
   const page = join(dataDir, 'page.jpg');
   writeFileSync(page, 'x');
@@ -25,9 +25,9 @@ function setup(opts: { cap?: string; asGroup?: boolean } = {}) {
   const solved: string[] = [];
   const helper = createGroupHelper({
     db, engine, dataDir, emit: () => {}, getSettings: () => db.getSettings(), setSettings: (p) => db.setSettings(p),
-    isTaskRequest: async (message, picture) => (picture || /реши|задач|найди/i.test(message) ? 0.9 : 0.1),
+    isRequest: async (chat, message, picture) => (picture || /реши|задач|найди|\?/i.test(message) ? 0.9 : 0.1),
     describePhoto: async () => ({ caption: 'контрольная по физике, 9 класс', tasks: ['1', '2', '3', '4', '5'] }),
-    solve: async ({ task }) => (solved.push(task), `## Решение\n**Ответ: 42**`),
+    answer: async (chat, { task }) => (solved.push(`[${chat.scenario ?? 'tasks'}] ${task}`), `## Решение\n**Ответ: 42**`),
   });
   return { db, engine, helper, acc, solved };
 }
@@ -116,8 +116,8 @@ describe('homework helper in a group', () => {
 
   it('«свои люди» have no daily cap', async () => {
     const { db, engine, helper, acc, solved } = setup({ cap: '1' });
-    createTrusted({ db, engine, emit: () => {}, checkin: async () => {} }).save({ username: 'vechkasov_kirill' });
-    for (const id of [1, 2, 3]) await helper.onMessage(acc.id, makeMsg(CHAT, id, `реши задачу номер ${id} про поезд`, { senderUserId: 7, senderUsername: 'VECHKASOV_KIRILL' }));
+    createTrusted({ db, engine, emit: () => {}, checkin: async () => {} }).save({ username: 'own_person' });
+    for (const id of [1, 2, 3]) await helper.onMessage(acc.id, makeMsg(CHAT, id, `реши задачу номер ${id} про поезд`, { senderUserId: 7, senderUsername: 'Own_Person' }));
     await tick();
     expect(solved).toHaveLength(3);
     expect(engine.sent.some((m) => /закончились/.test(m.text))).toBe(false);
@@ -131,5 +131,17 @@ describe('homework helper in a group', () => {
     expect(engine.reactions).toEqual([]);
     expect(engine.sent.map((m) => m.text)).toEqual(['🔥 взял задачу, решаю — минутку', '## Решение\n**Ответ: 42**']);
     expect(engine.deleted).toHaveLength(1);
+  });
+
+  it('«questions»: a question on the topic goes to the consultant with the group\'s description; no task polls', async () => {
+    const { engine, helper, acc, solved } = setup({ scenario: 'questions' });
+    await helper.onMessage(acc.id, makeMsg(CHAT, 1, 'спасибо всем'));
+    await helper.onMessage(acc.id, makeMsg(CHAT, 2, 'а когда в этом году пробный экзамен?', { senderUserId: 9 }));
+    await helper.onMessage(acc.id, makeMsg(CHAT, 3, '', { senderUserId: 10, photo: { fileId: 77 } }));
+    await tick(10);
+    expect(engine.polls).toEqual([]);
+    expect(solved[0]).toMatch(/^\[questions\] Вопрос участника группы: а когда в этом году пробный экзамен\?/);
+    expect(solved[0]).toContain('О группе: помощь с уроками и вопросы по учёбе');
+    expect(solved).toHaveLength(2);
   });
 });

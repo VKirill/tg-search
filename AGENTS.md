@@ -43,3 +43,5 @@ Desktop macOS app that finds and qualifies Telegram leads. Passport: [docs/proje
 - No secrets in the repo (it is public). Settings live in SQLite in userData; `.env` only for development.
 - Every outgoing Telegram message goes through the per-account limiter (daily limit + pause).
 - UI text is Russian; code, comments and commits are English.
+- Every user-visible change adds a line to `CHANGELOG.md` (Добавлено / Изменено / Исправлено, newest date on top) in the same commit; README follows when a feature changes.
+- Features are described generically. How the owner uses them (which chats, accounts, links, chat designs) never goes into the repo — only into local settings or chat notes under `.bb/`.

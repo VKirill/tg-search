@@ -278,7 +278,7 @@ export function StatsView() {
 const JOB_LABEL: Record<string, string> = {
   solver: 'решатель', copywriter: 'копирайтер', researcher: 'исследователь', analyst: 'аналитик', directologist: 'директолог',
   homework: 'заказ: задачи', copywriting: 'заказ: тексты', marketplace_card: 'заказ: карточки', image_gen: 'заказ: картинки', assistant: 'ассистент',
-  gateway: 'служебное', group: 'чат ГДЗ',
+  gateway: 'служебное', consultant: 'консультант в группе',
 };
 
 // How each model did each kind of job: accepted, turned down by the verifier, sent back by the agent, fixed for the client

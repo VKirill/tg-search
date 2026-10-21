@@ -52,7 +52,7 @@ import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
-import { createGroupHelper } from './groupHelper';
+import { createGroupHelper, scenarioOf } from './groupHelper';
 import { postSystemOne } from './ai/jev';
 import { llmGateway } from './ai/gateway';
 import { parseJsonFromLlm } from './ai/llm';
@@ -328,19 +328,25 @@ export function createApp(deps: AppDeps): AppHandlers {
       emit({ type: 'job', projectId: lead.projectId, stage: `Поручение #${task.id} (${task.agent}) не выполнено`, done: true, error });
     },
   });
-  // the homework helper in public groups (t.me/gdz_chat_all): Jev filters requests, the solver answers in the chat
+  // the group assistant: Jev filters members' requests by the group's scenario and topic, an agent answers in the group
   const groupHelper = createGroupHelper({
     db, engine, dataDir, emit, getSettings, setSettings: (p) => db.setSettings(p),
-    async isTaskRequest(message, picture) {
-      if (!getSettings().jevApiKey.trim()) return picture ? 0.6 : 0; // no Jev: a photo of a page is likely a task
+    async isRequest(chat, message, picture) {
+      const tasks = scenarioOf(chat) === 'tasks';
+      if (!getSettings().jevApiKey.trim()) return tasks && picture ? 0.6 : 0; // no Jev: only a photo in a tasks group counts
       const data = await postSystemOne(getSettings, {
-        state: { message: message.slice(0, 1500), picture: picture.slice(0, 800) },
+        state: { message: message.slice(0, 1500), picture: picture.slice(0, 800), group: (chat.about ?? '').slice(0, 800) },
         questions: {
           request: {
             type: 'noul',
-            instructions: 'This is a message in a public homework-help chat; `picture` describes an attached photo, if any. ' +
-              'Is the author asking to solve, check or explain a school or university task (homework, exercise, test question) — ' +
-              'including just sending a photo of a task? Chatting, thanks, ads and off-topic questions are not.',
+            instructions: tasks
+              ? 'This is a message in a Telegram group where an assistant solves tasks for members; `group` describes the group, ' +
+                '`picture` an attached photo, if any. Is the author asking to solve, check or explain a task (homework, exercise, ' +
+                'test question, problem) — including just sending a photo of a task? Chatting, thanks, ads and off-topic messages are not.'
+              : 'This is a message in a Telegram group with an assistant that answers members\' questions; `group` describes what ' +
+                'the group is about, `picture` an attached photo, if any. Is the author asking a question or for help or advice that ' +
+                'the assistant should answer, on the group\'s topic? Greetings, thanks, chatter, ads and messages addressed to a ' +
+                'particular other member are not.',
           },
         },
       });
@@ -357,10 +363,11 @@ export function createApp(deps: AppDeps): AppHandlers {
       const v = parseJsonFromLlm(raw) as { caption?: string; tasks?: unknown[] };
       return { caption: String(v.caption ?? ''), tasks: Array.isArray(v.tasks) ? v.tasks.map(String).filter(Boolean) : [] };
     },
-    async solve({ key, task, photos, dir }) {
+    async answer(chat, { key, task, photos, dir }) {
       const images = await Promise.all(photos.map((p) => fileToDataUri(p)));
       const { text } = await runSubagentTurn({
-        agentName: 'solver', task, context: 'Публичный чат ГДЗ: решение увидят все участники.', leadId: 0, clientId: null, images,
+        agentName: scenarioOf(chat) === 'tasks' ? 'solver' : 'consultant', task, leadId: 0, clientId: null, images,
+        context: `Группа в Telegram «${chat.title}»: ответ увидят все участники.`,
         host: { ...makeHostForLead(0), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit, aiEngine, sessionKey: key,
       });
       return renderFigures(text, { images: photos, dir: join(dir, 'figures') });

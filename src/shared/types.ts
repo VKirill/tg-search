@@ -435,13 +435,33 @@ export interface AiProvider {
   models: number;
 }
 
-// A group where the agent answers task requests (t.me/gdz_chat_all)
+// The group assistant: in groups the owner connects, the agent answers members' requests by a scenario
+export type HelperScenario = 'tasks' | 'questions';
+
+export const HELPER_SCENARIOS: Record<HelperScenario, { label: string; description: string }> = {
+  tasks: {
+    label: 'Решение задач',
+    description: 'Участники присылают задания текстом или фото. Jev отделяет просьбы решить от болтовни; если на фото несколько заданий — ' +
+      'опрос автору, какие решить (засчитывается только его голос); решатель отвечает пошагово, с проверкой второй моделью, рисунками и графиками.',
+  },
+  questions: {
+    label: 'Ответы на вопросы',
+    description: 'Jev отбирает вопросы по теме группы (из описания ниже), агент-консультант отвечает коротко и по делу, при необходимости ищет в сети; ' +
+      'приветствия, благодарности, болтовня и реклама остаются без ответа.',
+  },
+};
+
 export interface HelperChat {
   chatId: number;
   title: string;
   username: string | null;
   accountId: number; // the account that listens and answers
   enabled: boolean;
+  scenario?: HelperScenario; // default «tasks»
+  about?: string; // what the group is about — context for Jev and the agent (kept in local settings only)
+  instructions?: string; // how to answer: tone, length, what not to do, where to send people
+  askWhich?: boolean; // «tasks»: a page with several tasks gets a poll for its author (default true)
+  dailyCap?: number | null; // free answers per member a day; null — the common setting
   asGroup?: boolean; // answers on behalf of the group (default) rather than from the account
 }
 
