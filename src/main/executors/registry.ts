@@ -4,6 +4,7 @@ import { createCopywritingExecutor } from './copywriting';
 import { createHomeworkExecutor } from './homework';
 import { createImageGenExecutor } from './image_gen';
 import { createMarketplaceCardExecutor } from './marketplace_card';
+import { createAssistantExecutor } from './assistant';
 
 export function createExecutors(getSettings: () => Settings): ExecutorRegistry {
   return {
@@ -11,13 +12,6 @@ export function createExecutors(getSettings: () => Settings): ExecutorRegistry {
     marketplace_card: createMarketplaceCardExecutor(getSettings),
     image_gen: createImageGenExecutor(getSettings),
     copywriting: createCopywritingExecutor(getSettings),
-    assistant: notConnected('assistant'), // web search / research executor: agent worker
+    assistant: createAssistantExecutor(getSettings),
   };
-}
-
-function notConnected(kind: string) {
-  const fail = async (): Promise<never> => {
-    throw new Error(`Исполнитель «${kind}» ещё не подключён`);
-  };
-  return { estimate: fail, preview: fail, run: fail };
 }
