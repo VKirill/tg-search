@@ -89,7 +89,7 @@ export function createAiEngine(deps: {
     const owner = deps.getSettings().ownerName || 'владельца';
     const toolNames = deps.toolCatalog().map((t) => t.name.slice(TOOL_PREFIX.length));
     const list: AgentConfig[] = [{
-      id: ONESHOT_AGENT, description: 'Один запрос без инструментов', mode: 'primary', steps: 1, tools: [],
+      id: ONESHOT_AGENT, description: 'Один запрос без инструментов', mode: 'primary', tools: [], // no step cap: a cap makes OpenCode tell the model «max steps reached»
       system: 'Выполни запрос строго по инструкции в сообщении. Отвечай по-русски, если не сказано иначе.',
     }];
     for (const a of defs.list()) {

@@ -32,7 +32,7 @@ export interface AgentConfig {
   description: string;
   mode: 'primary' | 'subagent';
   system: string;
-  steps: number;
+  steps?: number;
   tools: string[]; // app tool names (without prefix) this agent may call
 }
 
@@ -109,7 +109,7 @@ export function writeOpencodeConfig(dir: string, providers: ProviderConfig[], ag
     description: a.description,
     mode: a.mode,
     system: a.system,
-    steps: a.steps,
+    ...(a.steps ? { steps: a.steps } : {}),
     // last match wins: everything (shell, files, web, subagents…) denied, then only this agent's app tools
     permissions: [
       { action: '*', resource: '*', effect: 'deny' },
