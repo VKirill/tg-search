@@ -1,0 +1,49 @@
+# Builds TG Search for macOS (Apple Silicon and Intel) and publishes a GitHub Release for every «v*» tag.
+# A manual run (Actions → Release → Run workflow) only builds and keeps the files as workflow artifacts.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15 # Apple Silicon → arm64
+          - os: macos-15-intel # Intel → x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tg-search-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.zip
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/release-notes.mjs > release/NOTES.md
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TG Search ${{ github.ref_name }}
+          body_path: release/NOTES.md
+          files: |
+            release/*.dmg
+            release/*.zip

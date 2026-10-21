@@ -1,7 +1,7 @@
 {
   "name": "tg-search",
   "productName": "TG Search",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "dist": "electron-vite build && electron-builder --mac dmg",
+    "dist": "electron-vite build && electron-builder --mac",
     "skill:refs": "node scripts/gen-skill-refs.mjs"
   },
   "dependencies": {
@@ -41,5 +41,49 @@
     "tdl@8.1.0": true,
     "onnxruntime-node@1.30.0": true,
     "protobufjs@7.6.6": true
-  }
+  },
+  "build": {
+    "appId": "io.github.vkirill.tgsearch",
+    "productName": "TG Search",
+    "copyright": "© VKirill",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "agents/**/*",
+      "skills/**/*",
+      "bin/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asar": false,
+    "artifactName": "TG-Search-${version}-${arch}.${ext}",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg"
+        },
+        {
+          "target": "zip"
+        }
+      ],
+      "category": "public.app-category.business",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Запись созвонов с клиентами на этом Mac",
+        "NSScreenCaptureUsageDescription": "Запись системного звука созвона"
+      }
+    },
+    "dmg": {
+      "title": "TG Search ${version}"
+    },
+    "publish": null,
+    "npmRebuild": false
+  },
+  "description": "Находит клиентов в Telegram, ведёт диалоги ИИ-менеджером и работает помощником в группах",
+  "author": "VKirill"
 }

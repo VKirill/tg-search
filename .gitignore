@@ -78,3 +78,6 @@ tdlib/
 *.ips
 .claude/
 .agents/
+
+# electron-builder resources (the app icon) live in the root build/
+!/build/

@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
+# From the source tree: links the tg-search skill for Claude Code (and Codex, if installed), the tgs CLI and the tgs-mcp
+# MCP server. Users of the packaged app do the same with «Настройки → ИИ-ассистенты».
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL_SRC="$ROOT/skills/tg-search"
-SKILL_DST="${HOME}/.claude/skills/tg-search"
-CLI_SRC="$ROOT/bin/tgs.mjs"
-CLI_DST="${HOME}/.local/bin/tgs"
+mkdir -p "${HOME}/.local/bin"
 
-mkdir -p "${HOME}/.claude/skills" "${HOME}/.local/bin"
+link() { # link <source> <destination>
+  if [[ -L "$2" || -e "$2" ]]; then rm -rf "$2"; fi
+  ln -s "$1" "$2"
+  echo "Linked: $2 -> $1"
+}
 
-if [[ -L "$SKILL_DST" || -e "$SKILL_DST" ]]; then
-  rm -rf "$SKILL_DST"
+mkdir -p "${HOME}/.claude/skills"
+link "$SKILL_SRC" "${HOME}/.claude/skills/tg-search"
+if [[ -d "${HOME}/.codex" ]]; then
+  mkdir -p "${HOME}/.codex/skills"
+  link "$SKILL_SRC" "${HOME}/.codex/skills/tg-search"
 fi
-ln -s "$SKILL_SRC" "$SKILL_DST"
-echo "Linked skill: $SKILL_DST -> $SKILL_SRC"
 
-if [[ -L "$CLI_DST" || -e "$CLI_DST" ]]; then
-  rm -f "$CLI_DST"
-fi
-ln -s "$CLI_SRC" "$CLI_DST"
-chmod +x "$CLI_SRC"
-echo "Linked CLI: $CLI_DST -> $CLI_SRC"
+chmod +x "$ROOT/bin/tgs.mjs" "$ROOT/bin/tgs-mcp.mjs"
+link "$ROOT/bin/tgs.mjs" "${HOME}/.local/bin/tgs"
+link "$ROOT/bin/tgs-mcp.mjs" "${HOME}/.local/bin/tgs-mcp"
+
+echo
+echo "MCP server — add it to your assistant:"
+echo "  Claude Code:  claude mcp add --scope user tg-search -- ${HOME}/.local/bin/tgs-mcp"
+echo "  Codex:        add to ~/.codex/config.toml:"
+echo "                [mcp_servers.tg-search]"
+echo "                command = \"${HOME}/.local/bin/tgs-mcp\""
 echo "Ensure ~/.local/bin is on your PATH."
