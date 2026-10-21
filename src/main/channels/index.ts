@@ -28,6 +28,8 @@ const MIN_TELEGRAM_TEXT = 60;
 const SCORE_BATCH = 8;
 const GNEWS_ITEMS = 25; // newest Google News results per read
 const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 8, deals: 6, top: 1, alert: 1 };
+const LISTING_FLOOR = 0.34; // events and deals: kept unless of no interest — the channel's threshold only ranks them for posts
+const PLACE_DOUBT: [number, number] = [0.1, 0.85]; // Jev unsure where it happens: a model that knows the map checks
 const ALERT_SCORE = 0.75; // Jev: urgent for residents today
 const ALERTS_PER_DAY = 4;
 const ALERT_FRESH_MS = 6 * 3600_000;
@@ -51,9 +53,10 @@ export interface ChannelsDeps {
   emit: (e: AppEvent) => void;
   getSettings: () => Settings;
   llm: (prompt: string, opts: { json?: boolean; role: 'chat' | 'fast' | 'smart'; title: string }) => Promise<string>;
-  // Jev: for each item — how well it fits the channel (0–1), whether it happens in the channel's area, what it is, its rubric
-  score: (desk: { about: string; area: string; categories: ChannelCategory[]; audiences: ChannelAudience[] }, items: { title: string; text: string }[]) =>
-    Promise<{ p: number; local: number | null; kind: ChannelItemKind | 'other'; category: string | null; audiences: string[]; urgent?: number }[]>;
+  // Jev: for each item — how much the channel's readers want it (0–1), whether it happens in the channel's area, what it is,
+  // its rubric, whether it is already over (an event ended, an offer expired)
+  score: (desk: { about: string; area: string; categories: ChannelCategory[]; audiences: ChannelAudience[] }, items: { title: string; text: string; publishedAt: number; source: string }[]) =>
+    Promise<{ p: number; local: number | null; kind: ChannelItemKind | 'other'; category: string | null; audiences: string[]; urgent?: number; over?: number }[]>;
   embed?: (text: string) => Promise<Float32Array | null>; // local embeddings: the same story from different sources
   // Jev: for each candidate — the probability it reports the same event as `item`; absent — similarity alone decides
   cover?: (prompt: string, deskId: number) => Promise<string | null>; // draws a cover (Muse Image), the file's path
@@ -196,11 +199,17 @@ export const mapsLink = (where: string) => `https://www.google.com/maps/search/?
 // the gist, and a line «tags · 🗓 when · 📍 place (on the map) · 💶 price»
 export function renderIssue(issue: Issue, o: { own: boolean; username: string | null }): string {
   const out: string[] = [];
-  if (issue.title) out.push(`## ${issue.title}`, '');
+  const items = issue.sections.flatMap((sec) => sec.items);
+  // one story: its own title on top — no issue header, no section, no repeated heading
+  const single = items.length === 1 ? items[0] : null;
+  if (single) out.push(`## ${single.emoji ? `${single.emoji} ` : ''}${single.title}`, '');
+  else if (issue.title) out.push(`## ${issue.title}`, '');
   if (issue.lead) out.push(`> ${issue.lead}`, '');
   for (const sec of issue.sections) {
-    out.push('---', '');
-    if (sec.title) out.push(`### ${sec.title}`, '');
+    if (!single) {
+      out.push('---', '');
+      if (sec.title) out.push(`### ${sec.title}`, '');
+    }
     for (const it of sec.items) {
       // the item's title is a small heading: Telegram gives headings room above, plain paragraphs sit back to back
       const head = `#### ${it.emoji ? `${it.emoji} ` : ''}${it.title}`;
@@ -212,9 +221,10 @@ export function renderIssue(issue: Issue, o: { own: boolean; username: string | 
         it.price && `💶 ${it.price}`,
         !o.own && it.source && /^https?:/.test(it.source) ? `[↗](${it.source})` : '',
       ].filter(Boolean).join(' · ');
-      out.push(head, '', [it.text, meta && `*${meta}*`].filter(Boolean).join('\n'), '');
+      if (!single) out.push(head, '');
+      out.push([it.text, meta && `*${meta}*`].filter(Boolean).join('\n'), '');
       // several places of one story: folded, each on the map
-      if (it.places.length > 1) {
+      if (it.places.length > 2) {
         out.push(`<details><summary>${it.placesTitle || `📍 ${it.places.length}`}</summary>`, '');
         out.push(...it.places.map((p) => `- [${p.name}](${mapsLink(p.where)})`), '', '</details>', '');
       }
@@ -512,18 +522,23 @@ export function createChannels(deps: ChannelsDeps) {
         status = CASE WHEN s.status = 'used' THEN 'used' ELSE s.status END
       FROM channel_items AS s WHERE i.desk_id = ? AND i.score IS NULL AND i.story_id <> i.id AND s.id = i.story_id AND s.score IS NOT NULL`).run(d.id);
     for (;;) {
-      const rows = raw.prepare('SELECT * FROM channel_items WHERE desk_id = ? AND score IS NULL AND (story_id IS NULL OR story_id = id) ORDER BY id LIMIT ?').all(d.id, SCORE_BATCH) as Row[];
+      const rows = raw.prepare(`SELECT i.*, s.title AS source_title FROM channel_items i JOIN channel_sources s ON s.id = i.source_id
+        WHERE i.desk_id = ? AND i.score IS NULL AND (i.story_id IS NULL OR i.story_id = i.id) ORDER BY i.id LIMIT ?`).all(d.id, SCORE_BATCH) as Row[];
       if (!rows.length) break;
       let verdicts: Awaited<ReturnType<ChannelsDeps['score']>>;
       try {
-        verdicts = await deps.score(d, rows.map((r) => ({ title: r.title, text: r.text.slice(0, 900) })));
+        verdicts = await deps.score(d, rows.map((r) => ({ title: r.title, text: r.text.slice(0, 900), publishedAt: r.published_at, source: r.source_title })));
       } catch (err) {
         console.warn('channel scoring', err instanceof Error ? err.message : err);
         return; // next round
       }
+      await checkPlaces(d, rows, verdicts);
       rows.forEach((r, i) => {
         const v = verdicts[i] ?? { p: 0, local: null, kind: 'other', category: null, audiences: [] };
-        const keep = v.kind !== 'other' && v.p >= d.threshold && (v.local === null || v.local >= 0.5);
+        // news by the channel's threshold; an event or a deal is kept while it is on, however small (a listing)
+        const listing = v.kind === 'event' || v.kind === 'deal';
+        const keep = v.kind !== 'other' && (v.local === null || v.local >= 0.5)
+          && (listing ? (v.over ?? 0) < 0.5 && v.p >= LISTING_FLOOR : v.p >= d.threshold);
         raw.prepare('UPDATE channel_items SET score = ?, local = ?, kind = ?, category = ?, audiences = ?, urgent = ?, status = ? WHERE id = ?')
           .run(v.p, v.local, v.kind === 'other' ? null : v.kind, v.category, JSON.stringify(v.audiences ?? []), v.urgent ?? null, keep ? 'new' : 'skipped', r.id);
       });
@@ -531,6 +546,25 @@ export function createChannels(deps: ChannelsDeps) {
     // duplicates whose story got its verdict in this round
     raw.prepare(`UPDATE channel_items AS i SET score = s.score, local = s.local, kind = s.kind, category = s.category, audiences = s.audiences, status = s.status
       FROM channel_items AS s WHERE i.desk_id = ? AND i.score IS NULL AND s.id = i.story_id AND s.score IS NOT NULL`).run(d.id);
+  }
+
+  // Jev knows the city but not every town of its suburbs (a festival in Picassent is «elsewhere»): items it is unsure
+  // about go to a model that knows the map; an answer it cannot give leaves Jev's verdict
+  async function checkPlaces(d: ChannelDesk, rows: Row[], verdicts: Awaited<ReturnType<ChannelsDeps['score']>>) {
+    const doubt = verdicts.map((v, i) => ({ v, i })).filter(({ v }) => v.kind !== 'other' && v.local !== null && v.local >= PLACE_DOUBT[0] && v.local < PLACE_DOUBT[1]);
+    if (!doubt.length || !d.area) return;
+    const found = await deps.llm([
+      'Для каждого материала определи, где это происходит (город, район, площадка), и входит ли это место в географию канала.',
+      'Пригороды и районы проверяй по своим знаниям карты: какому муниципалитету и комарке принадлежит место. Решение или услуга для жителей этих мест — тоже «да».',
+      `География канала: ${d.area}`,
+      'Ответ — только JSON: {"<номер>": {"place": "…", "inside": true|false}}. Место не понять — не включай номер.',
+      '',
+      ...doubt.map(({ i }) => `<item n="${i + 1}">\n${rows[i].title}\n${String(rows[i].text).slice(0, 900)}\n</item>`),
+    ].join('\n'), { json: true, role: 'fast', title: 'channel-place-check' }).then((r) => parseJsonFromLlm(r) as Record<string, { inside?: unknown }>).catch(() => ({} as Record<string, { inside?: unknown }>));
+    for (const { v, i } of doubt) {
+      const inside = found[String(i + 1)]?.inside;
+      if (typeof inside === 'boolean') v.local = inside ? 0.9 : 0.1;
+    }
   }
 
   // ---- posts ----
@@ -541,14 +575,20 @@ export function createChannels(deps: ChannelsDeps) {
   // The best fresh stories that fit: by the slot's rubrics, or by kind; a story told by more sources ranks higher
   function pickStories(d: ChannelDesk, kind: ChannelSlotKind, categories: string[] = [], audiences: string[] = []): number[] {
     const kinds = categories.length || audiences.length ? ['news', 'deal', 'event'] : kind === 'deals' ? ['deal', 'event'] : kind === 'top' ? ['news'] : ['news', 'event', 'deal'];
-    const rows = raw.prepare(`SELECT story_id, MAX(score) AS score, COUNT(DISTINCT source_id) AS sources, MAX(kind) AS kind, MAX(category) AS category, MAX(audiences) AS audiences, MAX(published_at) AS at
-      FROM channel_items WHERE desk_id = ? AND status = 'new' AND score >= ? AND published_at >= ? AND story_id IS NOT NULL
-        AND kind IN (${kinds.map(() => '?').join(',')})
-      GROUP BY story_id`).all(d.id, d.threshold, now() - FRESH_MS, ...kinds) as Row[];
+    const rows = raw.prepare(`SELECT story_id, MAX(score) AS score, COUNT(DISTINCT source_id) AS sources, MAX(published_at) AS at,
+        -- the story's verdict is its head's: items scored before stories existed may disagree
+        COALESCE(MAX(CASE WHEN id = story_id THEN kind END), MAX(kind)) AS kind,
+        COALESCE(MAX(CASE WHEN id = story_id THEN category END), MAX(category)) AS category,
+        COALESCE(MAX(CASE WHEN id = story_id THEN audiences END), MAX(audiences)) AS audiences
+      FROM channel_items WHERE desk_id = ? AND story_id IS NOT NULL
+      GROUP BY story_id
+      -- alive (its latest telling is fresh), not used, fits; importance counts every outlet that told it, old or new
+      HAVING MAX(published_at) >= ? AND MAX(score) >= ? AND SUM(CASE WHEN status <> 'new' THEN 1 ELSE 0 END) = 0`).all(d.id, now() - FRESH_MS, d.threshold) as Row[];
     const ranked = rows
+      .filter((r) => kinds.includes(r.kind))
       .filter((r) => inCategories(r.category, categories))
       .filter((r) => !audiences.length || (JSON.parse(r.audiences || '[]') as string[]).some((a) => audiences.includes(a)))
-      .map((r) => ({ id: r.story_id as number, kind: r.kind as string, rank: r.score + 0.05 * Math.min(r.sources - 1, 3), at: r.at as number }))
+      .map((r) => ({ id: r.story_id as number, kind: r.kind as string, rank: r.score + 0.06 * Math.min(r.sources - 1, 5) /* told by many outlets — a big story */, at: r.at as number }))
       .sort((a, b) => b.rank - a.rank || b.at - a.at);
     // a full digest: half city news, half the listings (events, plans, deals); one side short — the other fills in
     if (kind === 'digest' && !categories.length && !audiences.length) {
@@ -644,12 +684,12 @@ export function createChannels(deps: ChannelsDeps) {
   // Several venues of one story (an open-house weekend, a route, a chain's offer) go into a folded list with map links.
   // A separate small step: an editor busy with the whole issue skips the list even when the places are named.
   async function addPlaces(d: ChannelDesk, issue: Issue, stories: ChannelItem[][], kind: ChannelSlotKind): Promise<Issue> {
-    const wanted = issue.sections.flatMap((sec) => sec.items).filter((it) => it.places.length < 2 && it.story && stories[it.story - 1]);
+    const wanted = issue.sections.flatMap((sec) => sec.items).filter((it) => it.places.length < 3 && it.story && stories[it.story - 1]);
     if (!wanted.length) return issue;
     const ns = [...new Set(wanted.map((it) => it.story!))];
     const found = await deps.llm([
       'Для каждого сюжета перечисли конкретные места, которые прямо названы в его материалах: здания, заведения, площадки, магазины, точки маршрута.',
-      'Только если их два и больше; не придумывай и не добавляй неназванные. «where» — как искать место на картах: название и город (город — из материалов или географии канала).',
+      'Только если их три и больше; не придумывай и не добавляй неназванные. «where» — как искать место на картах: название и город (город — из материалов или географии канала).',
       `География канала: ${d.area || d.about.slice(0, 200)}. Язык подписи — ${d.language}.`,
       'Ответ — только JSON: {"<номер сюжета>": {"title": "подпись свёрнутого списка с эмодзи, например «📍 Ver los 12 edificios en el mapa»", "places": [{"name": "…", "where": "…"}]}}. Нет мест — {}.',
       '',
@@ -658,9 +698,9 @@ export function createChannels(deps: ChannelsDeps) {
     return {
       ...issue,
       sections: issue.sections.map((sec) => ({ ...sec, items: sec.items.map((it) => {
-        const f = it.places.length < 2 && it.story ? found[String(it.story)] : undefined;
+        const f = it.places.length < 3 && it.story ? found[String(it.story)] : undefined;
         const places = (Array.isArray(f?.places) ? f!.places : []).map((p: any) => ({ name: str(p?.name), where: str(p?.where) || str(p?.name) })).filter((p) => p.name).slice(0, 25);
-        return places.length >= 2 ? { ...it, places, placesTitle: str(f?.title) || it.placesTitle } : it;
+        return places.length >= 3 ? { ...it, places, placesTitle: str(f?.title) || it.placesTitle } : it;
       }) })),
     };
   }

@@ -56,7 +56,10 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
         coverStyle: 'sunny', queries: [{ kind: 'gnews', title: 'Ayuntamiento', target: '"Ayuntamiento de Málaga"' }, { kind: 'rss', title: 'bad', target: 'x' }],
         feeds: [{ title: 'Diario Málaga', url: 'https://news.example/feed' }, { title: 'Inventada', url: 'https://nope.example/rss' }], pages: [],
       });
-      if (title === 'channel-places') return /La EMT/.test(prompt) ? '{"1": {"title": "📍 Ver las 2 paradas", "places": [{"name": "Plaza Nueva", "where": "Plaza Nueva, Sevilla"}, {"name": "Prado de San Sebastián", "where": "Prado de San Sebastián, Sevilla"}]}}' : '{}';
+      // a model that knows the map: Picassent is in the suburbs, Buñol is not
+      if (title === 'channel-place-check') return JSON.stringify(Object.fromEntries([...prompt.matchAll(/<item n="(\d+)">\n([^\n]+)/g)]
+        .map(([, n, t]) => [n, { place: t, inside: /Picassent/.test(t) }])));
+      if (title === 'channel-places') return /La EMT/.test(prompt) ? '{"1": {"title": "📍 Ver las 3 paradas", "places": [{"name": "Plaza Nueva", "where": "Plaza Nueva, Sevilla"}, {"name": "Prado de San Sebastián", "where": "Prado de San Sebastián, Sevilla"}, {"name": "Santa Justa", "where": "Santa Justa, Sevilla"}]}}' : '{}';
       if (title === 'channel-extract') return 'Aquí tienes:\n```json\n[{"title": "2x1 en horchata en Triana", "text": "Solo este fin de semana", "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"}]\n```';
       // the editor writes the issue as data; a link slipped into a field must not survive
       return JSON.stringify({
@@ -67,7 +70,10 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
     },
     // «oferta» is a deal; «fútbol» is off-topic; «Madrid» is outside the channel's area
     score: async (_desk, items) => (scored.push(...items.map((it) => it.title)), items.map((it) => (
-      /fútbol/i.test(it.title) ? { p: 0.2, local: 0.9, kind: 'news', category: 'events.sport', audiences: [] }
+      /febrero/.test(it.title) ? { p: 0.45, local: 0.95, kind: 'event', category: 'events.music', audiences: [] }
+        : /pasado/.test(it.title) ? { p: 0.9, local: 0.95, kind: 'event', category: 'events.fairs', audiences: [], over: 0.9 }
+          : /Picassent|Buñol/.test(it.title) ? { p: 0.7, local: 0.2, kind: 'event', category: 'events.culture', audiences: [] }
+            : /fútbol/i.test(it.title) ? { p: 0.2, local: 0.9, kind: 'news', category: 'events.sport', audiences: [] }
         : /Madrid/.test(it.title) ? { p: 0.9, local: 0.1, kind: 'news', category: 'city.transport', audiences: [] }
           : /oferta|2x1/i.test(it.title) ? { p: 0.9, local: 0.9, kind: 'deal', category: 'deals.food', audiences: ['evening', 'weekend'] }
             : /huelga/i.test(it.title) ? { p: 0.9, local: 0.9, kind: 'news', category: 'city.transport', audiences: [], urgent: 0.95 }
@@ -94,14 +100,15 @@ describe('issue layout', () => {
     const issue = parseIssue(JSON.stringify({
       title: 'T', lead: '', footer: 'F',
       sections: [{ title: 'S', items: [{ emoji: '🏛️', title: 'Open House', text: 'Edificios abiertos.', tags: ['🆓', '🆓 gratis'],
-        places: [{ name: 'Finca Roja', where: 'Finca Roja, Valencia' }, { name: 'Parque Gulliver' }], placesTitle: '📍 Ver los 2 edificios' }] }],
+        places: [{ name: 'Finca Roja', where: 'Finca Roja, Valencia' }, { name: 'Parque Gulliver' }, { name: 'Lonja' }], placesTitle: '📍 Ver los 3 edificios' }] }],
     }));
     expect(issue.sections[0].items[0].tags).toEqual(['🆓 gratis']);
     const text = renderIssue(issue, { own: true, username: null });
     expect(text).toContain([
-      '<details><summary>📍 Ver los 2 edificios</summary>', '',
+      '<details><summary>📍 Ver los 3 edificios</summary>', '',
       '- [Finca Roja](https://www.google.com/maps/search/?api=1&query=Finca%20Roja%2C%20Valencia)',
-      '- [Parque Gulliver](https://www.google.com/maps/search/?api=1&query=Parque%20Gulliver)', '', '</details>',
+      '- [Parque Gulliver](https://www.google.com/maps/search/?api=1&query=Parque%20Gulliver)',
+      '- [Lonja](https://www.google.com/maps/search/?api=1&query=Lonja)', '', '</details>',
     ].join('\n'));
     const blocks = markdownToBlocks(text);
     const details = blocks.find((b) => b._ === 'inputPageBlockDetails') as { blocks: { _: string }[]; is_open: boolean };
@@ -130,6 +137,15 @@ describe('issue layout', () => {
       '*🆓 gratis · 🌙 tarde · 🗓 sáb 24, 17:00 · 📍 [Recinto Ágora, Torrent](https://www.google.com/maps/search/?api=1&query=Recinto%20%C3%81gora%2C%20Torrent) · 💶 gratis con invitación*',
       '', '---', '', '📲 Síguenos',
     ].join('\n'));
+  });
+});
+
+describe('single story layout', () => {
+  it('one story: its title on top, no issue header, no section heading, no repeated item heading', () => {
+    const issue = parseIssue(JSON.stringify({ title: 'Hoy en la ciudad', lead: 'Lo grande del finde.', footer: 'F',
+      sections: [{ title: '🏛 Arquitectura', items: [{ emoji: '🏛', title: 'Open House: 76 edificios', text: 'Gratis del 23 al 25.', when: '23–25 oct' }] }] }));
+    expect(renderIssue(issue, { own: true, username: null })).toBe(
+      ['## 🏛 Open House: 76 edificios', '', '> Lo grande del finde.', '', 'Gratis del 23 al 25.', '*🗓 23–25 oct*', '', '---', '', 'F'].join('\n'));
   });
 });
 
@@ -248,6 +264,32 @@ describe('channel assistant', () => {
     expect(items.find((i) => i.kind === 'deal')?.url).toBe('https://deals.example/horchata'); // the search's redirect link resolved
   });
 
+  it('a listing stays while it is on, however few want it; a place Jev doubts is checked on the map', async () => {
+    const { channels, engine, acc, prompts } = setup({ sameStory: async (_i, c) => c.map(() => 0) });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, area: 'Sevilla y su área metropolitana' });
+    channels.saveSource({ deskId: d.id, kind: 'telegram', title: 'Noticias City', target: '@noticias_city', enabled: true, intervalMin: 15 });
+    engine.setHistory(SOURCE, [
+      makeMsg(SOURCE, 1, 'Concierto de un grupo indie en febrero: las entradas ya están a la venta en la taquilla'),
+      makeMsg(SOURCE, 2, 'La feria del fin de semana pasado reunió a miles de vecinos en el parque del barrio'),
+      makeMsg(SOURCE, 3, 'Festival de teatro en Picassent con cinco espectáculos durante tres días de este mes'),
+      makeMsg(SOURCE, 4, 'Jornada gastronómica en Buñol con arroces, turrón y música en la plaza del pueblo'),
+      makeMsg(SOURCE, 5, 'Partido de fútbol esta noche en el estadio: todo lo que hay que saber del Betis y su rival'),
+    ]);
+    await channels.runSource(channels.sources(d.id)[0].id);
+
+    const status = Object.fromEntries(channels.items(d.id).map((i) => [i.title.split(' ').slice(0, 3).join(' '), i.status]));
+    expect(status).toMatchObject({
+      'Concierto de un': 'new', // an event a few want: in the listings, below the threshold for posts
+      'La feria del': 'skipped', // over
+      'Festival de teatro': 'new', // the map says the suburbs
+      'Jornada gastronómica en': 'skipped', // the map says elsewhere
+      'Partido de fútbol': 'skipped', // news below the threshold
+    });
+    const check = prompts.find((x) => x.includes('География канала: Sevilla') && x.includes('<item '))!;
+    expect(check.match(/<item /g)).toHaveLength(2); // only the doubtful places
+  });
+
   it('the same story from several sources is one story: Jev scores it once, the feed shows its sources, a post tells it once', async () => {
     const { channels, engine, acc, scored, prompts, editor } = setup();
     const d = await channels.createDesk(acc.id, 't.me/city_demo');
@@ -285,7 +327,7 @@ describe('channel assistant', () => {
     expect(p.text.replace(/\]\(https:\/\/www\.google\.com\/maps\/search\/[^)]+\)/g, '')).not.toMatch(/https?:|\]\(|other_channel/); // only map links remain
     expect(p.text).toContain('📍 [Plaza Nueva, Sevilla](https://www.google.com/maps/search/?api=1&query=Plaza%20Nueva%2C%20Sevilla)*');
     expect(channels.stories(d.id, 'used', 50)[0].items).toHaveLength(2); // both tellings are used
-    expect(p.text).toContain('<details><summary>📍 Ver las 2 paradas</summary>'); // the places step filled the list the editor skipped
+    expect(p.text).toContain('<details><summary>📍 Ver las 3 paradas</summary>'); // the places step filled the list the editor skipped
   });
 
   it('a close neighbour is the same story only if Jev says so', async () => {
@@ -395,6 +437,41 @@ describe('channel assistant', () => {
     expect(r.desk.editorPrompt).toContain('@malaga_demo'); // the new channel's own name, not the source's
     expect(channels.sources(r.desk.id).map((x) => `${x.kind}:${x.title}`)).toEqual(['gnews:Ayuntamiento', 'rss:Diario Málaga']);
     expect(r.rejected).toEqual(['https://nope.example/rss']);
+  });
+
+  it('a story is picked by its head\'s kind, not by whichever retelling sorts last', async () => {
+    const { channels, engine, acc, db, editor } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    channels.saveSource({ deskId: d.id, kind: 'telegram', title: 'Noticias City', target: '@noticias_city', enabled: true, intervalMin: 15 });
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 1, 'Vuelve el 2x1 de horchata en las horchaterías de Triana durante todo este fin de semana')]);
+    for (const s of channels.sources(d.id)) await channels.runSource(s.id);
+    // a retelling scored on its own earlier, as «news»
+    db.raw.prepare("UPDATE channel_items SET kind = 'news' WHERE story_id <> id").run();
+    await channels.compose(d.id, 'deals');
+    expect(editor()).toContain('2x1 en horchata');
+  });
+
+  it('a story told by many outlets ranks higher — counting its older tellings too', async () => {
+    const t = Date.now();
+    const { channels, engine, acc, db, editor } = setup({ now: () => t });
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, slots: [] });
+    for (const name of ['@a', '@b', '@c']) channels.saveSource({ deskId: d.id, kind: 'telegram', title: name, target: '@noticias_city', enabled: true, intervalMin: 15 });
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    const [a, b, c, search] = channels.sources(d.id);
+    // the bus story: told by three outlets, two of them two days ago; scored lower than the horchata deal
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 1, 'La EMT suma tres líneas de autobús nocturnas desde el lunes, cada veinte minutos', { date: t - 50 * 3600_000 })]);
+    await channels.runSource(a.id);
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 2, 'Autobuses nocturnos: la EMT estrena tres líneas el lunes con frecuencia de veinte minutos', { date: t - 49 * 3600_000 })]);
+    await channels.runSource(b.id);
+    engine.setHistory(SOURCE, [makeMsg(SOURCE, 3, 'Desde el lunes, tres nuevas líneas nocturnas de la EMT: un autobús cada veinte minutos toda la noche', { date: t - 3600_000 })]);
+    await channels.runSource(c.id);
+    await channels.runSource(search.id);
+    db.raw.prepare("UPDATE channel_items SET score = 0.76 WHERE title LIKE '%EMT%' OR title LIKE '%Autobuses%' OR title LIKE '%nocturnas%'").run();
+    db.raw.prepare("UPDATE channel_items SET score = 0.85, kind = 'news' WHERE title LIKE '%horchata%'").run();
+    await channels.compose(d.id, 'top');
+    expect(editor()).toMatch(/EMT|nocturnas/); // 0.76 + 0.12 for three outlets beats 0.85 for one
   });
 
   it('a slot made of chosen rubrics takes only their stories', async () => {

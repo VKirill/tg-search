@@ -101,6 +101,14 @@ export interface AppDeps {
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void>; relieveMemory(): void };
 
+// Jev's levels for how much a channel's readers want a story; the position on them is the story's score (0–1)
+const CHANNEL_INTEREST = [
+  'None: off the channel\'s topics, or of no use to its readers',
+  'Little: niche, aimed at professionals or businesses, or wanted by very few readers',
+  'Some: useful or interesting to part of the readers',
+  'Much: many readers would want to know it or go',
+];
+
 export function createApp(deps: AppDeps): AppHandlers {
   const { db, ai, openExternal, speech, dataDir } = deps;
   const engine = guardSpamJoins(deps.engine, db);
@@ -448,32 +456,51 @@ export function createApp(deps: AppDeps): AppHandlers {
         for (const sub of c.subs) rubrics[`${c.id}.${sub.id}`] = `${c.name} › ${sub.name}: ${sub.hint}`;
       }
       rubrics.other = 'none of these';
+      // one narrow judgment per question, combined in code: what it is, where, whether it is over, how wanted — not one
+      // «worth posting today» that sank a February concert and every listing a few readers want
       const questions: Record<string, object> = {};
       items.forEach((_, i) => {
-        questions[`fit${i}`] = { type: 'noul', instructions: `Is \`item${i}\` worth posting today in the channel described in \`channel\` — timely, useful or interesting for its audience? Old news, ads, job offers and opinion pieces are not.` };
-        questions[`urgent${i}`] = { type: 'noul', instructions: `Is \`item${i}\` an urgent practical alert for residents today — a transport disruption or strike, a weather warning, a road closure, a water or power cut, an emergency — that people should know right now? Ordinary news, plans and offers are not.` };
-        if (desk.area) questions[`local${i}`] = { type: 'noul', instructions: `Does \`item${i}\` happen in, or directly concern people in, the area described in \`area\`? Places elsewhere in the region, the country or abroad do not count.` };
+        const it = `\`item${i}\``;
         questions[`kind${i}`] = {
-          type: 'choice', instructions: `What is \`item${i}\`?`,
-          criteria: { news: 'local news', deal: 'a discount, promotion, offer or sale', event: 'an event with a date: concert, fair, exhibition, festival, opening', other: 'none of these, or not relevant' },
+          type: 'choice', instructions: `What is ${it}?`,
+          criteria: {
+            news: 'news: something that happened or was decided, or a change that affects people — transport, services, prices, rules, openings, weather',
+            deal: 'a deal: a discount, promotion, special offer, sale or free-entry day people can use',
+            event: 'an event: something people can attend on a given date or period — concert, show, party, fair, market, festival, exhibition, film, talk, workshop, guided visit, a sports event open to the public',
+            other: 'none of these: an opinion piece, an advertisement, a job or real-estate listing, a question or chat message',
+          },
         };
-        questions[`rubric${i}`] = { type: 'choice', instructions: `Which rubric of the channel does \`item${i}\` belong to?`, criteria: rubrics };
+        if (desk.area) {
+          questions[`local${i}`] = {
+            type: 'noul', instructions: `Does ${it} take place in, or directly affect people living in, the area described in \`area\`?`,
+            criteria: {
+              true: 'The place it is about — a town, district, venue or street — lies inside the area, or it is a rule, service or change that applies to people living there',
+              false: 'The place is outside the area — another town of the region, another part of the country or abroad — or nothing in it concerns the area',
+            },
+          };
+        }
+        questions[`over${i}`] = { type: 'noul', instructions: `As of \`today\`, is ${it} already over — the event has ended, the offer has expired, or it reports something long past?` };
+        questions[`interest${i}`] = { type: 'score', instructions: `How much would readers of the channel described in \`channel\` want to see ${it}?`, criteria: CHANNEL_INTEREST };
+        questions[`urgent${i}`] = { type: 'noul', instructions: `Is ${it} an urgent practical alert for residents on \`today\` — a transport disruption or strike, a weather warning, a road closure, a water or power cut, an emergency — that people should know right now? Ordinary news, plans and offers are not.` };
+        questions[`rubric${i}`] = { type: 'choice', instructions: `Which rubric of the channel does ${it} belong to?`, criteria: rubrics };
         // «who would want to see it», not «does the word fit»: a law about firefighters is not «free» because nobody pays
-        for (const au of desk.audiences) questions[`aud${i}_${au.id}`] = { type: 'noul', instructions: `A reader follows the channel's selection «${au.name}» (${au.hint}). Is \`item${i}\` exactly what this reader is looking for there — a plan, offer or piece of news made for them?` };
+        for (const au of desk.audiences) questions[`aud${i}_${au.id}`] = { type: 'noul', instructions: `A reader follows the channel's selection «${au.name}» (${au.hint}). Is ${it} exactly what this reader is looking for there — a plan, offer or piece of news made for them?` };
       });
-      const state: Record<string, string> = { channel: desk.about.slice(0, 800), ...(desk.area ? { area: desk.area.slice(0, 300) } : {}) };
-      items.forEach((it, i) => (state[`item${i}`] = `${it.title}\n${it.text}`.slice(0, 1200)));
+      const day = (t: number) => new Date(t).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const state: Record<string, unknown> = { today: day(Date.now()), channel: desk.about.slice(0, 800), ...(desk.area ? { area: desk.area.slice(0, 1500) } : {}) };
+      items.forEach((it, i) => (state[`item${i}`] = { title: it.title.slice(0, 200), published: day(it.publishedAt), source: it.source, text: it.text.slice(0, 900) }));
       const data = await postSystemOne(getSettings, { state, questions });
-      const a = (k: string) => data.answers?.[k] as { noul?: number; choice?: string } | undefined;
+      const a = (k: string) => data.answers?.[k] as { noul?: number; choice?: string; score?: number } | undefined;
       return items.map((_, i) => {
         const rubric = a(`rubric${i}`)?.choice;
         return {
-          p: a(`fit${i}`)?.noul ?? 0,
+          p: (a(`interest${i}`)?.score ?? 0) / (CHANNEL_INTEREST.length - 1),
           local: desk.area ? a(`local${i}`)?.noul ?? 0 : null,
           kind: (a(`kind${i}`)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
           category: rubric && rubric !== 'other' ? rubric : null,
           audiences: desk.audiences.filter((au) => (a(`aud${i}_${au.id}`)?.noul ?? 0) >= 0.6).map((au) => au.id),
           urgent: a(`urgent${i}`)?.noul ?? 0,
+          over: a(`over${i}`)?.noul ?? 0,
         };
       });
     },
