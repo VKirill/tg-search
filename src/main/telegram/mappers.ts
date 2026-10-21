@@ -25,6 +25,10 @@ export function isChatMemberStatus(status: ChatMemberStatus): boolean {
   return status._ !== 'chatMemberStatusLeft' && status._ !== 'chatMemberStatusBanned';
 }
 
+export function isChatAdminStatus(status: ChatMemberStatus): boolean {
+  return status._ === 'chatMemberStatusCreator' || status._ === 'chatMemberStatusAdministrator';
+}
+
 export function chatKindFromTd(
   chatType: chat['type'],
   supergroup?: supergroup,
@@ -56,15 +60,18 @@ export function mapChat(
 
   let memberCount: number | null = null;
   let isMember = false;
+  let isAdmin = false;
   let username = usernameOverride ?? null;
 
   if (supergroup) {
     memberCount = supergroup.member_count > 0 ? supergroup.member_count : null;
     isMember = isChatMemberStatus(supergroup.status);
+    isAdmin = isChatAdminStatus(supergroup.status);
     username = username ?? activeUsername(supergroup.usernames);
   } else if (basicGroup) {
     memberCount = basicGroup.member_count > 0 ? basicGroup.member_count : null;
     isMember = isChatMemberStatus(basicGroup.status);
+    isAdmin = isChatAdminStatus(basicGroup.status);
   } else if (tdChat.type._ === 'chatTypePrivate') {
     isMember = true;
   }
@@ -77,6 +84,7 @@ export function mapChat(
     memberCount,
     description,
     isMember,
+    isAdmin,
   };
 }
 

@@ -92,6 +92,14 @@ export function createSpamChats(deps: { db: Db; engine: TelegramEngine; emit: (e
     return toSpamChat(db.raw.prepare('SELECT * FROM spam_chats WHERE tg_chat_id = ?').get(chat.chatId) as SpamChatRow);
   }
 
+  async function isOwnOrChannel(accountIds: number[], chatId: number): Promise<boolean> {
+    for (const id of accountIds) {
+      const chat = await engine.getChat(id, chatId).catch(() => null);
+      if (chat?.kind === 'channel' || chat?.isAdmin) return true;
+    }
+    return false;
+  }
+
   return {
     list(): SpamChat[] {
       return (db.raw.prepare('SELECT * FROM spam_chats ORDER BY created_at DESC').all() as SpamChatRow[]).map(toSpamChat);
@@ -109,6 +117,8 @@ export function createSpamChats(deps: { db: Db; engine: TelegramEngine; emit: (e
         if (accountId == null) return blocked;
         let history: TgMessage[];
         try {
+          // a channel has one author by design, and our own chats are never left
+          if (await isOwnOrChannel(authorized, s.tgChatId)) continue;
           history = await engine.getMessagesBefore(accountId, s.tgChatId, null, SAMPLE);
         } catch {
           continue; // not readable now; next round

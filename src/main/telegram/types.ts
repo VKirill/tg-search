@@ -11,6 +11,7 @@ export interface TgChat {
   memberCount: number | null;
   description: string | null;
   isMember: boolean;
+  isAdmin?: boolean; // the account is the creator or an administrator: our own chat or channel
 }
 
 export interface TgMessage {

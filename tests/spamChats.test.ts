@@ -80,6 +80,20 @@ describe('spam chats', () => {
     expect(engine.joinCalls).toEqual([600]);
   });
 
+  it('channels and our own chats are never judged', async () => {
+    const { db, engine, add, spam } = setup();
+    const channel = add(700, 'Помогающий Маркетолог');
+    const own = add(800, 'Мой чат');
+    engine.chats.set(700, { chatId: 700, title: 'Помогающий Маркетолог', username: 'pomogay_marketing', kind: 'channel', memberCount: 5000, isMember: true, description: '' });
+    engine.chats.set(800, { chatId: 800, title: 'Мой чат', username: null, kind: 'supergroup', memberCount: 50, isMember: true, isAdmin: true, description: '' });
+    // channel posts have no user author, and our chat is full of our own repeated posts
+    engine.setHistory(700, Array.from({ length: 40 }, (_, i) => makeMsg(700, i + 1, `Пост канала номер ${i} про маркетинг и рекламу`, { senderUserId: null, senderChatId: 700 })));
+    engine.setHistory(800, spamChatHistory(800));
+    expect(await spam.check()).toEqual([]);
+    expect(engine.leftChats).toEqual([]);
+    expect([db.getSource(channel.id).status, db.getSource(own.id).status]).toEqual(['active', 'active']);
+  });
+
   it('a chat without new text for a week is dead; a small active one is not judged', () => {
     const now = Date.now();
     expect(spamVerdict({ messages: 5, live: 5, newest: now - 8 * 86400_000 }, now)).toBe('нет новых сообщений за неделю');
