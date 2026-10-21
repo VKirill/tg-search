@@ -83,13 +83,16 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   };
   const get = (id: number) => db.raw.prepare('SELECT * FROM helper_requests WHERE id = ?').get(id) as Row;
 
-  // Every outgoing message goes through the account's limiter: answers to people who asked skip the daily cap but
-  // keep the pause; one send at a time per account
+  // Every outgoing message goes through the account's limiter: answers to people who asked skip the daily cap, and the
+  // pause is the helper's own (seconds — a chat answer should not wait the 3 minutes cold outreach does); one send at a
+  // time per account, and the send counts for the account's pause like any other
   const sendChains = new Map<number, Promise<unknown>>();
   function sendLimited<T>(accountId: number, send: () => Promise<T>): Promise<T> {
     const run = async () => {
       for (;;) {
-        const gate = canSend(db.getAccount(accountId), Date.now(), true);
+        const account = db.getAccount(accountId);
+        const pauseSec = Math.max(0, Number(deps.getSettings().helperPauseSec ?? 5) || 0);
+        const gate = canSend({ ...account, pauseSec: Math.min(account.pauseSec, pauseSec) }, Date.now(), true);
         if (gate.ok) break;
         await new Promise((r) => setTimeout(r, (gate.reason === 'pause' ? gate.waitMs ?? 1000 : 60_000) + 300));
       }
@@ -106,9 +109,6 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   const waiting: number[] = [];
   function enqueue(id: number) {
     set(id, { status: 'queued' });
-    // 🔥 on the task message: the author sees at once that it is taken (the solution takes a minute or two)
-    const r = get(id);
-    deps.engine.react(r.account_id, r.chat_id, r.message_id, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
     waiting.push(id);
     pump();
   }
@@ -202,6 +202,8 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       insert('ignored');
       return;
     }
+    // 🔥 right away: the author sees the task is noticed while the photo is read and the question or solution comes
+    void deps.engine.react(accountId, msg.chatId, msg.messageId, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
     const cap = Number(deps.getSettings().helperDailyPerUser || 0);
     const own = trustedFor(db, { username: msg.senderUsername, userId }) != null; // «свои люди» have no daily cap
     if (cap > 0 && !own && solvedToday(msg.chatId, userId) >= cap) {

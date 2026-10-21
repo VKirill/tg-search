@@ -229,6 +229,7 @@ export interface Settings {
   aiUseFree: string;
   aiVerifierModel: string;
   helperChats: string; // JSON HelperChat[] — groups where the agent solves tasks for everyone
+  helperPauseSec: string; // seconds between the helper's answers in a group (cold outreach keeps the account's own pause)
   helperDailyPerUser: string; // free solutions per member a day in those groups; '0' — no cap // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
 }
 

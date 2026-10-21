@@ -96,7 +96,7 @@ let settings: Settings = {
   aiMainModel: 'zai-coding-plan/glm-5.3-flash',
   aiHelperModels: '["router9/ag/gemini-3.8-flash"]',
   aiUseFree: '1',
-  aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5',
+  aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5', helperPauseSec: '5',
 };
 
 const accounts: Account[] = [

@@ -9,7 +9,7 @@ const STATUS: Record<HelperRequest['status'], string> = {
 };
 
 // «Чат ГДЗ»: groups where the agent solves tasks for everyone — Jev filters requests, the solver answers in a reply
-export function HelperSection({ cap, onCap }: { cap: string; onCap: (v: string) => void }) {
+export function HelperSection({ cap, onCap, pause, onPause }: { cap: string; onCap: (v: string) => void; pause: string; onPause: (v: string) => void }) {
   const toast = useToast();
   const api = getApi();
   const [chats, setChats] = useState<HelperChat[]>([]);
@@ -65,6 +65,10 @@ export function HelperSection({ cap, onCap }: { cap: string; onCap: (v: string) 
       <div className="field">
         <label>Бесплатных решений одному участнику в день (0 — без лимита; дальше агент зовёт в личку) — сохраняется кнопкой «Сохранить»</label>
         <input value={cap} onChange={(e) => onCap(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Пауза между ответами помощника в группе, секунд (у рассылок своя пауза аккаунта) — сохраняется кнопкой «Сохранить»</label>
+        <input value={pause} onChange={(e) => onPause(e.target.value)} />
       </div>
       {requests.length > 0 && (
         <ul className="helper-log">

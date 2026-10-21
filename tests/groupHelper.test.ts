@@ -64,7 +64,7 @@ describe('homework helper in a group', () => {
     await helper.checkPolls();
     await tick();
     expect(poll.stopped).toBe(true);
-    expect(engine.reactions).toEqual([{ chatId: CHAT, messageId: 2, emoji: '🔥' }]);
+    expect(engine.reactions).toEqual([{ chatId: CHAT, messageId: 2, emoji: '🔥' }]); // once, when the photo was taken as a task
     expect(solved[0]).toContain('Решить: задачи № 2, № 5');
     expect(engine.sent.at(-1)?.text).toBe('## Решение\n**Ответ: 42**');
   });

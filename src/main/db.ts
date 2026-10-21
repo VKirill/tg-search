@@ -251,6 +251,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   aiVerifierModel: '',
   helperChats: '[]',
   helperDailyPerUser: '5',
+  helperPauseSec: '5',
 };
 
 // Starter services; price ranges from Russian freelance market data (Kwork, student exchanges), 2026-10

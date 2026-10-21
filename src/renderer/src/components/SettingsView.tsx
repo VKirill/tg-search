@@ -90,7 +90,7 @@ export function SettingsView() {
               <div className="field"><label>Кому сообщать о передаче (@username)</label><input value={s.handoffNotifyTo} onChange={(e) => setS({ ...s, handoffNotifyTo: e.target.value })} /></div>
             </section>
             <TrustedSection />
-            <HelperSection cap={s.helperDailyPerUser} onCap={(v) => setS({ ...s, helperDailyPerUser: v })} />
+            <HelperSection cap={s.helperDailyPerUser} onCap={(v) => setS({ ...s, helperDailyPerUser: v })} pause={s.helperPauseSec} onPause={(v) => setS({ ...s, helperPauseSec: v })} />
           </>
         )}
         {tab === 'telegram' && (
