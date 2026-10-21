@@ -1,6 +1,8 @@
 import type {
   HelperChat,
   HelperRequest,
+  KnowledgeBase,
+  KnowledgeDoc,
   Account,
   AgentStep,
   Anamnesis,
@@ -534,6 +536,11 @@ const mockAiProviders: AiProvider[] = [
   { id: 'openlux-claude', name: 'openlux Claude', kind: 'openai-compatible', baseURL: 'https://openlux.example/v1', hasKey: true, models: 3 },
   { id: 'deepseek', name: 'DeepSeek', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
   { id: 'zai-coding-plan', name: 'Z.ai (GLM)', kind: 'catalog', baseURL: null, hasKey: true, models: 0 },
+];
+const mockKnowledgeBases: KnowledgeBase[] = [{ id: 1, name: 'Справка Яндекс Директа', description: 'Документация и методички по Директу', docs: 2, chunks: 340, createdAt: Date.now() - 86400_000 }];
+const mockKnowledgeDocs: KnowledgeDoc[] = [
+  { id: 1, baseId: 1, title: 'Справка Яндекс Директа — ставки и стратегии', source: 'https://yandex.ru/support/direct/', chars: 182000, chunks: 160, embedded: 160, status: 'ready', error: null, createdAt: Date.now() - 86400_000 },
+  { id: 2, baseId: 1, title: 'Методичка по семантике', source: '/Users/me/Документы/semantika.md', chars: 210000, chunks: 180, embedded: 120, status: 'indexing', error: null, createdAt: Date.now() - 3600_000 },
 ];
 const mockHelperChats: HelperChat[] = [{ chatId: -1001234567890, title: 'Помощь с уроками', username: 'study_help_chat', accountId: 1, enabled: true, scenario: 'tasks', about: 'помощь с домашкой для школьников' }];
 const mockAiChoice = { main: 'zai-coding-plan/glm-5.3-flash', helpers: ['router9/ag/gemini-3.8-flash-medium', 'openlux-claude/claude-sonnet-5-5'], useFree: true };
@@ -1959,6 +1966,45 @@ export function createMockApi(): Api {
         if (i >= 0) mockSpamChats.splice(i, 1);
       },
     },
+    knowledge: {
+      async bases() {
+        return mockKnowledgeBases;
+      },
+      async createBase(name, description) {
+        mockKnowledgeBases.push({ id: mockKnowledgeBases.length + 1, name, description, docs: 0, chunks: 0, createdAt: Date.now() });
+        return mockKnowledgeBases;
+      },
+      async updateBase(id, patch) {
+        Object.assign(mockKnowledgeBases.find((b) => b.id === id) ?? {}, patch);
+        return mockKnowledgeBases;
+      },
+      async removeBase(id) {
+        mockKnowledgeBases.splice(mockKnowledgeBases.findIndex((b) => b.id === id), 1);
+        return mockKnowledgeBases;
+      },
+      async docs(baseId) {
+        return mockKnowledgeDocs.filter((d) => d.baseId === baseId);
+      },
+      async addFiles() {
+        return [];
+      },
+      async addUrl(baseId, url) {
+        const d: KnowledgeDoc = { id: Date.now(), baseId, title: url, source: url, chars: 12000, chunks: 11, embedded: 3, status: 'indexing', error: null, createdAt: Date.now() };
+        mockKnowledgeDocs.unshift(d);
+        return d;
+      },
+      async addText(baseId, title, text) {
+        const d: KnowledgeDoc = { id: Date.now(), baseId, title, source: 'вставлен текст', chars: text.length, chunks: 1, embedded: 1, status: 'ready', error: null, createdAt: Date.now() };
+        mockKnowledgeDocs.unshift(d);
+        return d;
+      },
+      async removeDoc(docId) {
+        mockKnowledgeDocs.splice(mockKnowledgeDocs.findIndex((d) => d.id === docId), 1);
+      },
+      async search() {
+        return [{ docTitle: 'Справка Яндекс Директа', source: 'https://yandex.ru/support/direct/', heading: 'Ставки › Автостратегии', text: 'Автостратегия «Максимум кликов» сама подбирает ставки в пределах недельного бюджета…' }];
+      },
+    },
     helper: {
       async chats() {
         return mockHelperChats;
@@ -1970,6 +2016,9 @@ export function createMockApi(): Api {
       async saveChats(list) {
         mockHelperChats.splice(0, mockHelperChats.length, ...list);
         return mockHelperChats;
+      },
+      async preview(_chat, text) {
+        return { answer: `## Ответ\nНа «${text}» помощник ответил бы так.\n\n**Итог:** пример ответа из демо-данных`, ms: 8400 };
       },
       async test(chat, text) {
         const score = /реши|задач|\?/i.test(text) ? 0.86 : 0.08;

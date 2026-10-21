@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, nativeImage, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, nativeImage, session, shell } from 'electron';
 import { setFigureHost } from './figures';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -142,6 +142,10 @@ app.whenReady().then(async () => {
     emit,
     openExternal: async (url) => openLink(url),
     payments: new YooKassaProvider(getSettings),
+    pickFiles: async ({ title, extensions }) => {
+      const r = await dialog.showOpenDialog({ title, properties: ['openFile', 'multiSelections'], filters: [{ name: 'Материалы', extensions }] });
+      return r.canceled ? [] : r.filePaths;
+    },
     revealInFolder: async (path) => {
       shell.showItemInFolder(path);
     },

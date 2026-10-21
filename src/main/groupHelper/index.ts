@@ -44,7 +44,7 @@ export interface GroupHelperDeps {
   setSettings: (patch: Partial<Settings>) => void;
   isRequest: (chat: HelperChat, message: string, picture: string) => Promise<number>; // Jev: probability it is a request for this group
   describePhoto: (path: string) => Promise<{ caption: string; tasks: string[] }>; // vision: what is on it, task labels
-  answer: (chat: HelperChat, job: { key: string; task: string; photos: string[]; dir: string }) => Promise<string>; // the agent → Markdown
+  answer: (chat: HelperChat, job: { key: string; task: string; query: string; photos: string[]; dir: string }) => Promise<string>; // the agent → Markdown; `query` — the member's own words, for knowledge search
 }
 
 // «все», «реши всё», «3», «№ 2 и 5», «задачи 1, 4», «упр. 12б»
@@ -173,7 +173,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     set(id, { status: 'solving', agent: helperAgent(chat) });
     try {
       const dir = join(deps.dataDir, 'group', String(r.chat_id), String(r.message_id));
-      const text = await deps.answer(chat, { key: `group:${r.chat_id}:${r.message_id}`, task: taskText(chat, r), photos: JSON.parse(r.photos), dir });
+      const text = await deps.answer(chat, { key: `group:${r.chat_id}:${r.message_id}`, task: taskText(chat, r), query: [r.text, r.picture].filter(Boolean).join('\n'), photos: JSON.parse(r.photos), dir });
       if (!text.trim()) throw new Error('пустое решение');
       const sent = await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, text));
       set(id, { status: 'done', error: null, answer: text, answer_id: sent.messageId });
@@ -372,6 +372,16 @@ export function createGroupHelper(deps: GroupHelperDeps) {
         ? db.raw.prepare('SELECT * FROM helper_requests ORDER BY id DESC LIMIT ?').all(limit)
         : db.raw.prepare('SELECT * FROM helper_requests WHERE chat_id = ? ORDER BY id DESC LIMIT ?').all(chatId, limit);
       return (rows as Row[]).map(toRequest);
+    },
+    // The sandbox: what the group's pipeline (knowledge, agents or a model, checking) would answer — sent nowhere
+    async preview(chat: HelperChat, text: string): Promise<{ answer: string; ms: number }> {
+      const started = Date.now();
+      const dir = join(deps.dataDir, 'group', 'preview', String(started));
+      const answer = await deps.answer(chat, {
+        key: `preview:${started}`, photos: [], dir, query: text,
+        task: taskText(chat, { text, photos: '[]', picture: '', selection: null }),
+      });
+      return { answer, ms: Date.now() - started };
     },
     // The sandbox: what the group's filters and Jev say about a message, without answering it
     async test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }> {

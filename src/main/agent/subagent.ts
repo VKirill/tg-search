@@ -29,6 +29,9 @@ export interface SubagentRunInput {
   ) => Promise<AgentCompletionResult>;
   includeDelegate?: boolean;
   images?: string[]; // data URIs of the client's photos — for a vision model (Gemini) working on pictures
+  model?: string; // provider/model to try first (a group's choice)
+  verifyMode?: 'always' | 'free' | 'off'; // instead of the agent's own `verify`
+  verifier?: string; // provider/model of the checker
   aiEngine?: import('../opencode/engine').AiEngine; // run as an OpenCode session
   sessionKey?: string; // 'task:<id>' — a background task keeps its own session
 }
@@ -62,7 +65,9 @@ export async function runSubagentTurn(input: SubagentRunInput): Promise<{ text: 
       timeoutMs: 15 * 60_000,
       requireText: true, // the text is the result: an empty one goes to the next model
       taskId: input.sessionKey?.startsWith('task:') ? Number(input.sessionKey.slice(5)) : undefined,
-      verify: { task: input.task, images: input.images }, // checked by a second model per the agent's `verify`
+      // checked by a second model per the agent's `verify`; the checker sees the job's materials too (knowledge passages)
+      verify: { task: [input.task, input.context && `Материалы и контекст поручения:\n${input.context}`].filter(Boolean).join('\n\n'), images: input.images },
+      model: input.model, verifyMode: input.verifyMode, verifier: input.verifier,
     });
     if (result.outcome !== 'succeeded') throw new Error(`OpenCode: ${result.error ?? result.outcome}`);
     const steps = listAgentSteps(input.db, input.leadId, 100).filter((s) => s.ts >= started && s.tool.startsWith(`${input.agentName}:`)).reverse();

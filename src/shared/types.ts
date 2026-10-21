@@ -501,7 +501,15 @@ export interface HelperChat {
   scenario?: HelperScenario; // default «tasks»
   about?: string; // what the group is about — context for Jev and the agent (kept in local settings only)
   instructions?: string; // how to answer: tone, length, what not to do, where to send people
-  agent?: string; // the subagent that answers; default — the scenario's
+  // How the answer is made
+  mode?: 'agent' | 'model'; // an agent in OpenCode (tools, skills, helpers) or one request straight to a model, its text goes out as is
+  agent?: string; // «agent»: the main agent that writes the answer; default — the scenario's
+  helpers?: string[]; // «agent»: agents that work on the request first (in parallel); their results go to the main agent
+  model?: string; // provider/model: «model» — the model that answers; «agent» — the main agent's model; '' — chosen by the router
+  verify?: 'agent' | 'always' | 'free' | 'off'; // check the answer with a second model: as the agent's file says (default), always, free models' only, never
+  verifier?: string; // provider/model of the checker; '' — the default one
+  knowledge?: number[]; // knowledge bases the answer draws on
+  knowledgeOnly?: boolean; // answer only from the materials; say so when they have nothing
   skills?: string[]; // skills whose instructions go with every job
   jevCheck?: boolean; // ask Jev whether to answer (default true); off — every message that passes the filters
   jevPrompt?: string; // the question for Jev; '' — the scenario's default
@@ -532,6 +540,36 @@ export interface HelperRequest {
   error: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+// Knowledge bases: the owner's materials an assistant answers from (books, articles, manuals, docs)
+export interface KnowledgeBase {
+  id: number;
+  name: string;
+  description: string;
+  docs: number;
+  chunks: number;
+  createdAt: number;
+}
+
+export interface KnowledgeDoc {
+  id: number;
+  baseId: number;
+  title: string;
+  source: string; // file, URL or pasted text
+  chars: number;
+  chunks: number;
+  embedded: number; // passages already embedded for meaning search
+  status: 'indexing' | 'ready' | 'failed';
+  error: string | null;
+  createdAt: number;
+}
+
+export interface KnowledgeHit {
+  docTitle: string;
+  source: string;
+  heading: string;
+  text: string;
 }
 
 // A model's record on one kind of job (an agent or an executor), from the ledger
@@ -978,6 +1016,19 @@ export interface Api {
     saveChats(list: HelperChat[]): Promise<HelperChat[]>;
     requests(limit: number, chatId?: number): Promise<HelperRequest[]>;
     test(chat: HelperChat, text: string): Promise<{ score: number; answer: boolean; reason: string }>; // what Jev says about a message
+    preview(chat: HelperChat, text: string): Promise<{ answer: string; ms: number }>; // the whole pipeline's answer, sent nowhere
+  };
+  knowledge: {
+    bases(): Promise<KnowledgeBase[]>;
+    createBase(name: string, description: string): Promise<KnowledgeBase[]>;
+    updateBase(id: number, patch: { name?: string; description?: string }): Promise<KnowledgeBase[]>;
+    removeBase(id: number): Promise<KnowledgeBase[]>;
+    docs(baseId: number): Promise<KnowledgeDoc[]>;
+    addFiles(baseId: number): Promise<KnowledgeDoc[]>; // opens a file dialog: .md, .txt, .html, .pdf
+    addUrl(baseId: number, url: string): Promise<KnowledgeDoc>;
+    addText(baseId: number, title: string, text: string): Promise<KnowledgeDoc>;
+    removeDoc(docId: number): Promise<void>;
+    search(baseIds: number[], query: string): Promise<KnowledgeHit[]>;
   };
   trusted: {
     list(): Promise<TrustedContact[]>;

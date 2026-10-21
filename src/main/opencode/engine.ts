@@ -248,13 +248,18 @@ export function createAiEngine(deps: {
     canRetry?: () => boolean;
     taskId?: number; // a background task: its runs are reviewed later by the primary agent
     verify?: { task: string; images?: string[] }; // check the result with a second model (by the agent's `verify` mode)
+    model?: string; // provider/model to try first (a group's choice); the router's candidates follow
+    verifyMode?: VerifyMode; // instead of the agent's own `verify`
+    verifier?: string; // provider/model of the checker
   }): Promise<TurnResult & { model: string; score?: number }> {
     const row = opts.key
       ? deps.db.raw.prepare('SELECT session_id, synced_message_id FROM opencode_sessions WHERE key = ?').get(opts.key) as { session_id: string; synced_message_id: number } | undefined
       : undefined;
     const { text, lastMessageId } = opts.prompt(row?.synced_message_id ?? 0);
-    const models = await candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName), text, opts.agentName);
-    const policy = agentPolicy(opts.agentName);
+    const routed = await candidates(opts.role, { tools: true, vision: !!opts.files?.length }, agentNeeds(opts.agentName), text, opts.agentName);
+    const models = withPreferred(opts.model, routed);
+    const own = agentPolicy(opts.agentName);
+    const policy = { mode: opts.verifyMode ?? own.mode, check: own.check };
     const leadId = opts.binding.ctx.leadId || undefined;
     let sessionID = row?.session_id;
     if (!sessionID) {
@@ -281,7 +286,7 @@ export function createAiEngine(deps: {
           cost: result.costUsd, leadId, taskId: opts.taskId,
         }) : 0;
         if (ok) {
-          const verdict = opts.verify && shouldVerify(policy.mode, m) ? await verifyWith(m, opts.verify, result.text, policy.check).catch((err) => {
+          const verdict = opts.verify && shouldVerify(policy.mode, m) ? await verifyWith(m, { ...opts.verify, verifier: opts.verifier }, result.text, policy.check).catch((err) => {
             console.warn('verify', err);
             return null;
           }) : null;
@@ -321,18 +326,71 @@ export function createAiEngine(deps: {
     }
   }
 
+  // a chosen model first, then the router's candidates without it
+  function withPreferred(ref: string | undefined, routed: ModelRef[]): ModelRef[] {
+    const m = ref ? catalog.find((x) => refString(x) === ref) : undefined;
+    if (!m) return routed;
+    const first: ModelRef = { providerID: m.providerID, id: m.id, variant: m.variants.includes('medium') ? 'medium' : undefined };
+    return [first, ...routed.filter((r) => refOf(r) !== ref)].slice(0, MAX_ATTEMPTS);
+  }
+
+  // One request straight to a model (no agent, no tools): the text goes out as is. Checked by a second model when the
+  // mode says so; a turned-down answer goes to the next model with the checker's notes.
+  async function direct(opts: {
+    agent: string; // for the ledger: what kind of job
+    role: ModelRole;
+    model?: string;
+    system?: string;
+    context?: string; // the job's materials (group, knowledge passages): in the prompt and in front of the checker
+    text: string;
+    images?: string[];
+    verifyMode?: VerifyMode;
+    verifier?: string;
+    check?: string;
+  }): Promise<{ text: string; model: string; score?: number }> {
+    if (server.status().state !== 'ready') throw new Error(`ИИ-движок OpenCode не запущен: ${server.status().message ?? server.status().state}`);
+    const models = withPreferred(opts.model, await candidates(opts.role, { vision: !!opts.images?.length }, undefined, opts.text, opts.agent));
+    const base = [opts.system, opts.context, opts.text].filter(Boolean).join('\n\n');
+    let prompt = base;
+    const checkTask = [opts.text, opts.context && `Материалы и контекст:\n${opts.context}`].filter(Boolean).join('\n\n');
+    let best: { text: string; model: string; score?: number } | null = null;
+    let lastError: unknown = null;
+    for (const m of models) {
+      const started = Date.now();
+      try {
+        const text = await sessions.oneShot({ model: m, text: prompt, files: opts.images, title: opts.agent, timeoutMs: 5 * 60_000 });
+        recordUsage({ kind: 'llm', model: refOf(m) });
+        const runId = ledger.record({ model: refOf(m), agent: opts.agent, outcome: 'ok', task: opts.text, ms: Date.now() - started });
+        const verdict = shouldVerify(opts.verifyMode ?? 'off', m)
+          ? await verifyWith(m, { task: checkTask, images: opts.images, verifier: opts.verifier }, text, opts.check ?? '').catch(() => null)
+          : null;
+        if (verdict) ledger.verdict(runId, verdict);
+        if (!verdict || verdict.ok) return { text, model: refOf(m), score: verdict?.score };
+        if (!best || (best.score ?? 0) < verdict.score) best = { text, model: refOf(m), score: verdict.score };
+        prompt = `${base}\n\nПредыдущий ответ другой модели проверяющий отклонил: ${verdict.note || 'есть ошибки по существу'}\n<rejected>\n${text.slice(0, 8000)}\n</rejected>\nСделай заново, исправив это.`;
+      } catch (err) {
+        lastError = err;
+        const error = err instanceof Error ? err.message : String(err);
+        ledger.record({ model: refOf(m), agent: opts.agent, outcome: /пустой/.test(error) ? 'empty' : 'error', error, task: opts.text, ms: Date.now() - started });
+        failed(m, error);
+      }
+    }
+    if (best) return best;
+    throw lastError ?? new Error('нет подходящей модели');
+  }
+
   const shouldVerify = (mode: VerifyMode, m: ModelRef) => mode === 'always' || (mode === 'free' && isFreeModel(m));
 
   // The verifier: the owner's choice in Settings, else a strong ticked subscription (Gemini 3.8 Flash High if ticked);
   // never the model that did the work; one that sees images when the job has them
-  function verifiersFor(producer: ModelRef, vision: boolean): ModelRef[] {
+  function verifiersFor(producer: ModelRef, vision: boolean, prefer?: string): ModelRef[] {
     const byRef = new Map(catalog.map((m) => [refString(m), m]));
     const usable = (ref: string) => {
       const m = byRef.get(ref);
       return m && m.enabled && ref !== refOf(producer) && (!vision || m.vision) ? m : null;
     };
     const c = choice();
-    const preferred = [deps.getSettings().aiVerifierModel, ...c.helpers.filter((r) => /gemini-3\.8-flash-high/.test(r))].filter(Boolean);
+    const preferred = [prefer, deps.getSettings().aiVerifierModel, ...c.helpers.filter((r) => /gemini-3\.8-flash-high/.test(r))].filter((r): r is string => !!r);
     const ticked = [...c.helpers, c.main].map(usable).filter((m): m is CatalogModel => !!m)
       .sort((a, b) => Number(isSubscriptionModel(b)) - Number(isSubscriptionModel(a)) || (b.costIn + b.costOut) - (a.costIn + a.costOut));
     // medium reasoning: at «high» a model may spend the whole output on thinking and answer nothing
@@ -341,9 +399,9 @@ export function createAiEngine(deps: {
       .map((m) => ({ providerID: m.providerID, id: m.id, variant: m.variants.includes('medium') ? 'medium' : undefined }));
   }
 
-  async function verifyWith(producer: ModelRef, job: { task: string; images?: string[] }, result: string, check: string): Promise<(Verdict & { verifier: string }) | null> {
+  async function verifyWith(producer: ModelRef, job: { task: string; images?: string[]; verifier?: string }, result: string, check: string): Promise<(Verdict & { verifier: string }) | null> {
     let lastError: unknown = null;
-    for (const v of verifiersFor(producer, !!job.images?.length)) {
+    for (const v of verifiersFor(producer, !!job.images?.length, job.verifier)) {
       try {
         const raw = await sessions.oneShot({ model: v, text: verifyPrompt(job.task, result, check), files: job.images, title: 'verify' });
         recordUsage({ kind: 'llm', model: refOf(v) });
@@ -412,6 +470,7 @@ export function createAiEngine(deps: {
     profileView,
     refreshProfiles,
     ledger,
+    direct,
 
     // Settings → «Кому достанется задача»: the same routing a real task of this agent gets
     async route(agentName: string, task: string): Promise<AiRoute> {

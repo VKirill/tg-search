@@ -3664,3 +3664,36 @@ button.chip:hover {
   max-height: 320px;
   overflow: auto;
 }
+
+.groups-scenarios--two {
+  grid-template-columns: repeat(2, 1fr);
+  margin-bottom: var(--space-3);
+}
+
+.groups-inline {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px !important;
+  font-size: 13px;
+}
+
+.groups-inline input {
+  width: auto;
+}
+
+.kb-hits {
+  margin: var(--space-3) 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.kb-hits li {
+  margin-bottom: 10px;
+}
+
+.kb-hits p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}

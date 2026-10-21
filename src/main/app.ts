@@ -53,6 +53,10 @@ import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
 import { createGroupHelper, helperAgent, scenarioOf } from './groupHelper';
+import { createKnowledge, knowledgeContext } from './knowledge';
+import { createWorkerEmbedder } from './memory/embedder';
+import { RICH_FORMAT } from './agent/style';
+import { FIGURES_GUIDE } from './figures';
 import { HELPER_DEFAULT_JEV, type HelperChat } from '../shared/types';
 import { postSystemOne } from './ai/jev';
 import { llmGateway } from './ai/gateway';
@@ -87,6 +91,7 @@ export interface AppDeps {
   executors?: ExecutorRegistry;
   payments?: PaymentProvider;
   revealInFolder?: (path: string) => Promise<void>;
+  pickFiles?: (opts: { title: string; extensions: string[] }) => Promise<string[]>; // the system file dialog; absent in tests
 }
 
 export type AppHandlers = Omit<Api, 'onEvent'> & { start(): Promise<void>; stop(): Promise<void>; relieveMemory(): void };
@@ -99,10 +104,14 @@ export function createApp(deps: AppDeps): AppHandlers {
   const manager = deps.manager ?? stubManagerAi();
   const crmAi = deps.crmAi ?? stubCrmAi();
   const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
+  // one embedding model for client memory and knowledge bases (a second copy would double the memory it takes)
+  const embedder = createWorkerEmbedder(dataDir);
+  const knowledge = createKnowledge({ db, embedder });
   const memory = createMemoryStore({
     db,
     engine,
     dataDir,
+    embedder,
     settings: () => db.getSettings(),
     emit: deps.emit,
   });
@@ -353,9 +362,10 @@ export function createApp(deps: AppDeps): AppHandlers {
       const v = parseJsonFromLlm(raw) as { caption?: string; tasks?: unknown[] };
       return { caption: String(v.caption ?? ''), tasks: Array.isArray(v.tasks) ? v.tasks.map(String).filter(Boolean) : [] };
     },
-    async answer(chat, { key, task, photos, dir }) {
+    // The group's pipeline: knowledge passages → helper agents (in parallel) → the main agent, or one request straight
+    // to a model; the group's model, checking and checker on top of the agents' own settings
+    async answer(chat, { key, task, query, photos, dir }) {
       const images = await Promise.all(photos.map((p) => fileToDataUri(p)));
-      // the group's skills go with the job: their instructions are part of the context
       const skillText = (chat.skills ?? []).map((name) => {
         try {
           return `<skill name="${name}">\n${skills.loadSkillBody(name)}\n</skill>`;
@@ -363,11 +373,41 @@ export function createApp(deps: AppDeps): AppHandlers {
           return '';
         }
       }).filter(Boolean).join('\n\n');
-      const { text } = await runSubagentTurn({
-        agentName: helperAgent(chat), task, leadId: 0, clientId: null, images,
-        context: [`Группа в Telegram «${chat.title}»: ответ увидят все участники.`, skillText].filter(Boolean).join('\n\n'),
-        host: { ...makeHostForLead(0), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit, aiEngine, sessionKey: key,
-      });
+      // the member's own words find the passages: the job's service lines would only blur the search
+      const hits = chat.knowledge?.length ? await knowledge.search(chat.knowledge, query || task, 6).catch(() => []) : [];
+      const kb = chat.knowledge?.length ? knowledgeContext(hits, !!chat.knowledgeOnly) : '';
+      const context = [`Группа в Telegram «${chat.title}»: ответ увидят все участники.`, skillText, kb].filter(Boolean).join('\n\n');
+      const verifyMode = chat.verify && chat.verify !== 'agent' ? chat.verify : undefined;
+      const main = helperAgent(chat);
+      let text: string;
+      if (chat.mode === 'model') {
+        if (!aiEngine) throw new Error('ИИ-движок не подключён');
+        let check = '';
+        try {
+          check = agentDefs.get(main).check;
+        } catch {
+          /* no such agent: the base checks only */
+        }
+        ({ text } = await aiEngine.direct({
+          agent: `group:${chat.chatId}`, role: scenarioOf(chat) === 'tasks' ? 'smart' : 'fast', model: chat.model || undefined,
+          system: [RICH_FORMAT, scenarioOf(chat) === 'tasks' ? FIGURES_GUIDE : ''].filter(Boolean).join('\n\n'), context,
+          text: task, images, verifyMode: verifyMode ?? 'off', verifier: chat.verifier || undefined, check,
+        }));
+      } else {
+        const run = (agentName: string, ctx: string, own: boolean) => runSubagentTurn({
+          agentName, task, context: ctx, leadId: 0, clientId: null, images,
+          host: { ...makeHostForLead(0), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit, aiEngine,
+          sessionKey: own ? key : `${key}:${agentName}`,
+          ...(own ? { model: chat.model || undefined, verifyMode, verifier: chat.verifier || undefined } : {}),
+        });
+        const helpers = (chat.helpers ?? []).filter((h) => h !== main);
+        const results = await Promise.all(helpers.map((h) => run(h, context, false).then((r) => `<helper agent="${h}">\n${r.text}\n</helper>`, (err) => {
+          console.warn(`group helper: ${h} failed`, err instanceof Error ? err.message : err);
+          return '';
+        })));
+        const found = results.filter(Boolean);
+        ({ text } = await run(main, [context, found.length ? `Помощники уже поработали над запросом — проверь их результаты и используй в ответе:\n${found.join('\n\n')}` : ''].filter(Boolean).join('\n\n'), true));
+      }
       return renderFigures(text, { images: photos, dir: join(dir, 'figures') });
     },
   });
@@ -537,6 +577,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       }
       if (unanswered.length) console.log(`resume: ${unanswered.length} dialog(s) waiting for an answer`);
       void groupHelper.start();
+      knowledge.resume();
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
@@ -836,6 +877,24 @@ export function createApp(deps: AppDeps): AppHandlers {
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
     },
+    knowledge: {
+      bases: async () => knowledge.listBases(),
+      createBase: async (name, description) => knowledge.createBase(name, description),
+      updateBase: async (id, patch) => knowledge.updateBase(id, patch),
+      removeBase: async (id) => knowledge.removeBase(id),
+      docs: async (baseId) => knowledge.docs(baseId),
+      addFiles: async (baseId) => {
+        if (!deps.pickFiles) throw new Error('Выбор файлов доступен только в приложении');
+        const paths = await deps.pickFiles({ title: 'Материалы для базы знаний', extensions: ['md', 'markdown', 'txt', 'html', 'htm', 'pdf'] });
+        const added = [];
+        for (const p of paths) added.push(knowledge.addFile(baseId, p));
+        return added;
+      },
+      addUrl: async (baseId, url) => knowledge.addUrl(baseId, url),
+      addText: async (baseId, title, text) => knowledge.addText(baseId, title || 'Текст', text, 'вставлен текст'),
+      removeDoc: async (docId) => knowledge.removeDoc(docId),
+      search: async (baseIds, query) => knowledge.search(baseIds, query, 6),
+    },
     helper: {
       chats: async () => groupHelper.chats(),
       addChat: async (accountId, link) => {
@@ -857,6 +916,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       saveChats: async (list) => groupHelper.saveChats(list),
       requests: async (limit, chatId) => groupHelper.requests(limit, chatId),
       test: async (chat, text) => groupHelper.test(chat, text),
+      preview: async (chat, text) => groupHelper.preview(chat, text),
     },
 
     ai: {

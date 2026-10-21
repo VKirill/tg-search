@@ -5,6 +5,10 @@ import {
   HELPER_SCENARIOS,
   type Account,
   type AgentDef,
+  type AiModel,
+  type KnowledgeBase,
+  type KnowledgeDoc,
+  type KnowledgeHit,
   type HelperChat,
   type HelperRequest,
   type HelperScenario,
@@ -31,6 +35,10 @@ export function GroupsView() {
   const [agents, setAgents] = useState<AgentDef[]>([]);
   const [skills, setSkills] = useState<SkillDef[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [models, setModels] = useState<AiModel[]>([]);
+  const [bases, setBases] = useState<KnowledgeBase[]>([]);
+  const [baseId, setBaseId] = useState<number | null>(null); // a knowledge base open on the right instead of a group
+  const [newBase, setNewBase] = useState('');
   const [link, setLink] = useState('');
   const fail = useCallback((e: unknown) => toast(e instanceof Error ? e.message : String(e)), [toast]);
 
@@ -43,6 +51,8 @@ export function GroupsView() {
     api.agents.list().then((list) => setAgents(list.filter((a) => a.mode === 'subagent')), () => {});
     api.skills.list().then((list) => setSkills(list.filter((s) => s.status === 'active')), () => {});
     api.settings.get().then(setSettings, () => {});
+    api.ai.models().then((v) => setModels(v.models), () => {});
+    api.knowledge.bases().then(setBases, () => {});
   }, [api, fail]);
 
   const current = chats.find((c) => c.chatId === selected) ?? null;
@@ -82,7 +92,7 @@ export function GroupsView() {
     <div className="page-view groups-view">
       <div className="page-view__head">
         <h1>Помощник групп</h1>
-        {draft && <button type="button" className="btn btn--primary btn--sm" disabled={!dirty} onClick={save}>{dirty ? 'Сохранить' : 'Сохранено'}</button>}
+        {draft && baseId == null && <button type="button" className="btn btn--primary btn--sm" disabled={!dirty} onClick={save}>{dirty ? 'Сохранить' : 'Сохранено'}</button>}
       </div>
       <p className="field-hint">
         Агент работает в ваших группах и обсуждениях каналов: отбирает сообщения, на которые нужно ответить, и отвечает реплаем — по сценарию группы.
@@ -91,7 +101,7 @@ export function GroupsView() {
       <div className="groups-layout">
         <aside className="groups-list">
           {chats.map((c) => (
-            <button key={c.chatId} type="button" className={`groups-list__item${c.chatId === selected ? ' groups-list__item--active' : ''}`} onClick={() => setSelected(c.chatId)}>
+            <button key={c.chatId} type="button" className={`groups-list__item${c.chatId === selected && baseId == null ? ' groups-list__item--active' : ''}`} onClick={() => { setSelected(c.chatId); setBaseId(null); }}>
               <span className={`status-dot${c.enabled ? ' status-dot--ok' : ''}`} />
               <span className="groups-list__name">{c.channel ? c.channel.title : c.title}</span>
               <span className="crm-muted">{c.channel ? 'канал · ' : ''}{HELPER_SCENARIOS[c.scenario ?? 'tasks'].label}</span>
@@ -101,6 +111,20 @@ export function GroupsView() {
           <div className="groups-add">
             <input className="text-input" value={link} placeholder="t.me/группа или канал" onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
             <button type="button" className="btn btn--sm" disabled={!accounts.length || !link.trim()} onClick={add}>Подключить</button>
+          </div>
+          <div className="groups-common">
+            <h2 className="section-title">Базы знаний</h2>
+            {bases.map((b) => (
+              <button key={b.id} type="button" className={`groups-list__item${baseId === b.id ? ' groups-list__item--active' : ''}`} onClick={() => setBaseId(b.id)}>
+                <span className="status-dot status-dot--ok" />
+                <span className="groups-list__name">{b.name}</span>
+                <span className="crm-muted">{b.docs} док. · {b.chunks} фрагм.</span>
+              </button>
+            ))}
+            <div className="groups-add">
+              <input className="text-input" value={newBase} placeholder="Новая база: книги, справка…" onChange={(e) => setNewBase(e.target.value)} />
+              <button type="button" className="btn btn--sm" disabled={!newBase.trim()} onClick={() => api.knowledge.createBase(newBase, '').then((list) => { setBases(list); setNewBase(''); setBaseId(list.find((b) => b.name === newBase.trim())?.id ?? null); }, fail)}>Создать</button>
+            </div>
           </div>
           {settings && (
             <div className="groups-common">
@@ -117,8 +141,10 @@ export function GroupsView() {
             </div>
           )}
         </aside>
-        {draft ? (
-          <GroupEditor draft={draft} setDraft={setDraft} accounts={accounts} agents={agents} skills={skills} onRemove={() => remove(draft)} />
+        {baseId != null && bases.some((b) => b.id === baseId) ? (
+          <KnowledgeEditor base={bases.find((b) => b.id === baseId)!} onBases={setBases} onRemoved={() => setBaseId(null)} />
+        ) : draft ? (
+          <GroupEditor draft={draft} setDraft={setDraft} accounts={accounts} agents={agents} skills={skills} models={models} bases={bases} onRemove={() => remove(draft)} />
         ) : (
           <div className="empty-state">Подключите группу или канал по ссылке слева</div>
         )}
@@ -127,12 +153,14 @@ export function GroupsView() {
   );
 }
 
-function GroupEditor({ draft, setDraft, accounts, agents, skills, onRemove }: {
+function GroupEditor({ draft, setDraft, accounts, agents, skills, models, bases, onRemove }: {
   draft: HelperChat;
   setDraft: (c: HelperChat) => void;
   accounts: Account[];
   agents: AgentDef[];
   skills: SkillDef[];
+  models: AiModel[];
+  bases: KnowledgeBase[];
   onRemove: () => void;
 }) {
   const api = getApi();
@@ -143,6 +171,19 @@ function GroupEditor({ draft, setDraft, accounts, agents, skills, onRemove }: {
   const [probe, setProbe] = useState('');
   const [verdict, setVerdict] = useState<{ score: number; answer: boolean; reason: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [preview, setPreview] = useState<{ answer: string; ms: number } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const runPreview = async () => {
+    setPreviewing(true);
+    setPreview(null);
+    try {
+      setPreview(await api.helper.preview(draft, probe));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewing(false);
+    }
+  };
   const [log, setLog] = useState<HelperRequest[]>([]);
   const [open, setOpen] = useState<number | null>(null);
 
@@ -243,23 +284,88 @@ function GroupEditor({ draft, setDraft, accounts, agents, skills, onRemove }: {
       </section>
 
       <section className="settings-card">
-        <h2 className="settings-card__title">Кто отвечает</h2>
+        <h2 className="settings-card__title">Как готовится ответ</h2>
+        <div className="groups-scenarios groups-scenarios--two">
+          <button type="button" className={`groups-scenario${draft.mode !== 'model' ? ' groups-scenario--active' : ''}`} onClick={() => set({ mode: 'agent' })}>
+            <b>Агент через OpenCode</b>
+            <span>Главный агент пишет ответ с инструментами и умениями; помощники могут сначала поработать над запросом — их результаты он получит.</span>
+          </button>
+          <button type="button" className={`groups-scenario${draft.mode === 'model' ? ' groups-scenario--active' : ''}`} onClick={() => set({ mode: 'model' })}>
+            <b>Сразу модель</b>
+            <span>Один запрос к выбранной модели (например, бесплатной) — что она выдала, то и уходит в группу. Быстро и дёшево.</span>
+          </button>
+        </div>
+        {draft.mode !== 'model' && (
+          <>
+            <div className="field">
+              <label>Главный агент — пишет ответ (правится в «Агентах»)</label>
+              <select value={draft.agent ?? ''} onChange={(e) => set({ agent: e.target.value || undefined })}>
+                <option value="">по сценарию — {HELPER_SCENARIOS[scenario].agent}</option>
+                {agents.map((a) => <option key={a.name} value={a.name}>{a.name} — {a.description.slice(0, 60)}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Помощники — работают над запросом до главного агента, параллельно</label>
+              <div className="needs-row">
+                {agents.filter((a) => a.name !== (draft.agent || HELPER_SCENARIOS[scenario].agent)).map((a) => {
+                  const on = (draft.helpers ?? []).includes(a.name);
+                  return (
+                    <label key={a.name} className={`chip-check${on ? ' chip-check--on' : ''}`} title={a.description}>
+                      <input type="checkbox" checked={on} onChange={(e) => set({ helpers: e.target.checked ? [...(draft.helpers ?? []), a.name] : (draft.helpers ?? []).filter((x) => x !== a.name) })} />
+                      {a.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
         <div className="field">
-          <label>Агент (правится в «Агентах»)</label>
-          <select value={draft.agent ?? ''} onChange={(e) => set({ agent: e.target.value || undefined })}>
-            <option value="">по сценарию — {HELPER_SCENARIOS[scenario].agent}</option>
-            {agents.map((a) => <option key={a.name} value={a.name}>{a.name} — {a.description.slice(0, 60)}</option>)}
-          </select>
+          <label>{draft.mode === 'model' ? 'Модель, которая отвечает' : 'Модель главного агента'} (при сбое — следующая по маршрутизации)</label>
+          <ModelSelect value={draft.model ?? ''} models={draft.mode === 'model' ? models : models.filter((m) => m.tools)} empty="авто — выбирает маршрутизатор под задачу" onChange={(v) => set({ model: v || undefined })} />
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label>Проверка ответа второй моделью</label>
+            <select value={draft.verify ?? 'agent'} onChange={(e) => set({ verify: e.target.value as HelperChat['verify'] })}>
+              <option value="agent">как в настройках агента</option>
+              <option value="always">всегда</option>
+              <option value="free">только работу бесплатных моделей</option>
+              <option value="off">не проверять</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Проверяющий</label>
+            <ModelSelect value={draft.verifier ?? ''} models={models} empty="по умолчанию" onChange={(v) => set({ verifier: v || undefined })} />
+          </div>
+        </div>
+        <div className="field">
+          <label>Базы знаний — ответ опирается на найденные в них фрагменты (создаются слева)</label>
+          <div className="needs-row">
+            {bases.map((b) => {
+              const on = (draft.knowledge ?? []).includes(b.id);
+              return (
+                <label key={b.id} className={`chip-check${on ? ' chip-check--on' : ''}`} title={b.description}>
+                  <input type="checkbox" checked={on} onChange={(e) => set({ knowledge: e.target.checked ? [...(draft.knowledge ?? []), b.id] : (draft.knowledge ?? []).filter((x) => x !== b.id) })} />
+                  {b.name}
+                </label>
+              );
+            })}
+            {!bases.length && <span className="crm-muted">баз пока нет</span>}
+          </div>
+          {!!draft.knowledge?.length && (
+            <label className="groups-inline"><input type="checkbox" checked={!!draft.knowledgeOnly} onChange={(e) => set({ knowledgeOnly: e.target.checked })} /> отвечать только по материалам (если в них нет — так и сказать)</label>
+          )}
         </div>
         <div className="field">
           <label>Умения, которые агент получает с каждым запросом (правятся в «Умениях»)</label>
           <div className="needs-row">
-            {skills.map((s) => {
-              const on = (draft.skills ?? []).includes(s.name);
+            {skills.map((sk) => {
+              const on = (draft.skills ?? []).includes(sk.name);
               return (
-                <label key={s.name} className={`chip-check${on ? ' chip-check--on' : ''}`} title={s.description}>
-                  <input type="checkbox" checked={on} onChange={(e) => set({ skills: e.target.checked ? [...(draft.skills ?? []), s.name] : (draft.skills ?? []).filter((x) => x !== s.name) })} />
-                  {s.name}
+                <label key={sk.name} className={`chip-check${on ? ' chip-check--on' : ''}`} title={sk.description}>
+                  <input type="checkbox" checked={on} onChange={(e) => set({ skills: e.target.checked ? [...(draft.skills ?? []), sk.name] : (draft.skills ?? []).filter((x) => x !== sk.name) })} />
+                  {sk.name}
                 </label>
               );
             })}
@@ -284,15 +390,24 @@ function GroupEditor({ draft, setDraft, accounts, agents, skills, onRemove }: {
 
       <section className="settings-card">
         <h2 className="settings-card__title">Песочница</h2>
-        <p className="field-hint">Что скажут фильтры и Jev о сообщении с текущими (даже не сохранёнными) настройками. В группу ничего не уходит.</p>
+        <p className="field-hint">С текущими (даже не сохранёнными) настройками: «Проверить» — что скажут фильтры и Jev; «Показать ответ» — что ответил бы помощник целиком (знания, агенты или модель, проверка). В группу ничего не уходит.</p>
         <div className="route-check">
           <textarea className="text-input" rows={2} value={probe} placeholder="Например: помогите решить №5, не понимаю как" onChange={(e) => setProbe(e.target.value)} />
-          <button type="button" className="btn btn--sm" disabled={testing || !probe.trim()} onClick={test}>{testing ? 'Jev думает…' : 'Проверить'}</button>
+          <div className="helper-chat__opts">
+            <button type="button" className="btn btn--sm" disabled={testing || !probe.trim()} onClick={test}>{testing ? 'Jev думает…' : 'Проверить'}</button>
+            <button type="button" className="btn btn--sm" disabled={previewing || !probe.trim()} onClick={runPreview}>{previewing ? 'Готовит ответ…' : 'Показать ответ'}</button>
+          </div>
         </div>
         {verdict && (
           <p className={`groups-verdict${verdict.answer ? ' groups-verdict--yes' : ''}`}>
             {verdict.answer ? 'Ответит' : 'Не ответит'} — {verdict.reason}
           </p>
+        )}
+        {preview && (
+          <div className="helper-log__detail">
+            <div className="crm-muted">ответ за {Math.round(preview.ms / 1000)} с</div>
+            <pre>{preview.answer}</pre>
+          </div>
         )}
       </section>
 
@@ -319,6 +434,143 @@ function GroupEditor({ draft, setDraft, accounts, agents, skills, onRemove }: {
           ))}
           {!log.length && <li className="crm-muted">Запросов пока не было</li>}
         </ul>
+      </section>
+    </div>
+  );
+}
+
+function ModelSelect({ value, models, empty, onChange }: { value: string; models: AiModel[]; empty: string; onChange: (v: string) => void }) {
+  const groups = new Map<string, AiModel[]>();
+  for (const m of models) groups.set(m.providerID, [...(groups.get(m.providerID) ?? []), m]);
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{empty}</option>
+      {[...groups.entries()].map(([pid, list]) => (
+        <optgroup key={pid} label={pid}>
+          {list.map((m) => <option key={m.ref} value={m.ref}>{m.free ? '★ ' : ''}{m.name}{m.vision ? ' · зрение' : ''}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+// A knowledge base: its documents (files, pages, pasted text), indexing progress and a search check
+function KnowledgeEditor({ base, onBases, onRemoved }: { base: KnowledgeBase; onBases: (b: KnowledgeBase[]) => void; onRemoved: () => void }) {
+  const api = getApi();
+  const toast = useToast();
+  const fail = (e: unknown) => toast(e instanceof Error ? e.message : String(e));
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
+  const [name, setName] = useState(base.name);
+  const [description, setDescription] = useState(base.description);
+  const [url, setUrl] = useState('');
+  const [paste, setPaste] = useState({ title: '', text: '' });
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api.knowledge.docs(base.id).then(setDocs, () => {});
+    api.knowledge.bases().then(onBases, () => {});
+  }, [api, base.id, onBases]);
+  useEffect(() => {
+    setName(base.name);
+    setDescription(base.description);
+    setHits(null);
+    api.knowledge.docs(base.id).then(setDocs, () => {});
+  }, [api, base.id, base.name, base.description]);
+  useEffect(() => {
+    if (!docs.some((d) => d.status === 'indexing')) return;
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [docs, load]);
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await fn();
+      load();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="groups-editor">
+      <section className="settings-card">
+        <div className="settings-card__head">
+          <h2 className="settings-card__title">База знаний</h2>
+          <span className="crm-muted">{base.docs} документов · {base.chunks} фрагментов</span>
+          <button type="button" className="btn btn--sm btn--ghost" onClick={() => confirm(`Удалить базу «${base.name}» со всеми документами?`) && api.knowledge.removeBase(base.id).then((l) => { onBases(l); onRemoved(); }, fail)}>Удалить</button>
+        </div>
+        <div className="field">
+          <label>Название</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== base.name && api.knowledge.updateBase(base.id, { name }).then(onBases, fail)} />
+        </div>
+        <div className="field">
+          <label>Что в ней</label>
+          <input value={description} placeholder="Например: справка Яндекс Директа и наши методички" onChange={(e) => setDescription(e.target.value)} onBlur={() => description !== base.description && api.knowledge.updateBase(base.id, { description }).then(onBases, fail)} />
+        </div>
+        <p className="field-hint">
+          Материалы разбиваются на фрагменты по заголовкам и абзацам; поиск находит подходящие и по словам, и по смыслу (локальная модель,
+          ничего не уходит наружу). Помощник получает 6 лучших фрагментов к каждому вопросу.
+        </p>
+      </section>
+
+      <section className="settings-card">
+        <h2 className="settings-card__title">Добавить материалы</h2>
+        <div className="helper-chat__opts">
+          <button type="button" className="btn btn--sm" disabled={busy} onClick={() => act(() => api.knowledge.addFiles(base.id))}>Файлы… (.md, .txt, .html, .pdf)</button>
+        </div>
+        <div className="groups-add">
+          <input className="text-input" value={url} placeholder="https://… — статья, страница документации" onChange={(e) => setUrl(e.target.value)} />
+          <button type="button" className="btn btn--sm" disabled={busy || !url.trim()} onClick={() => act(async () => { await api.knowledge.addUrl(base.id, url); setUrl(''); })}>Добавить страницу</button>
+        </div>
+        <details className="ai-engine__add">
+          <summary>Вставить текст</summary>
+          <div className="ai-engine__form">
+            <input placeholder="Название" value={paste.title} onChange={(e) => setPaste({ ...paste, title: e.target.value })} />
+            <textarea rows={5} placeholder="Текст или Markdown" value={paste.text} onChange={(e) => setPaste({ ...paste, text: e.target.value })} />
+            <button type="button" className="btn btn--sm btn--primary" disabled={busy || !paste.text.trim()} onClick={() => act(async () => { await api.knowledge.addText(base.id, paste.title, paste.text); setPaste({ title: '', text: '' }); })}>Добавить</button>
+          </div>
+        </details>
+      </section>
+
+      <section className="settings-card">
+        <h2 className="settings-card__title">Документы</h2>
+        <ul className="ai-providers">
+          {docs.map((d) => (
+            <li key={d.id}>
+              <span className={`status-dot${d.status === 'ready' ? ' status-dot--ok' : d.status === 'failed' ? ' status-dot--err' : ''}`} />
+              <span className="ai-models__name">{d.title}</span>
+              <span className="crm-muted ai-providers__url" title={d.source}>{d.source}</span>
+              <span className="crm-muted">{d.status === 'indexing' ? `индексируется ${d.embedded}/${d.chunks}` : `${d.chunks} фрагм.`}</span>
+              {d.error && <span className="tag tag--warn" title={d.error}>ошибка</span>}
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => confirm(`Убрать «${d.title}»?`) && act(() => api.knowledge.removeDoc(d.id))}>×</button>
+            </li>
+          ))}
+          {!docs.length && <li className="crm-muted">Документов пока нет</li>}
+        </ul>
+      </section>
+
+      <section className="settings-card">
+        <h2 className="settings-card__title">Проверить поиск</h2>
+        <div className="route-check">
+          <input className="text-input" value={query} placeholder="Вопрос, как его задал бы участник" onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && query.trim() && api.knowledge.search([base.id], query).then(setHits, fail)} />
+          <button type="button" className="btn btn--sm" disabled={!query.trim()} onClick={() => api.knowledge.search([base.id], query).then(setHits, fail)}>Найти</button>
+        </div>
+        {hits && (
+          <ol className="kb-hits">
+            {hits.map((h, i) => (
+              <li key={i}>
+                <b>{h.docTitle}</b>{h.heading ? <span className="crm-muted"> — {h.heading}</span> : null}
+                <p>{h.text.slice(0, 400)}{h.text.length > 400 ? '…' : ''}</p>
+              </li>
+            ))}
+            {!hits.length && <li className="crm-muted">Ничего не нашлось</li>}
+          </ol>
+        )}
       </section>
     </div>
   );
