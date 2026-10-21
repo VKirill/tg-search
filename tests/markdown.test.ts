@@ -91,3 +91,13 @@ describe('rich message history text', () => {
     expect(richMessageText(blocks)).toBe('Почему так\nD = b^2-4ac\nx=1');
   });
 });
+
+describe('formulas inside bold', () => {
+  it('«**Ответ: $v = 20\\text{ м/с}$**» renders the formula, not raw LaTeX', async () => {
+    const { inlineRich } = await import('../src/main/telegram/markdown');
+    const r = inlineRich('**Ответ: $v_{\\text{ср}} = 20\\text{ м/с}$ (или $72\\text{ км/ч}$)**') as any;
+    expect(r._).toBe('richTextBold');
+    expect(r.text.texts).toContainEqual({ _: 'richTextMathematicalExpression', expression: 'v_{\\text{ср}} = 20\\text{ м/с}' });
+    expect(markdownToFormatted('**Ответ: $s \\approx 2444\\text{ м}$**').text).toBe('Ответ: s \\approx 2444 м');
+  });
+});

@@ -7,6 +7,9 @@ type Kind = 'textEntityTypeBold' | 'textEntityTypeItalic' | 'textEntityTypeCode'
 // **bold** __bold__ `code` [text](url) *italic* ||spoiler|| $math$ (a price like «5$ и 10$» is not math: no space inside the marks)
 const TOKEN = /\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|`([^`\n]+?)`|\[([^\]\n]+?)\]\((https?:\/\/[^)\s]+)\)|(?<![\w*])\*(\S(?:[^*\n]*?\S)?)\*(?![\w*])|\|\|([^|\n]+?)\|\||(?<![\w$])\$(?=\S)([^$\n]+?)(?<=\S)\$(?![\w$])/g;
 
+// Plain text has no nested entities: a formula inside bold just drops its $ marks and LaTeX text commands
+const unmath = (t: string) => t.replace(/(?<![\w$])\$(?=\S)([^$\n]+?)(?<=\S)\$(?![\w$])/g, (_, e: string) => e.replace(/\\text\{([^}]*)\}/g, '$1'));
+
 export function markdownToFormatted(input: string): formattedText {
   // headings and <summary> become bold lines, <details> wrappers go, $$ formulas become code
   const src = input
@@ -26,10 +29,10 @@ export function markdownToFormatted(input: string): formattedText {
   };
   for (const m of src.matchAll(TOKEN)) {
     out += src.slice(last, m.index);
-    if (m[1] ?? m[2]) add((m[1] ?? m[2])!, 'textEntityTypeBold');
+    if (m[1] ?? m[2]) add(unmath((m[1] ?? m[2])!), 'textEntityTypeBold');
     else if (m[3]) add(m[3], 'textEntityTypeCode');
     else if (m[4]) add(m[4], 'textEntityTypeTextUrl', m[5]);
-    else if (m[6]) add(m[6], 'textEntityTypeItalic');
+    else if (m[6]) add(unmath(m[6]), 'textEntityTypeItalic');
     else if (m[7]) add(m[7], 'textEntityTypeSpoiler');
     else if (m[8]) add(m[8], 'textEntityTypeCode');
     last = m.index! + m[0].length;
@@ -54,10 +57,11 @@ export function inlineRich(src: string): RichText {
   let last = 0;
   for (const m of src.matchAll(TOKEN)) {
     if (m.index! > last) parts.push(plain(src.slice(last, m.index)));
-    if (m[1] ?? m[2]) parts.push({ _: 'richTextBold', text: plain((m[1] ?? m[2])!) });
+    // bold and italic may hold formulas, spoilers, code: «**Ответ: $v = 20$ м/с**»
+    if (m[1] ?? m[2]) parts.push({ _: 'richTextBold', text: inlineRich((m[1] ?? m[2])!) });
     else if (m[3]) parts.push({ _: 'richTextFixed', text: plain(m[3]) });
     else if (m[4]) parts.push({ _: 'richTextUrl', text: plain(m[4]), url: m[5], is_cached: false });
-    else if (m[6]) parts.push({ _: 'richTextItalic', text: plain(m[6]) });
+    else if (m[6]) parts.push({ _: 'richTextItalic', text: inlineRich(m[6]) });
     else if (m[7]) parts.push({ _: 'richTextSpoiler', text: plain(m[7]) });
     else if (m[8]) parts.push({ _: 'richTextMathematicalExpression', expression: m[8] });
     last = m.index! + m[0].length;
