@@ -209,7 +209,12 @@ export function createMemoryStore(deps: MemoryStoreDeps): MemoryStoreApi {
   }
 
   function clientForLead(leadId: number): Client | null {
-    const lead = deps.db.getLead(leadId);
+    let lead: Lead;
+    try {
+      lead = deps.db.getLead(leadId);
+    } catch {
+      return null; // unknown lead, e.g. the sandbox's temporary lead
+    }
     if (lead.clientId) {
       const r = one('SELECT * FROM clients WHERE id = ?', lead.clientId);
       return r ? toClient(r) : null;

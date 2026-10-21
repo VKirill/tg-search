@@ -107,6 +107,16 @@ describe('memory store', () => {
     store.stop();
   });
 
+  it('clientForLead returns null for an unknown lead (sandbox lead 0)', () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tg-mem-'));
+    const { db } = setupDb();
+    const store = createMemoryStore({
+      db, engine: new FakeEngine(), dataDir, settings: () => db.getSettings(), emit: () => {}, embedder: createFakeEmbedder(),
+    });
+    expect(store.clientForLead(0)).toBeNull();
+    store.stop();
+  });
+
   it('finds facts via FTS', async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'tg-mem-'));
     const { db, project } = setupDb();

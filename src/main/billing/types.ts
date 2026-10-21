@@ -11,6 +11,7 @@ export interface BillingStatus {
 }
 
 export interface Billing {
+  plans(): Plan[]; // enabled and disabled; the operator sells the enabled ones
   status(clientId: number): BillingStatus;
   subscribe(clientId: number, planId: number): Promise<Subscription>; // creates it and sends the invoice
   consumeTask(clientId: number): boolean; // false without an active subscription or when the quota is spent

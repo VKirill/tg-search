@@ -439,6 +439,7 @@ export function createBilling(deps: BillingDeps): BillingApi {
     start,
     stop,
     listPlans,
+    plans: () => listPlans(),
     savePlan,
     removePlan,
     listSubscriptions,

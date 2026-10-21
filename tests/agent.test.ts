@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Db } from '../src/main/db';
 import { ensureAgentSchema } from '../src/main/agent/schema';
 import { createOperator } from '../src/main/agent/operator';
+import { listAgentSteps } from '../src/main/agent/store';
 import type { AgentChatMessage, AgentCompletionResult, ToolCall } from '../src/main/agent/llm';
 import { toolsToLlmDefs } from '../src/main/agent/tools';
 import { DEFAULT_MANAGER } from '../src/shared/types';
@@ -138,6 +139,7 @@ describe('operator agent', () => {
   it('run_task blocked without subscription', async () => {
     const { db, engine, ai, manager, emit, lead } = setupDb();
     const billing: Billing = {
+      plans: () => [],
       status: () => ({ subscription: null, plan: null, daysLeft: null, tasksLeft: null, unpaid: [] }),
       subscribe: async () => {
         throw new Error('no');
@@ -173,6 +175,7 @@ describe('operator agent', () => {
     const { db, engine, ai, manager, emit, lead } = setupDb();
     let consumed = false;
     const billing: Billing = {
+      plans: () => [],
       status: () => ({
         subscription: {
           id: 1,
@@ -346,6 +349,10 @@ describe('operator agent', () => {
     expect(r.reply).toBe('fallback');
     expect(manager.replyCalls).toBe(1);
     expect(r.steps).toHaveLength(0);
+    // the failure is visible to the owner, not swallowed
+    const errors = listAgentSteps(db, lead.id).filter((s) => s.tool === 'operator_error');
+    expect(errors).toHaveLength(2);
+    expect(errors[0].output).toContain('LLM down');
   });
 });
 

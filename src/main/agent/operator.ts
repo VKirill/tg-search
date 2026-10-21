@@ -8,6 +8,7 @@ import { managerServicesContext } from '../ai/manager';
 import { agentChatCompletion, type AgentChatMessage, type AgentCompletionResult } from './llm';
 import { buildClientContext, catalogContext, projectManagerPrompt } from './context';
 import { insertAgentStep } from './store';
+import { ensureAgentSchema } from './schema';
 import { buildAgentTools, freshTurnState, toolsToLlmDefs, type HandoffActions, type OrderActions } from './tools';
 import type { Operator, OperatorResult, OperatorTurnOptions } from './types';
 
@@ -19,7 +20,9 @@ const OPERATOR_RULES =
   'На вопросы «ты бот?», «ты человек?», «кто ты?» отвечай только, что ты его помощник и помогаешь с задачей; ' +
   'не называй себя живым человеком и не говори «я не бот». ' +
   'Завершай ход инструментом reply с текстом для клиента. Цену называй только внутри вилки услуги. ' +
-  'Клиенты редко дают бриф — формулируй допущения. Перед использованием фото клиента спроси согласие.';
+  'Клиенты редко дают бриф — формулируй допущения. Перед использованием фото клиента спроси согласие. ' +
+  'Если клиент хочет регулярную помощь, ассистента на месяц или много поручений — назови тариф подписки из каталога ' +
+  '(цена, квота поручений, что входит) и предложи оформить (инструмент offer_subscription после согласия).';
 
 export interface OperatorDeps extends OutreachDeps {
   getSettings: () => import('../../shared/types').Settings;
@@ -49,14 +52,22 @@ function lastClientText(lead: Lead, messages: ChatMessage[]): string {
   return lastIn?.text ?? lead.text;
 }
 
+// Every enabled plan is on sale (a new client has no subscription yet), plus the client's current one if any
 function billingPlansText(billing?: Billing, clientId?: number | null): string {
-  if (!billing || clientId == null) return '';
-  const st = billing.status(clientId);
-  if (!st.plan) return '';
-  return `id=${st.plan.id}: ${st.plan.name}, ${st.plan.priceMonth} ₽/мес, ${st.plan.tasksPerMonth} поручений — ${st.plan.description}`;
+  if (!billing) return '';
+  const lines = billing
+    .plans()
+    .filter((p) => p.enabled)
+    .map((p) => `id=${p.id}: ${p.name}, ${p.priceMonth} ₽/мес, ${p.tasksPerMonth} поручений — ${p.description}`);
+  const st = clientId != null ? billing.status(clientId) : null;
+  if (st?.subscription && st.plan) {
+    lines.push(`Текущая подписка клиента: ${st.plan.name}, статус ${st.subscription.status}, дней осталось ${st.daysLeft ?? '—'}, поручений осталось ${st.tasksLeft ?? '—'}`);
+  }
+  return lines.join('\n');
 }
 
 export function createOperator(deps: OperatorDeps): Operator {
+  ensureAgentSchema(deps.db.raw); // the trace table must exist wherever an operator runs
   async function runWithFallback(
     project: Project,
     lead: Lead,
@@ -71,6 +82,17 @@ export function createOperator(deps: OperatorDeps): Operator {
         return await runToolLoop(project, lead, history, mgr, card, dryRun);
       } catch (e) {
         lastErr = e;
+        // Never fail silently: the owner sees operator errors in the «Агент» tab and the log
+        console.error('operator turn failed', e);
+        try {
+          const step = insertAgentStep(deps.db, {
+            leadId: lead.id, ts: Date.now(), tool: 'operator_error', input: '',
+            output: e instanceof Error ? e.message : String(e), ok: false,
+          });
+          deps.emit({ type: 'agent:step', step });
+        } catch (traceErr) {
+          console.error('agent trace', traceErr); // the trace must never break the fallback
+        }
       }
     }
     const fallback = await deps.manager.reply(project, lead, history, mgr, card);
