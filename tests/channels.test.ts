@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Db } from '../src/main/db';
-import { applyFixes, createChannels, parseIssue, renderIssue, stripLinks } from '../src/main/channels';
+import { applyFixes, createChannels, isPlace, parseIssue, renderIssue, stripLinks } from '../src/main/channels';
 import { markdownToBlocks } from '../src/main/telegram/markdown';
 import { parseFeed } from '../src/main/channels/feeds';
 import { FakeEngine, makeMsg } from './fakes';
@@ -61,6 +61,10 @@ function setup(opts: { fetchFn?: typeof fetch; now?: () => number; sameStory?: (
         .map(([, n, t]) => [n, { place: t, inside: /Picassent/.test(t) }])));
       if (title === 'channel-places') return /La EMT/.test(prompt) ? '{"1": {"title": "📍 Ver las 3 paradas", "places": [{"name": "Plaza Nueva", "where": "Plaza Nueva, Sevilla"}, {"name": "Prado de San Sebastián", "where": "Prado de San Sebastián, Sevilla"}, {"name": "Santa Justa", "where": "Santa Justa, Sevilla"}]}}' : '{}';
       if (title === 'channel-extract') return 'Aquí tienes:\n```json\n[{"title": "2x1 en horchata en Triana", "text": "Solo este fin de semana", "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"}]\n```';
+      if (title === 'channel-enrich') return '{"where": "Horchatería Santa Catalina, Plaza de Santa Catalina 6, Sevilla", "when": "", "price": "2,50 €"}';
+      if (title === 'channel-post' && prompt.includes('2x1 en horchata') && !prompt.includes('La EMT')) {
+        return JSON.stringify({ title: 'T', lead: '', footer: 'F', sections: [{ title: 'Planes', items: [{ story: 1, emoji: '🥤', title: '2x1 en horchata', text: 'Este finde.', when: 'sáb y dom', where: 'Triana', price: '' }] }] });
+      }
       // the editor writes the issue as data; a link slipped into a field must not survive
       return JSON.stringify({
         title: 'Sevilla hoy · miércoles 21', lead: 'Lo que importa hoy.',
@@ -131,9 +135,9 @@ describe('issue layout', () => {
     }));
     expect(issue.sections).toHaveLength(2);
     expect(renderIssue(issue, { own: true, username: 'x' })).toBe([
-      '## Valencia Hoy · 21 oct', '', '> Un finde lleno de planes.', '', '---', '', '### 📰 La ciudad', '',
-      '#### 🏗️ Benimaclet tendrá 1.345 viviendas', '', 'El pleno lo aprueba el viernes.', '*📍 Benimaclet*', '', '---', '', '### 🎭 Agenda', '',
-      '#### 🎶 Tardeo remember', '', 'Éxitos de los 90.',
+      '# Valencia Hoy · 21 oct', '', '> Un finde lleno de planes.', '', '---', '', '## 📰 La ciudad', '',
+      '##### Benimaclet tendrá 1.345 viviendas', '', 'El pleno lo aprueba el viernes.', '*📍 Benimaclet*', '', '---', '', '## 🎭 Agenda', '',
+      '##### Tardeo remember', '', 'Éxitos de los 90.',
       '*🆓 gratis · 🌙 tarde · 🗓 sáb 24, 17:00 · 📍 [Recinto Ágora, Torrent](https://www.google.com/maps/search/?api=1&query=Recinto%20%C3%81gora%2C%20Torrent) · 💶 gratis con invitación*',
       '', '---', '', '📲 Síguenos',
     ].join('\n'));
@@ -145,7 +149,7 @@ describe('single story layout', () => {
     const issue = parseIssue(JSON.stringify({ title: 'Hoy en la ciudad', lead: 'Lo grande del finde.', footer: 'F',
       sections: [{ title: '🏛 Arquitectura', items: [{ emoji: '🏛', title: 'Open House: 76 edificios', text: 'Gratis del 23 al 25.', when: '23–25 oct' }] }] }));
     expect(renderIssue(issue, { own: true, username: null })).toBe(
-      ['## 🏛 Open House: 76 edificios', '', '> Lo grande del finde.', '', 'Gratis del 23 al 25.', '*🗓 23–25 oct*', '', '---', '', 'F'].join('\n'));
+      ['# Open House: 76 edificios', '', '> Lo grande del finde.', '', 'Gratis del 23 al 25.', '*🗓 23–25 oct*', '', '---', '', 'F'].join('\n'));
   });
 });
 
@@ -166,6 +170,16 @@ describe('proofreading', () => {
     expect(fixed.sections.map((s) => s.items.map((i) => i.title))).toEqual([['Festival'], ['Mercado']]);
     expect(fixed.sections[0].items[0]).toMatchObject({ price: 'visitas guiadas gratis', tags: [] });
     expect(fixed.footer).toBe('📲 Síguenos');
+  });
+});
+
+describe('map links', () => {
+  it('an address or one venue with its town gets a map link; the city alone or a list of places does not', () => {
+    expect(isPlace('Recinto Ágora, Torrent')).toBe(true);
+    expect(isPlace('Carrer de Quart 80, València')).toBe(true);
+    expect(isPlace('Paterna')).toBe(false);
+    expect(isPlace('La Lonja de la Seda, Torres de Serranos y museos municipales, Valencia')).toBe(false);
+    expect(isPlace('Restaurantes de Ciutat Vella, Ruzafa y Eixample')).toBe(false);
   });
 });
 
@@ -472,6 +486,20 @@ describe('channel assistant', () => {
     db.raw.prepare("UPDATE channel_items SET score = 0.85, kind = 'news' WHERE title LIKE '%horchata%'").run();
     await channels.compose(d.id, 'top');
     expect(editor()).toMatch(/EMT|nocturnas/); // 0.76 + 0.12 for three outlets beats 0.85 for one
+  });
+
+  it('the listings researcher fills a vague place with the exact address and the missing price from the web', async () => {
+    const searched: string[] = [];
+    const { channels, acc } = setup();
+    const d = await channels.createDesk(acc.id, 't.me/city_demo');
+    channels.saveDesk({ ...d, area: 'Sevilla y su área metropolitana' });
+    channels.saveSource({ deskId: d.id, kind: 'search', title: 'Ofertas', target: 'oferta', enabled: true, intervalMin: 180 });
+    await channels.runSource(channels.sources(d.id)[0].id);
+    const p = await channels.compose(d.id, 'deals');
+    expect(p.text).toContain('📍 [Horchatería Santa Catalina, Plaza de Santa Catalina 6, Sevilla](https://www.google.com/maps/search/');
+    expect(p.text).toContain('💶 2,50 €');
+    expect(p.text).toContain('🗓 sáb y dom'); // what the materials said stays
+    void searched;
   });
 
   it('a slot made of chosen rubrics takes only their stories', async () => {

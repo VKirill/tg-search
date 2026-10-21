@@ -2088,6 +2088,9 @@ export function createMockApi(): Api {
         mockDesks.push(d);
         return { desk: d, sources: 9, rejected: [] };
       },
+      async repost(id) {
+        return mockChannelPosts.find((x) => x.id === id)!;
+      },
       async redrawCover(id) {
         return mockChannelPosts.find((x) => x.id === id)!;
       },

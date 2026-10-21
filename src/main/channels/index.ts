@@ -27,6 +27,7 @@ const LATE_SLOT_MS = 3600_000; // a slot missed while the app was off: still pos
 const MIN_TELEGRAM_TEXT = 60;
 const SCORE_BATCH = 8;
 const GNEWS_ITEMS = 25; // newest Google News results per read
+const ENRICH_ITEMS = 4; // listings looked up on the web per post
 const POST_ITEMS: Record<ChannelSlotKind, number> = { digest: 8, deals: 6, top: 1, alert: 1 };
 const LISTING_FLOOR = 0.34; // events and deals: kept unless of no interest — the channel's threshold only ranks them for posts
 const PLACE_DOUBT: [number, number] = [0.1, 0.85]; // Jev unsure where it happens: a model that knows the map checks
@@ -192,6 +193,10 @@ export function applyFixes(issue: Issue, f: { fixes?: unknown[]; drop?: unknown[
   return out;
 }
 
+// A place worth a map link: an address (a number in it), or one venue with its town — not «the city», not a list of places
+export const isPlace = (where: string) =>
+  /\d/.test(where) || ((where.match(/,/g)?.length ?? 0) === 1 && !/\s(y|i|and|e|и)\s|;|\//i.test(where));
+
 // Google Maps search for a place as people would type it: the reader gets there in one tap
 export const mapsLink = (where: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(where)}`;
 
@@ -202,22 +207,23 @@ export function renderIssue(issue: Issue, o: { own: boolean; username: string | 
   const items = issue.sections.flatMap((sec) => sec.items);
   // one story: its own title on top — no issue header, no section, no repeated heading
   const single = items.length === 1 ? items[0] : null;
-  if (single) out.push(`## ${single.emoji ? `${single.emoji} ` : ''}${single.title}`, '');
-  else if (issue.title) out.push(`## ${issue.title}`, '');
+  // the issue's title H1, sections H2 with their emoji, items H5 without — small item titles, the emoji marks the section
+  if (single) out.push(`# ${single.title}`, '');
+  else if (issue.title) out.push(`# ${issue.title}`, '');
   if (issue.lead) out.push(`> ${issue.lead}`, '');
   for (const sec of issue.sections) {
     if (!single) {
       out.push('---', '');
-      if (sec.title) out.push(`### ${sec.title}`, '');
+      if (sec.title) out.push(`## ${sec.title}`, '');
     }
     for (const it of sec.items) {
       // the item's title is a small heading: Telegram gives headings room above, plain paragraphs sit back to back
-      const head = `#### ${it.emoji ? `${it.emoji} ` : ''}${it.title}`;
+      const head = `##### ${it.title}`;
       const meta = [
         ...it.tags,
         it.when && `🗓 ${it.when}`,
         // a map link only for a real place (a venue with its town, an address), not for «the city» or a region
-        it.where && (/,|\d/.test(it.where) ? `📍 [${it.where}](${mapsLink(it.where)})` : `📍 ${it.where}`),
+        it.where && (isPlace(it.where) ? `📍 [${it.where}](${mapsLink(it.where)})` : `📍 ${it.where}`),
         it.price && `💶 ${it.price}`,
         !o.own && it.source && /^https?:/.test(it.source) ? `[↗](${it.source})` : '',
       ].filter(Boolean).join(' · ');
@@ -676,7 +682,7 @@ export function createChannels(deps: ChannelsDeps) {
       console.warn('channel factcheck', err instanceof Error ? err.message : err);
       return { fixes: [], drop: [] }; // the editor's issue is still an issue
     });
-    const issue = await addPlaces(d, applyFixes(draft, fixes), stories, kind);
+    const issue = await enrichListings(d, await addPlaces(d, applyFixes(draft, fixes), stories, kind), stories);
     // nothing leads out of the channel: links, addresses and other channels' names go from every field
     return o.own ? mapIssue(issue, (t) => stripLinks(t, d.username)) : issue;
   }
@@ -701,6 +707,55 @@ export function createChannels(deps: ChannelsDeps) {
         const f = it.places.length < 3 && it.story ? found[String(it.story)] : undefined;
         const places = (Array.isArray(f?.places) ? f!.places : []).map((p: any) => ({ name: str(p?.name), where: str(p?.where) || str(p?.name) })).filter((p) => p.name).slice(0, 25);
         return places.length >= 3 ? { ...it, places, placesTitle: str(f?.title) || it.placesTitle } : it;
+      }) })),
+    };
+  }
+
+  // The listings' researcher: for events and offers it looks the place up on the web — the exact address, opening hours,
+  // the price — and fills what the materials left vague, only when the page is clearly about this very event or place.
+  // (After the proofreader: these facts come from the web, not from the materials.)
+  async function enrichListings(d: ChannelDesk, issue: Issue, stories: ChannelItem[][]): Promise<Issue> {
+    if (!deps.search) return issue;
+    const city = (d.area.split(/[(,—–-]/)[0] || d.area).trim().slice(0, 60);
+    const vague = (it: IssueItem) => !/\d/.test(it.where) || !it.price || !it.when;
+    const targets = issue.sections.flatMap((sec) => sec.items)
+      .filter((it) => it.story && stories[it.story - 1] && stories[it.story - 1][0].kind !== 'news' && vague(it))
+      .slice(0, ENRICH_ITEMS);
+    const found = new Map<IssueItem, { where?: string; when?: string; price?: string }>();
+    await Promise.all(targets.map(async (it) => {
+      try {
+        const results = (await deps.search!(`${it.title} ${it.where} ${city}`.replace(/\s+/g, ' ').trim())).slice(0, 4);
+        if (!results.length) return;
+        const page = await fetchText(await finalUrl(results[0].url)).then((r) => articleText(r.body).slice(0, 2500), () => '');
+        const web = [...results.map((r) => `### ${r.title}\n${r.content.slice(0, 900)}`), page && `### ${results[0].title} (страница)\n${page}`].filter(Boolean).join('\n\n');
+        const r = parseJsonFromLlm(await deps.llm([
+          'Пункт афиши Telegram-канала и найденное о нём в интернете. Уточни пункт, но только тем, что в найденном прямо сказано о ЭТОМ же событии или месте (то же название, те же даты, тот же город).',
+          `- where: точный адрес места — название, улица и номер, город (${city}), как ищут на картах; не нашёл точнее — пусто.`,
+          '- when: даты и часы, если в пункте их нет или они неполные; иначе пусто.',
+          '- price: цена или условия входа, если в пункте их нет; иначе пусто.',
+          `Пиши на языке пункта (${d.language}). Сомневаешься, то ли это событие, — всё пусто. Ответ — только JSON: {"where": "", "when": "", "price": ""}.`,
+          '',
+          `<item>\n${JSON.stringify({ title: it.title, text: it.text, when: it.when, where: it.where, price: it.price })}\n</item>`,
+          '',
+          `<web>\n${web}\n</web>`,
+        ].join('\n'), { json: true, role: 'fast', title: 'channel-enrich' })) as Record<string, unknown>;
+        found.set(it, { where: str(r.where), when: str(r.when), price: str(r.price) });
+      } catch (err) {
+        console.warn('channel enrich', err instanceof Error ? err.message : err);
+      }
+    }));
+    if (!found.size) return issue;
+    return {
+      ...issue,
+      sections: issue.sections.map((sec) => ({ ...sec, items: sec.items.map((it) => {
+        const f = found.get(it);
+        if (!f) return it;
+        return {
+          ...it,
+          where: f.where && /\d/.test(f.where) && !/\d/.test(it.where) ? f.where : it.where, // only a more precise address
+          when: it.when || f.when || '',
+          price: it.price || f.price || '',
+        };
       }) })),
     };
   }
@@ -1116,6 +1171,20 @@ export function createChannels(deps: ChannelsDeps) {
       if (!image) throw new Error('Обложка не нарисовалась: проверьте ключ fal.ai');
       raw.prepare('UPDATE channel_posts SET image = ? WHERE id = ?').run(image, id);
       return post(id);
+    },
+    // A published post again, in the current layout: the same issue and cover rendered anew, the old message taken down
+    async repost(id: number): Promise<ChannelPost> {
+      const row = raw.prepare('SELECT * FROM channel_posts WHERE id = ?').get(id) as Row | undefined;
+      if (!row?.issue) throw new Error('Перевыложить можно только пост нового формата');
+      const d = desk(row.desk_id);
+      const text = renderIssue(JSON.parse(row.issue), { own: d.links === 'none', username: d.username });
+      const copy = Number(raw.prepare('INSERT INTO channel_posts(desk_id, kind, text, image, item_ids, slot_key, issue, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(d.id, row.kind, text, row.image, row.item_ids, row.slot_key, row.issue, now()).lastInsertRowid);
+      if (row.status === 'published' && row.message_id) {
+        await deps.engine.deleteMessages(d.accountId, d.chatId, [row.message_id]);
+        raw.prepare("UPDATE channel_posts SET status = 'rejected', error = 'перевыложен' WHERE id = ?").run(id);
+      }
+      return publish(copy);
     },
     // a rejected draft gives its items back
     rejectPost(id: number) {

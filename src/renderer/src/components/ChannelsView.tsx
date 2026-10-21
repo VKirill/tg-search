@@ -741,6 +741,7 @@ function PostCard({ post, reload, fail }: { post: ChannelPost; reload: () => Pro
       {post.image && !/^https?:/.test(post.image) && <img className="channel-post__cover" src={mediaDisplayUrl(post.image)} alt="" />}
       {post.status === 'published' && (
         <div className="channel-row">
+          <button type="button" className="btn btn--sm btn--ghost" disabled={busy} title="Тот же выпуск в текущем оформлении; старое сообщение удаляется" onClick={() => act(() => api.channels.repost(post.id))}>Перевыложить</button>
           <button type="button" className="btn btn--sm btn--ghost" disabled={busy} onClick={() => confirm('Удалить пост из канала? Его сюжеты вернутся в работу.') && act(() => api.channels.unpublish(post.id))}>Удалить из канала</button>
         </div>
       )}

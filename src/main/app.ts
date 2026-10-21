@@ -1038,6 +1038,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       rejectPost: async (id) => channels.rejectPost(id),
       unpublish: async (id) => channels.unpublish(id),
       redrawCover: async (id) => channels.redrawCover(id),
+      repost: async (id) => channels.repost(id),
       cloneForCity: async (fromDeskId, accountId, city, target) => channels.cloneForCity(fromDeskId, accountId, city, target),
       setAvatar: async (deskId, path) => {
         const file = path ?? (deps.pickFiles ? (await deps.pickFiles({ title: 'Аватар канала', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0] : undefined);

@@ -181,6 +181,7 @@ export interface Api {
     rejectPost(id: number): Promise<void>;
     unpublish(id: number): Promise<ChannelPost>;
     redrawCover(id: number): Promise<ChannelPost>; // a draft's cover drawn again
+    repost(id: number): Promise<ChannelPost>; // a published post again in the current layout (the old message taken down)
     setAvatar(deskId: number, path?: string): Promise<void>;
     // The same desk for another city: its structure copied, the texts and the search queries rewritten for the city, local
     // feeds and official news pages proposed and kept only when they answer. `target` — an existing channel or a new one.
