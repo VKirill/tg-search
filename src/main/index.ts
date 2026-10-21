@@ -17,6 +17,7 @@ import { OpenAiSpeech } from './ai/speech';
 import { JevCategorizer } from './ai/categorizer';
 import { setUsageSink } from './usage';
 import { registerMediaProtocol, registerMediaSchemes } from './media';
+import { YooKassaProvider } from './payments/yookassa';
 
 registerMediaSchemes();
 
@@ -97,6 +98,7 @@ app.whenReady().then(async () => {
     dataDir,
     emit,
     openExternal: (url) => shell.openExternal(url),
+    payments: new YooKassaProvider(getSettings),
   });
 
   for (const [ns, methods] of Object.entries(API_METHODS)) {
