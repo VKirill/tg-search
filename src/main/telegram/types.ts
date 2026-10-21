@@ -103,5 +103,6 @@ export interface TelegramEngine {
   onPrivateMessage(cb: (accountId: number, msg: TgMessage) => void): void;
   // New messages in groups, supergroups and channels the accounts are members of (real-time monitoring).
   // The same message may arrive from several accounts; consumers dedupe by chatId:messageId.
+  // Each call adds a listener (lead search, the group helper); all of them get every message.
   onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void;
 }

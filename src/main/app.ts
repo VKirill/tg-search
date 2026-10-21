@@ -52,6 +52,10 @@ import { createExecutors } from './executors/registry';
 import { captionImage } from './memory/caption';
 import { createAgentTasks, type AgentTask, type TaskFile } from './agent/tasks';
 import { runSubagentTurn } from './agent/subagent';
+import { createGroupHelper } from './groupHelper';
+import { postSystemOne } from './ai/jev';
+import { llmGateway } from './ai/gateway';
+import { parseJsonFromLlm } from './ai/llm';
 import { sendMediaMessage, waitForSendWindow } from './pipeline/outreach';
 import { fileToDataUri } from './executors/images';
 import { agentRole, createAiEngine } from './opencode/engine';
@@ -324,6 +328,44 @@ export function createApp(deps: AppDeps): AppHandlers {
       emit({ type: 'job', projectId: lead.projectId, stage: `Поручение #${task.id} (${task.agent}) не выполнено`, done: true, error });
     },
   });
+  // the homework helper in public groups (t.me/gdz_chat_all): Jev filters requests, the solver answers in the chat
+  const groupHelper = createGroupHelper({
+    db, engine, dataDir, emit, getSettings, setSettings: (p) => db.setSettings(p),
+    async isTaskRequest(message, picture) {
+      if (!getSettings().jevApiKey.trim()) return picture ? 0.6 : 0; // no Jev: a photo of a page is likely a task
+      const data = await postSystemOne(getSettings, {
+        state: { message: message.slice(0, 1500), picture: picture.slice(0, 800) },
+        questions: {
+          request: {
+            type: 'noul',
+            instructions: 'This is a message in a public homework-help chat; `picture` describes an attached photo, if any. ' +
+              'Is the author asking to solve, check or explain a school or university task (homework, exercise, test question) — ' +
+              'including just sending a photo of a task? Chatting, thanks, ads and off-topic questions are not.',
+          },
+        },
+      });
+      return (data.answers?.request as { noul?: number } | undefined)?.noul ?? 0;
+    },
+    async describePhoto(path) {
+      const gw = llmGateway();
+      if (!gw) return { caption: '', tasks: [] };
+      const raw = await gw.complete({
+        role: 'vision', json: true, title: 'group-photo', images: [await fileToDataUri(path)],
+        messages: [{ role: 'user', text: 'Что на фото? Если это учебное задание (учебник, тетрадь, контрольная, билет) — перечисли номера или обозначения ' +
+          'отдельных задач на странице, как они там написаны. Ответ — только JSON: {"caption": "кратко по-русски: предмет, класс, тема, что на фото", "tasks": ["1", "2", "3"]}' }],
+      });
+      const v = parseJsonFromLlm(raw) as { caption?: string; tasks?: unknown[] };
+      return { caption: String(v.caption ?? ''), tasks: Array.isArray(v.tasks) ? v.tasks.map(String).filter(Boolean) : [] };
+    },
+    async solve({ key, task, photos, dir }) {
+      const images = await Promise.all(photos.map((p) => fileToDataUri(p)));
+      const { text } = await runSubagentTurn({
+        agentName: 'solver', task, context: 'Публичный чат ГДЗ: решение увидят все участники.', leadId: 0, clientId: null, images,
+        host: { ...makeHostForLead(0), taskDir: dir }, agents: agentDefs, approvals: approvalsHolder.api!, db, emit, aiEngine, sessionKey: key,
+      });
+      return renderFigures(text, { images: photos, dir: join(dir, 'figures') });
+    },
+  });
   // every app tool an OpenCode agent may call through the bridge (definitions only; calls run with the turn's host)
   const toolCatalog = (): ToolCatalogEntry[] => {
     const host = { ...makeHostForLead(0), turnState: freshTurnState() };
@@ -489,6 +531,7 @@ export function createApp(deps: AppDeps): AppHandlers {
         }
       }
       if (unanswered.length) console.log(`resume: ${unanswered.length} dialog(s) waiting for an answer`);
+      groupHelper.start();
       autopilot.start();
       broadcaster.start();
       orders.startPoller();
@@ -787,6 +830,18 @@ export function createApp(deps: AppDeps): AppHandlers {
       blockChat: (accountId, chatId) => spamChats.blockByOwner(accountId, chatId),
       unblockChat: async (tgChatId) => spamChats.unblock(tgChatId),
     },
+    helper: {
+      chats: async () => groupHelper.chats(),
+      addChat: async (accountId, link) => {
+        const chat = await engine.resolveChat(accountId, link.trim());
+        if (chat.kind === 'private' || chat.kind === 'channel') throw new Error('Нужна группа: помощник отвечает на сообщения участников');
+        const rest = groupHelper.chats().filter((c) => c.chatId !== chat.chatId);
+        return groupHelper.saveChats([...rest, { chatId: chat.chatId, title: chat.title, username: chat.username ?? null, accountId, enabled: true }]);
+      },
+      saveChats: async (list) => groupHelper.saveChats(list),
+      requests: async (limit) => groupHelper.requests(limit),
+    },
+
     ai: {
       status: async () => aiEngine?.status() ?? { state: 'stopped', version: null, latest: null, url: null, message: 'ИИ-движок не подключён', checkedAt: null },
       models: async () => aiModelsView(),

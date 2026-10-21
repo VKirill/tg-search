@@ -30,7 +30,7 @@ const settings = () => ({
   auxApiKey: '',
   auxModel: '',
   falKey: '',
-  imageModel: '', newsInterests: '', operatorProvider: 'glm' as const, glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '', geminiApiKey: '', aiProviders: '[]', aiMainModel: '', aiHelperModels: '[]', aiUseFree: '1', aiVerifierModel: '',
+  imageModel: '', newsInterests: '', operatorProvider: 'glm' as const, glmApiKey: '', deepseekApiKey: '', operatorBaseUrl: '', operatorApiKey: '', operatorModel: '', tavilyApiKey: '', geminiApiKey: '', aiProviders: '[]', aiMainModel: '', aiHelperModels: '[]', aiUseFree: '1', aiVerifierModel: '', helperChats: '[]', helperDailyPerUser: '5',
 });
 
 describe('YooKassaProvider', () => {

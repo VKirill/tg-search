@@ -227,7 +227,9 @@ export interface Settings {
   aiMainModel: string;
   aiHelperModels: string;
   aiUseFree: string;
-  aiVerifierModel: string; // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
+  aiVerifierModel: string;
+  helperChats: string; // JSON HelperChat[] — groups where the agent solves tasks for everyone
+  helperDailyPerUser: string; // free solutions per member a day in those groups; '0' — no cap // provider/model that checks helpers' results; '' — a strong ticked subscription // '1' — OpenRouter's free models go first for helper jobs
 }
 
 // Long-term client: one person across all leads, topics and accounts (docs/architecture-agent.md)
@@ -430,6 +432,32 @@ export interface AiProvider {
   baseURL: string | null;
   hasKey: boolean; // keys never leave the main process
   models: number;
+}
+
+// A group where the agent answers task requests (t.me/gdz_chat_all)
+export interface HelperChat {
+  chatId: number;
+  title: string;
+  username: string | null;
+  accountId: number; // the account that listens and answers
+  enabled: boolean;
+}
+
+export interface HelperRequest {
+  id: number;
+  chatId: number;
+  messageId: number;
+  accountId: number;
+  userId: number;
+  userName: string | null;
+  text: string;
+  photos: string[];
+  tasks: string[];
+  selection: string | null;
+  status: 'ignored' | 'asked' | 'queued' | 'solving' | 'done' | 'failed' | 'limit';
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // A model's record on one kind of job (an agent or an executor), from the ledger
@@ -867,8 +895,14 @@ export interface Api {
     removeProvider(id: string): Promise<AiProvider[]>;
     importOpencode(): Promise<number>; // from the user's own OpenCode config; returns providers found
     checkUpdate(): Promise<string>;
-    route(agent: string, task: string): Promise<AiRoute>;
-    stats(sinceDays: number): Promise<AiModelStat[]>; // how each model did each kind of job // which model an agent's task would go to, and why
+    route(agent: string, task: string): Promise<AiRoute>; // which model an agent's task would go to, and why
+    stats(sinceDays: number): Promise<AiModelStat[]>; // how each model did each kind of job
+  };
+  helper: {
+    chats(): Promise<HelperChat[]>;
+    addChat(accountId: number, link: string): Promise<HelperChat[]>;
+    saveChats(list: HelperChat[]): Promise<HelperChat[]>;
+    requests(limit: number): Promise<HelperRequest[]>;
   };
   trusted: {
     list(): Promise<TrustedContact[]>;

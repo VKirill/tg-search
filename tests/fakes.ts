@@ -226,12 +226,12 @@ export class FakeEngine implements TelegramEngine {
     this.leftChats.push(chatId);
   }
 
-  private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
+  private chatMessageCbs: ((accountId: number, msg: TgMessage) => void)[] = [];
   onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void {
-    this.chatMessageCb = cb;
+    this.chatMessageCbs.push(cb);
   }
   emitChat(accountId: number, msg: TgMessage) {
-    this.chatMessageCb?.(accountId, msg);
+    for (const cb of this.chatMessageCbs) cb(accountId, msg);
   }
 }
 

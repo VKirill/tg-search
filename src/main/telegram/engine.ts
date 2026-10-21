@@ -112,7 +112,7 @@ export class TdlEngine implements TelegramEngine {
   private readonly userCache = new Map<number, user>();
   private readonly chatUsernameCache = new Map<number, string | null>();
   private privateMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
-  private chatMessageCb: ((accountId: number, msg: TgMessage) => void) | null = null;
+  private chatMessageCbs: ((accountId: number, msg: TgMessage) => void)[] = []; // lead search, the group helper…
 
   constructor(readonly dataDir: string, readonly settings: () => Settings) {}
 
@@ -142,7 +142,7 @@ export class TdlEngine implements TelegramEngine {
   }
 
   onChatMessage(cb: (accountId: number, msg: TgMessage) => void): void {
-    this.chatMessageCb = cb;
+    this.chatMessageCbs.push(cb);
   }
 
   async startLogin(accountId: number, phone: string): Promise<TgLoginResult> {
@@ -689,15 +689,15 @@ export class TdlEngine implements TelegramEngine {
       return;
     }
 
-    if (update._ === 'updateNewMessage' && (this.privateMessageCb || this.chatMessageCb)) {
+    if (update._ === 'updateNewMessage' && (this.privateMessageCb || this.chatMessageCbs.length)) {
       const msg = update.message;
       if (msg.is_outgoing) return;
       try {
         const tdChat = await this.invoke(slot, { _: 'getChat', chat_id: msg.chat_id });
-        const cb = tdChat.type._ === 'chatTypePrivate' ? this.privateMessageCb : this.chatMessageCb;
-        if (!cb) return;
+        const cbs = tdChat.type._ === 'chatTypePrivate' ? [this.privateMessageCb].filter((c) => !!c) : this.chatMessageCbs;
+        if (!cbs.length) return;
         const mapped = await this.mapOneMessage(slot, msg, tdChat);
-        cb(slot.accountId, mapped);
+        for (const cb of cbs) cb!(slot.accountId, mapped);
       } catch (err) {
         console.error('new message handler failed:', err);
       }
