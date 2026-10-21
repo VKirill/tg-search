@@ -442,6 +442,7 @@ export interface HelperChat {
   username: string | null;
   accountId: number; // the account that listens and answers
   enabled: boolean;
+  asGroup?: boolean; // answers on behalf of the group (default) rather than from the account
 }
 
 export interface HelperRequest {

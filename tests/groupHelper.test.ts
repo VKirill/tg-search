@@ -12,12 +12,12 @@ const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-function setup(opts: { cap?: string } = {}) {
+function setup(opts: { cap?: string; asGroup?: boolean } = {}) {
   const db = new Db(':memory:');
   const dataDir = mkdtempSync(join(tmpdir(), 'gdz-'));
   const acc = db.upsertAccountByPhone('+79990001122');
   db.updateAccount(acc.id, { status: 'authorized', dailyLimit: 1, pauseSec: 0 });
-  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'ГДЗ', username: 'gdz_chat_all', accountId: acc.id, enabled: true }]), helperDailyPerUser: opts.cap ?? '5' });
+  db.setSettings({ helperChats: JSON.stringify([{ chatId: CHAT, title: 'ГДЗ', username: 'gdz_chat_all', accountId: acc.id, enabled: true, asGroup: opts.asGroup ?? false }]), helperDailyPerUser: opts.cap ?? '5' });
   const engine = new FakeEngine();
   const page = join(dataDir, 'page.jpg');
   writeFileSync(page, 'x');
@@ -121,5 +121,15 @@ describe('homework helper in a group', () => {
     await tick();
     expect(solved).toHaveLength(3);
     expect(engine.sent.some((m) => /закончились/.test(m.text))).toBe(false);
+  });
+
+  it('on behalf of the group: no reaction, a «взял задачу» note instead, deleted when the solution comes', async () => {
+    const { engine, helper, acc, solved } = setup({ asGroup: true });
+    await helper.onMessage(acc.id, makeMsg(CHAT, 1, 'реши задачу про поезд: 120 км за 1,5 часа', { senderUserId: 5 }));
+    await tick(10);
+    expect(solved).toHaveLength(1);
+    expect(engine.reactions).toEqual([]);
+    expect(engine.sent.map((m) => m.text)).toEqual(['🔥 взял задачу, решаю — минутку', '## Решение\n**Ответ: 42**']);
+    expect(engine.deleted).toHaveLength(1);
   });
 });

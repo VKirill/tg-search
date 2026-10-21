@@ -384,6 +384,25 @@ export class TdlEngine implements TelegramEngine {
     await this.invoke(slot, { _: 'stopPoll', chat_id: chatId, message_id: messageId });
   }
 
+  async deleteMessages(accountId: number, chatId: number, messageIds: number[]): Promise<void> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    await this.invoke(slot, { _: 'deleteMessages', chat_id: chatId, message_ids: messageIds, revoke: true });
+  }
+
+  async sendAsGroup(accountId: number, chatId: number, asGroup: boolean): Promise<boolean> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const me = await this.invoke(slot, { _: 'getMe' });
+    if (!asGroup) {
+      await this.invoke(slot, { _: 'setChatMessageSender', chat_id: chatId, message_sender_id: { _: 'messageSenderUser', user_id: me.id } });
+      return true;
+    }
+    const senders = await this.invoke(slot, { _: 'getChatAvailableMessageSenders', chat_id: chatId });
+    const group = senders.senders.find((s) => s.sender._ === 'messageSenderChat' && s.sender.chat_id === chatId);
+    if (!group) return false;
+    await this.invoke(slot, { _: 'setChatMessageSender', chat_id: chatId, message_sender_id: { _: 'messageSenderChat', chat_id: chatId } });
+    return true;
+  }
+
   async getChat(accountId: number, chatId: number): Promise<TgChat> {
     const slot = await this.requireAuthorizedSlot(accountId);
     const mapped = await this.loadTgChat(slot, chatId);

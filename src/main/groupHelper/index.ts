@@ -70,6 +70,11 @@ export function createGroupHelper(deps: GroupHelperDeps) {
   } catch {
     /* already there */
   }
+  try {
+    db.raw.exec('ALTER TABLE helper_requests ADD COLUMN ack_id INTEGER'); // «🔥 взял задачу» — removed when the answer comes
+  } catch {
+    /* already there */
+  }
 
   const chats = (): HelperChat[] => {
     try {
@@ -107,8 +112,18 @@ export function createGroupHelper(deps: GroupHelperDeps) {
 
   let running = 0;
   const waiting: number[] = [];
+  const asGroup = (chatId: number) => chats().find((c) => c.chatId === chatId)?.asGroup !== false;
+
   function enqueue(id: number) {
     set(id, { status: 'queued' });
+    // on behalf of the group there are no reactions (Telegram forbids them to anonymous admins): a short «taken» note
+    // instead, deleted when the solution comes
+    const r = get(id);
+    if (asGroup(r.chat_id) && !r.ack_id) {
+      void sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, '🔥 взял задачу, решаю — минутку'))
+        .then((m) => set(id, { ack_id: m.messageId }))
+        .catch((err) => console.warn('group helper ack', err instanceof Error ? err.message : err));
+    }
     waiting.push(id);
     pump();
   }
@@ -140,13 +155,22 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       if (!text.trim()) throw new Error('пустое решение');
       await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id, text));
       set(id, { status: 'done', error: null });
+      await dropAck(id);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`group helper: request ${id} failed`, error);
       set(id, { status: 'failed', error });
       await sendLimited(r.account_id, () => deps.engine.replyInChat(r.account_id, r.chat_id, r.message_id,
         'не получилось разобрать задание 😕 пришли, пожалуйста, фото почётче или перепиши условие текстом')).catch(() => {});
+      await dropAck(id);
     }
+  }
+
+  async function dropAck(id: number) {
+    const r = get(id);
+    if (!r.ack_id) return;
+    await deps.engine.deleteMessages(r.account_id, r.chat_id, [r.ack_id]).catch((err) => console.warn('group helper ack delete', err instanceof Error ? err.message : err));
+    set(id, { ack_id: null });
   }
 
   function solvedToday(chatId: number, userId: number): number {
@@ -203,7 +227,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       return;
     }
     // 🔥 right away: the author sees the task is noticed while the photo is read and the question or solution comes
-    void deps.engine.react(accountId, msg.chatId, msg.messageId, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
+    if (!asGroup(msg.chatId)) void deps.engine.react(accountId, msg.chatId, msg.messageId, '🔥').catch((err) => console.warn('group helper reaction', err instanceof Error ? err.message : err));
     const cap = Number(deps.getSettings().helperDailyPerUser || 0);
     const own = trustedFor(db, { username: msg.senderUsername, userId }) != null; // «свои люди» have no daily cap
     if (cap > 0 && !own && solvedToday(msg.chatId, userId) >= cap) {
@@ -265,6 +289,15 @@ export function createGroupHelper(deps: GroupHelperDeps) {
       pollTimer = null;
     },
     async start() {
+      // answers go on behalf of the group unless the owner turned it off for a chat
+      for (const chat of chats().filter((c) => c.enabled)) {
+        const asGroup = chat.asGroup !== false;
+        const ok = await deps.engine.sendAsGroup(chat.accountId, chat.chatId, asGroup).catch((err) => {
+          console.warn('group helper send-as', chat.title, err instanceof Error ? err.message : err);
+          return false;
+        });
+        if (asGroup && !ok) console.warn(`group helper: «${chat.title}» does not offer sending on behalf of the group to this account`);
+      }
       pollTimer = setInterval(() => void checkPolls().catch((err) => console.error('group helper polls', err)), POLL_CHECK_MS);
       deps.engine.onChatMessage((accountId, msg) => {
         onMessage(accountId, msg).catch((err) => console.error('group helper', msg.chatId, msg.messageId, err));
@@ -286,6 +319,7 @@ export function createGroupHelper(deps: GroupHelperDeps) {
     chats,
     saveChats(list: HelperChat[]) {
       deps.setSettings({ helperChats: JSON.stringify(list) });
+      for (const c of list.filter((x) => x.enabled)) void deps.engine.sendAsGroup(c.accountId, c.chatId, c.asGroup !== false).catch(() => {});
       return chats();
     },
     requests(limit = 50): HelperRequest[] {

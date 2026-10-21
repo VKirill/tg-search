@@ -72,6 +72,9 @@ export interface TelegramEngine {
   sendPoll(accountId: number, chatId: number, replyToMessageId: number, question: string, options: string[]): Promise<TgMessage>;
   pollVoters(accountId: number, chatId: number, messageId: number, optionId: number): Promise<number[]>; // user ids
   stopPoll(accountId: number, chatId: number, messageId: number): Promise<void>;
+  // Messages in a group go «on behalf of the group» (Telegram's «send as»; an admin right) or from the account; false when the group isn't offered
+  sendAsGroup(accountId: number, chatId: number, asGroup: boolean): Promise<boolean>;
+  deleteMessages(accountId: number, chatId: number, messageIds: number[]): Promise<void>; // for everyone
   // t.me/<name>, t.me/<name>/<post>, t.me/c/<id>/<post>, tg://… → the chat and the message (if the link has one);
   // never joins: an invite link to a chat we are not in fails with a hint
   resolveLink(accountId: number, url: string): Promise<{ chat: TgChat; messageId: number | null }>;

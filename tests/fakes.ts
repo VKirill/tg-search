@@ -83,6 +83,15 @@ export class FakeEngine implements TelegramEngine {
     const p = this.polls.find((x) => x.messageId === messageId);
     if (p) p.stopped = true;
   }
+  deleted: number[] = [];
+  async deleteMessages(_accountId: number, _chatId: number, messageIds: number[]): Promise<void> {
+    this.deleted.push(...messageIds);
+  }
+  sendAs = new Map<number, boolean>();
+  async sendAsGroup(_accountId: number, chatId: number, asGroup: boolean): Promise<boolean> {
+    this.sendAs.set(chatId, asGroup);
+    return true;
+  }
   reactions: { chatId: number; messageId: number; emoji: string }[] = [];
   async react(_accountId: number, chatId: number, messageId: number, emoji: string): Promise<void> {
     this.reactions.push({ chatId, messageId, emoji });

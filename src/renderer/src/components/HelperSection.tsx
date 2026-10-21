@@ -53,6 +53,9 @@ export function HelperSection({ cap, onCap, pause, onPause }: { cap: string; onC
             <label>
               <input type="checkbox" checked={c.enabled} onChange={(e) => save(chats.map((x) => (x.chatId === c.chatId ? { ...x, enabled: e.target.checked } : x)))} /> отвечать
             </label>
+            <label title="Ответы приходят от имени группы, а не от аккаунта">
+              <input type="checkbox" checked={c.asGroup !== false} onChange={(e) => save(chats.map((x) => (x.chatId === c.chatId ? { ...x, asGroup: e.target.checked } : x)))} /> от имени группы
+            </label>
             <span className="crm-muted">{c.title}</span>
             <button type="button" className="btn btn--sm btn--ghost" onClick={() => confirm(`Отключить чат «${c.title}»?`) && save(chats.filter((x) => x.chatId !== c.chatId))}>×</button>
           </li>
