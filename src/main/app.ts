@@ -457,7 +457,8 @@ export function createApp(deps: AppDeps): AppHandlers {
           criteria: { news: 'local news', deal: 'a discount, promotion, offer or sale', event: 'an event with a date: concert, fair, exhibition, festival, opening', other: 'none of these, or not relevant' },
         };
         questions[`rubric${i}`] = { type: 'choice', instructions: `Which rubric of the channel does \`item${i}\` belong to?`, criteria: rubrics };
-        for (const au of desk.audiences) questions[`aud${i}_${au.id}`] = { type: 'noul', instructions: `Does \`item${i}\` suit this audience: ${au.name} — ${au.hint}?` };
+        // «who would want to see it», not «does the word fit»: a law about firefighters is not «free» because nobody pays
+        for (const au of desk.audiences) questions[`aud${i}_${au.id}`] = { type: 'noul', instructions: `A reader follows the channel's selection «${au.name}» (${au.hint}). Is \`item${i}\` exactly what this reader is looking for there — a plan, offer or piece of news made for them?` };
       });
       const state: Record<string, string> = { channel: desk.about.slice(0, 800), ...(desk.area ? { area: desk.area.slice(0, 300) } : {}) };
       items.forEach((it, i) => (state[`item${i}`] = `${it.title}\n${it.text}`.slice(0, 1200)));
@@ -470,7 +471,7 @@ export function createApp(deps: AppDeps): AppHandlers {
           local: desk.area ? a(`local${i}`)?.noul ?? 0 : null,
           kind: (a(`kind${i}`)?.choice ?? 'other') as 'news' | 'deal' | 'event' | 'other',
           category: rubric && rubric !== 'other' ? rubric : null,
-          audiences: desk.audiences.filter((au) => (a(`aud${i}_${au.id}`)?.noul ?? 0) >= 0.5).map((au) => au.id),
+          audiences: desk.audiences.filter((au) => (a(`aud${i}_${au.id}`)?.noul ?? 0) >= 0.6).map((au) => au.id),
         };
       });
     },
