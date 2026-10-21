@@ -969,6 +969,25 @@ export class TdlEngine implements TelegramEngine {
     );
   }
 
+  async sendAlbum(
+    accountId: number,
+    chatId: number,
+    files: { path: string; kind: 'photo' | 'document' }[],
+    caption?: string,
+  ): Promise<TgMessage[]> {
+    const slot = await this.requireAuthorizedSlot(accountId);
+    const cap = caption?.trim() ? markdownToFormatted(caption.trim()) : undefined;
+    const contents: InputMessageContent$Input[] = files.map((f, i) =>
+      f.kind === 'photo'
+        ? { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: f.path } }, ...(i === 0 && cap ? { caption: cap } : {}) }
+        : { _: 'inputMessageDocument', document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: f.path } }, ...(i === 0 && cap ? { caption: cap } : {}) },
+    ) as unknown as InputMessageContent$Input[];
+    const sent = await this.invoke(slot, { _: 'sendMessageAlbum', chat_id: chatId, input_message_contents: contents });
+    const finals = await Promise.all(sent.messages.filter((m): m is message => m != null).map((m) => this.waitForSend(slot, m.id)));
+    const tdChat = await this.invoke(slot, { _: 'getChat', chat_id: chatId });
+    return Promise.all(finals.map((m) => this.mapOneMessage(slot, m, tdChat)));
+  }
+
   private async sendContent(
     slot: AccountSlot,
     chatId: number,

@@ -1,43 +1,40 @@
 import { existsSync } from 'node:fs';
 import type { AgentTool } from '../types';
-import { listAuthorizedProjectAccounts } from '../../pipeline/accounts';
+import { sendMediaMessage } from '../../pipeline/outreach';
 import type { ToolHostDeps } from './deps';
 
 export function createSendAssetTool(deps: ToolHostDeps): AgentTool {
   return {
     name: 'send_asset',
-    description: 'Отправить клиенту его сохранённый файл (фото или документ).',
+    description:
+      'Отправить клиенту его сохранённые файлы: одно сообщение — до 10 фото альбомом, текст подписью под ними (Markdown можно).',
     parameters: {
       type: 'object',
       properties: {
-        assetId: { type: 'number' },
-        caption: { type: 'string' },
+        assetIds: { type: 'array', items: { type: 'number' }, description: 'id файлов из памяти клиента' },
+        assetId: { type: 'number', description: 'один файл (устаревшее, лучше assetIds)' },
+        caption: { type: 'string', description: 'текст сообщения под файлами' },
       },
-      required: ['assetId'],
     },
     async run(args, ctx) {
-      const assetId = Number(args.assetId);
-      const caption = args.caption != null ? String(args.caption) : undefined;
+      const ids = (Array.isArray(args.assetIds) ? args.assetIds : [args.assetId]).map(Number).filter((n) => Number.isFinite(n));
+      const caption = args.caption != null ? String(args.caption) : '';
+      if (!ids.length) return 'Ошибка: укажите assetIds';
       if (!deps.memory) return 'Файлы клиента не подключены';
       if (ctx.clientId == null) return 'Клиент не привязан';
-      if (ctx.dryRun) return `[dryRun] Отправили бы asset #${assetId}`;
-      const found = deps.memory.search(ctx.clientId, String(assetId));
-      const asset = found.assets.find((a) => a.id === assetId);
-      if (!asset) return 'Ошибка: файл не найден';
-      if (asset.clientId !== ctx.clientId) return 'Ошибка: файл принадлежит другому клиенту';
-      if (!existsSync(asset.path)) return 'Ошибка: файл отсутствует на диске';
-      const lead = deps.db.getLead(ctx.leadId);
-      const project = deps.db.getProject(lead.projectId);
-      const accountId = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
-      if (accountId == null || lead.authorUserId == null) return 'Нет аккаунта для отправки';
-      const chatId = await deps.engine.ensurePrivateChat(accountId, lead.authorUserId);
-      const mime = asset.mime || '';
-      if (mime.startsWith('image/')) {
-        await deps.engine.sendPhoto(accountId, chatId, asset.path, caption);
-      } else {
-        await deps.engine.sendDocument(accountId, chatId, asset.path, caption);
+      if (ctx.dryRun) return `[dryRun] Отправили бы файлы ${ids.join(', ')}`;
+      const { memory } = deps;
+      const clientId = ctx.clientId;
+      const assets: { path: string; mime: string; name: string }[] = [];
+      for (const id of ids) {
+        const asset = memory.search(clientId, String(id)).assets.find((a) => a.id === id);
+        if (!asset) return `Ошибка: файл #${id} не найден`;
+        if (asset.clientId !== clientId) return `Ошибка: файл #${id} принадлежит другому клиенту`;
+        if (!existsSync(asset.path)) return `Ошибка: файл #${id} отсутствует на диске`;
+        assets.push(asset);
       }
-      return `Файл «${asset.name}» отправлен`;
+      await sendMediaMessage(deps, ctx.leadId, caption, assets.map((a) => ({ path: a.path, mime: a.mime || '' })), true);
+      return `Отправлено одним сообщением: ${assets.map((a) => `«${a.name}»`).join(', ')}`;
     },
   };
 }

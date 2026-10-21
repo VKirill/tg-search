@@ -15,7 +15,7 @@ import type { Executor, ExecutorRegistry } from '../executors/types';
 import type { Billing } from '../billing/types';
 import type { PaymentProvider } from '../payments/types';
 import type { TelegramEngine, TgMessage } from '../telegram/types';
-import { sendMessage, type OutreachDeps } from './outreach';
+import { sendMediaMessage, sendMessage, type OutreachDeps } from './outreach';
 import { isFreeLead } from '../trusted';
 import { listAuthorizedProjectAccounts } from './accounts';
 
@@ -45,10 +45,6 @@ function priceInRange(service: Service, price: number): boolean {
 
 function openOrderStatuses(): Set<Order['status']> {
   return new Set(['collecting', 'quoted', 'awaiting_payment', 'paid', 'in_progress', 'revision']);
-}
-
-function isImageMime(mime: string): boolean {
-  return mime.startsWith('image/');
 }
 
 function buildExecutorInput(
@@ -119,24 +115,8 @@ export function createOrders(deps: OrdersDeps) {
     return deps.db.listOrders(leadId).find((o) => open.has(o.status)) ?? null;
   }
 
-  async function sendOutputFiles(lead: Lead, files: OrderFile[], accountId: number, chatId: number) {
-    for (const f of files) {
-      if (isImageMime(f.mime)) {
-        await deps.engine.sendPhoto(accountId, chatId, f.path, f.name);
-      } else {
-        await deps.engine.sendDocument(accountId, chatId, f.path, f.name);
-      }
-    }
-  }
-
   async function deliverPreview(leadId: number, text: string, files: OrderFile[]) {
-    const lead = deps.db.getLead(leadId);
-    const project = deps.db.getProject(lead.projectId);
-    const accountId = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
-    if (accountId == null || lead.authorUserId == null) throw new Error('Нет аккаунта для отправки');
-    const chatId = await deps.engine.ensurePrivateChat(accountId, lead.authorUserId);
-    if (text.trim()) await sendMessage(deps, leadId, text.trim(), 'dm', true);
-    await sendOutputFiles(lead, files, accountId, chatId);
+    await sendMediaMessage(deps, leadId, text, files, true);
   }
 
   async function requestPayment(orderId: number): Promise<Order> {
@@ -211,18 +191,10 @@ export function createOrders(deps: OrdersDeps) {
 
   async function deliver(orderId: number): Promise<Order> {
     const order = deps.db.getOrder(orderId);
-    const lead = deps.db.getLead(order.leadId);
-    const project = deps.db.getProject(lead.projectId);
-    const accountId = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
-    if (accountId == null || lead.authorUserId == null) throw new Error('Нет аккаунта для отправки');
-
-    if (order.result?.trim()) {
-      await sendMessage(deps, order.leadId, order.result.trim(), 'dm', true);
-    }
+    // the result text and every output file in one go: albums with the text under them
     const outputs = order.files.filter((f) => f.role === 'output');
-    if (outputs.length) {
-      const chatId = await deps.engine.ensurePrivateChat(accountId, lead.authorUserId);
-      await sendOutputFiles(lead, outputs, accountId, chatId);
+    if (order.result?.trim() || outputs.length) {
+      await sendMediaMessage(deps, order.leadId, order.result?.trim() ?? '', outputs, true);
     }
     return patchOrder(orderId, { status: 'delivered' });
   }

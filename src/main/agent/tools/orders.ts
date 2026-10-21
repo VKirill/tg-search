@@ -145,6 +145,9 @@ export function createOrderTools(deps: ToolHostDeps): AgentTool[] {
       if (!isFreeLead(deps.db, deps.db.getLead(ctx.leadId))) return 'Бесплатно — только для своих людей; платным клиентам выставь счёт (request_payment)';
       if (ctx.dryRun) return `[dryRun] Запустили бы заказ #${orderId}`;
       if (!deps.orders) return 'Заказы не подключены';
+      if (!['collecting', 'quoted', 'revision', 'failed'].includes(order.status)) {
+        return `Заказ #${orderId} уже ${order.status === 'delivered' || order.status === 'done' ? 'выполнен' : 'в работе'} — повторно не запускаю`;
+      }
       void deps.orders.requestPayment(orderId).catch((e) => console.error('start_work', e));
       return `Заказ #${orderId} в работе: исполнитель пришлёт результат клиенту сам. Скажи клиенту, что взял в работу и примерно когда будет.`;
     },

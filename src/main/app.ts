@@ -330,6 +330,10 @@ export function createApp(deps: AppDeps): AppHandlers {
       dedupePruneTimer = setInterval(() => pruneFingerprints(db), PRUNE_INTERVAL_MS);
       // replies that were waiting on a timer when the app stopped: dialogs whose last message is incoming and fresh
       for (const leadId of db.leadsAwaitingReply(Date.now() - 2 * 3600_000)) managerAgent.onIncoming(leadId);
+      // orders whose executor was running when the app stopped: run again (the result was never delivered)
+      for (const o of db.listOrders().filter((x) => x.status === 'in_progress' || x.status === 'paid')) {
+        orders.run(o.id).catch((err) => console.error('resume order', o.id, err));
+      }
       realtime.start();
       autopilot.start();
       broadcaster.start();

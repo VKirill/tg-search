@@ -185,6 +185,11 @@ export class FakeEngine implements TelegramEngine {
     this.sentFiles.push({ kind: 'photo', chatId, filePath, caption });
     return this.fileMsg(chatId);
   }
+  albums: { chatId: number; files: { path: string; kind: 'photo' | 'document' }[]; caption?: string }[] = [];
+  async sendAlbum(_accountId: number, chatId: number, files: { path: string; kind: 'photo' | 'document' }[], caption?: string): Promise<TgMessage[]> {
+    this.albums.push({ chatId, files, caption });
+    return files.map(() => this.fileMsg(chatId));
+  }
   async sendDocument(_accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage> {
     this.sentFiles.push({ kind: 'document', chatId, filePath, caption });
     return this.fileMsg(chatId);

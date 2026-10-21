@@ -85,6 +85,8 @@ export interface TelegramEngine {
   // Files and avatars for executors: photo/document with optional caption; the user's current profile photo (null if none)
   sendPhoto(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage>;
   sendDocument(accountId: number, chatId: number, filePath: string, caption?: string): Promise<TgMessage>;
+  // One grouped message: up to 10 photos (or documents) with the caption under the first; 2+ files
+  sendAlbum(accountId: number, chatId: number, files: { path: string; kind: 'photo' | 'document' }[], caption?: string): Promise<TgMessage[]>;
   getUserPhoto(accountId: number, userId: number): Promise<string | null>;
 
   // Manual client («Чаты»)
