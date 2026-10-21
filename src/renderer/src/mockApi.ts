@@ -301,7 +301,7 @@ const leads: Lead[] = [
     status: 'replied',
     accountId: 1,
     clientId: null,
-    repeatCount: 0,
+    repeatCount: 3,
     spamTemplateId: null,
     sequenceStep: 2,
     nextStepAt: now + 18 * 3600_000,
@@ -916,28 +916,128 @@ function mockOrderPatch(id: number, patch: Partial<Order>): Order {
   return copy;
 }
 
-const mockAgents: AgentDef[] = [
-  { name: 'manager', description: 'Ведёт диалог с клиентом от имени помощника владельца, продаёт услуги и подписку', mode: 'primary', model: '', temperature: 0.4, steps: 8, permission: { '*': 'allow', request_payment: 'ask' }, prompt: 'Ты — помощник Кирилла…', builtIn: true },
-  { name: 'researcher', description: 'Поиск в интернете и исследование со списком источников', mode: 'subagent', model: 'deepseek', temperature: 0.2, steps: 12, permission: { web_search: 'allow', fetch_url: 'allow', '*': 'deny' }, prompt: 'Ты — исследователь…', builtIn: true },
+const builtinAgentDefaults: AgentDef[] = [
+  {
+    name: 'manager',
+    description: 'Ведёт диалог с клиентом от имени помощника владельца, продаёт услуги и подписку',
+    mode: 'primary',
+    model: '',
+    temperature: 0.4,
+    steps: 8,
+    permission: { '*': 'allow', request_payment: 'ask' },
+    prompt:
+      'Ты — помощник Кирилла. Собираешь заявку, продаёшь услуги из каталога, предлагаешь подписку. ' +
+      'Пиши коротко, по одному вопросу. Цены — только внутри вилки. Передаёшь человеку, когда клиент просит цену вне каталога.',
+    builtIn: true,
+  },
+  {
+    name: 'researcher',
+    description: 'Поиск в интернете и исследование со списком источников',
+    mode: 'subagent',
+    model: 'deepseek',
+    temperature: 0.2,
+    steps: 12,
+    permission: { web_search: 'allow', fetch_url: 'allow', '*': 'deny' },
+    prompt: 'Ты — исследователь. Ищи в сети, читай страницы, отвечай со ссылками на источники.',
+    builtIn: true,
+  },
 ];
+
+const mockAgents: AgentDef[] = builtinAgentDefaults.map((a) => ({ ...a, permission: { ...a.permission } }));
 
 let mockRules = '# Правила компании\n\n- Пишем коротко и по-человечески.\n- Не обещаем того, чего нет в каталоге.\n- Цены — только внутри вилки услуги.';
 
 const mockSkills: SkillDef[] = [
-  { name: 'wb-card', description: 'Карточка товара для Wildberries: SEO, характеристики, инфографика без запрещённых элементов', body: '…', status: 'active', source: 'builtin', uses: 14, updatedAt: now },
-  { name: 'content-plan-week', description: 'Контент-план на неделю для малого бизнеса по нише и ссылкам', body: '…', status: 'active', source: 'owner', uses: 6, updatedAt: now },
-  { name: 'supplier-search', description: 'Поиск поставщиков по городу и категории со сравнением цен', body: '…', status: 'draft', source: 'learned', uses: 0, updatedAt: now },
+  {
+    name: 'wb-card',
+    description: 'Карточка товара для Wildberries: SEO, характеристики, инфографика без запрещённых элементов',
+    body: '# WB card\n\nСобери характеристики, SEO-название и описание. Не используй чужие логотипы.',
+    status: 'active',
+    source: 'builtin',
+    uses: 14,
+    updatedAt: now,
+  },
+  {
+    name: 'content-plan-week',
+    description: 'Контент-план на неделю для малого бизнеса по нише и ссылкам',
+    body: '# Content plan\n\n7 дней, форматы: пост, сторис, опрос. Укажи допущения по ЦА.',
+    status: 'active',
+    source: 'owner',
+    uses: 6,
+    updatedAt: now,
+  },
+  {
+    name: 'supplier-search',
+    description: 'Поиск поставщиков по городу и категории со сравнением цен',
+    body: '# Supplier search\n\nНайди 3–5 поставщиков, сравни цены и сроки, выдай таблицу.',
+    status: 'draft',
+    source: 'learned',
+    uses: 0,
+    updatedAt: now,
+  },
 ];
 
 const mockSpamTemplates: SpamTemplate[] = [
-  { id: 1, sample: 'Всем привет! Нужно помочь с парой карточек. Оплата по результату. Пишите в личку — объясню все подробности', authors: 23, messages: 41, status: 'spam', source: 'auto', createdAt: now - 86_400_000, lastSeenAt: now - 600_000 },
+  {
+    id: 1,
+    sample:
+      'Всем привет! Нужно помочь с парой карточек. Оплата по результату. Пишите в личку — объясню все подробности',
+    authors: 23,
+    messages: 41,
+    status: 'spam',
+    source: 'auto',
+    createdAt: now - 86_400_000,
+    lastSeenAt: now - 600_000,
+  },
+  {
+    id: 2,
+    sample: 'Заработок без вложений — пиши + в личку, расскажу схему',
+    authors: 8,
+    messages: 12,
+    status: 'allowed',
+    source: 'owner',
+    createdAt: now - 200_000_000,
+    lastSeenAt: now - 3_600_000,
+  },
 ];
 
 const mockApprovals: Approval[] = [
-  { id: 1, leadId: 1, agent: 'manager', tool: 'request_payment', input: '{"orderId":3}', summary: 'Выставить счёт 1500 ₽ за нейрофотосессию (10 образов)', status: 'pending', createdAt: now - 600_000, decidedAt: null },
+  {
+    id: 1,
+    leadId: 1,
+    agent: 'manager',
+    tool: 'request_payment',
+    input: '{"orderId":3}',
+    summary: 'Выставить счёт 1500 ₽ за нейрофотосессию (10 образов)',
+    status: 'pending',
+    createdAt: now - 600_000,
+    decidedAt: null,
+  },
+  {
+    id: 2,
+    leadId: 4,
+    agent: 'manager',
+    tool: 'send_asset',
+    input: '{"assetId":2}',
+    summary: 'Отправить клиенту пример портфолио (PDF)',
+    status: 'approved',
+    createdAt: now - 86400_000 * 2,
+    decidedAt: now - 86400_000 * 2 + 120_000,
+  },
 ];
 
 const mockChats: ChatSummary[] = [
+  {
+    chatId: 101,
+    title: 'Заказы на разработку',
+    username: 'dev_orders_ru',
+    kind: 'supergroup',
+    memberCount: 12040,
+    isMember: true,
+    unreadCount: 2,
+    lastText: 'Ищу разработчика на MVP мобильного приложения с интеграцией Telegram-бота',
+    lastDate: now - 2 * 3600_000,
+  },
   { chatId: -1001, title: 'Фриланс · заказы на разработку', username: 'freelance_dev_orders', kind: 'supergroup', memberCount: 18420, isMember: true, unreadCount: 12, lastText: 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', lastDate: now - 4 * 60_000 },
   { chatId: -1002, title: 'Предприниматели · нетворкинг', username: 'biz_networking', kind: 'supergroup', memberCount: 25539, isMember: true, unreadCount: 3, lastText: 'Кто делал интеграцию amoCRM с сайтом? Поделитесь контактом', lastDate: now - 35 * 60_000 },
   { chatId: -1003, title: 'WordPress for developers', username: 'wp4dev', kind: 'supergroup', memberCount: 4210, isMember: true, unreadCount: 0, lastText: 'Обновил плагин, всё взлетело', lastDate: now - 3 * 3600_000 },
@@ -950,7 +1050,36 @@ const mockPublicChats: ChatInfo[] = [
   { chatId: -2002, title: 'Telegram-боты: заказы и вакансии', username: 'tg_bots_orders', kind: 'supergroup', memberCount: 5120, isMember: false },
 ];
 
-function mockChatItems(chatId: number): ChatItem[] {
+function mockChatItems(chatId: number, centerMessageId?: number): ChatItem[] {
+  if (chatId === 101) {
+    const leadText =
+      'Ищу разработчика на MVP мобильного приложения с интеграцией Telegram-бота. Бюджет обсуждаем, сроки 6–8 недель.';
+    const base = now - 3 * 3600_000;
+    const thread: [number, string, string, boolean][] = [
+      [8798, 'Олег', 'Кто делает лендинги под запуск курса?', false],
+      [8799, 'Анна', 'Могу порекомендовать студию', false],
+      [8800, 'Игорь', 'Ищу верстальщика на Tilda', false],
+      [8801, 'Алексей Морозов', leadText, false],
+      [8802, 'Модератор', 'Пожалуйста, без спама в чате', false],
+      [8803, 'Кирилл', 'Алексей, ответил в личку', true],
+    ];
+    let list = thread.map(([messageId, name, text, out]) => ({
+      messageId,
+      date: base + (messageId - 8798) * 12 * 60_000,
+      text,
+      senderName: name,
+      senderUsername: name === 'Алексей Морозов' ? 'alexm_dev' : null,
+      isOutgoing: out,
+      voice: null,
+      replyToMessageId: null,
+      link: messageId === 8801 ? 'https://t.me/dev_orders_ru/8801' : null,
+    }));
+    if (centerMessageId != null) {
+      const idx = list.findIndex((m) => m.messageId === centerMessageId);
+      if (idx >= 0) list = list.slice(Math.max(0, idx - 2), idx + 3);
+    }
+    return list;
+  }
   const base = now - 3 * 3600_000;
   const lines: [string, string, boolean][] = [
     ['Олег', 'Всем привет! Кто может сделать лендинг под запуск курса за неделю?', false],
@@ -959,8 +1088,15 @@ function mockChatItems(chatId: number): ChatItem[] {
     ['Игорь', 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', false],
   ];
   return lines.map(([name, text, out], i) => ({
-    messageId: Math.abs(chatId) * 100 + i + 1, date: base + i * 40 * 60_000, text, senderName: name, senderUsername: null,
-    isOutgoing: out, voice: i === 1 ? { fileId: 9, durationSec: 7 } : null, replyToMessageId: null, link: null,
+    messageId: Math.abs(chatId) * 100 + i + 1,
+    date: base + i * 40 * 60_000,
+    text,
+    senderName: name,
+    senderUsername: null,
+    isOutgoing: out,
+    voice: i === 1 ? { fileId: 9, durationSec: 7 } : null,
+    replyToMessageId: null,
+    link: null,
   }));
 }
 
@@ -1671,6 +1807,12 @@ export function createMockApi(): Api {
         return { ...def };
       },
       async remove(name) {
+        const built = builtinAgentDefaults.find((a) => a.name === name);
+        if (built) {
+          const i = mockAgents.findIndex((a) => a.name === name);
+          if (i >= 0) mockAgents[i] = { ...built, permission: { ...built.permission } };
+          return;
+        }
         const i = mockAgents.findIndex((a) => a.name === name && !a.builtIn);
         if (i >= 0) mockAgents.splice(i, 1);
       },
@@ -1727,7 +1869,9 @@ export function createMockApi(): Api {
       async decide(id, approve) {
         const a = mockApprovals.find((x) => x.id === id)!;
         Object.assign(a, { status: approve ? 'approved' : 'denied', decidedAt: Date.now() });
-        return { ...a };
+        const copy = { ...a };
+        emit({ type: 'approval:update', approval: copy });
+        return copy;
       },
     },
     agent: {
@@ -1862,9 +2006,9 @@ export function createMockApi(): Api {
         const i = mockChats.findIndex((c) => c.chatId === chatId);
         if (i >= 0) mockChats.splice(i, 1);
       },
-      async around(_accountId, chatId) {
+      async around(_accountId, chatId, messageId) {
         await delay(150);
-        return mockChatItems(chatId);
+        return mockChatItems(chatId, messageId);
       },
       async media() {
         return mockWavDataUrl();
