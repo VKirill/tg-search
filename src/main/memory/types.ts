@@ -20,7 +20,8 @@ export interface MemoryStore {
   // Facts → recent episodes → last messages → open orders and subscription → assets matching the query
   context(leadId: number, query: string, budgetTokens?: number): AgentContext;
   remember(clientId: number, kind: FactKind, text: string, source: string | null): MemoryFact;
-  search(clientId: number, query: string): MemorySearchResult;
+  search(clientId: number, query: string): MemorySearchResult; // FTS + cached vectors only (instant)
+  searchAsync(clientId: number, query: string): Promise<MemorySearchResult>; // full hybrid: embeds the query first
   addAsset(a: { clientId: number; orderId: number | null; path: string; mime: string; name: string; role: AssetRole; caption?: string; tags?: string[] }): Asset;
   // Hooks from the app's event route: capture assets, compact episodes, extract facts
   onMessage(message: ChatMessage): void;

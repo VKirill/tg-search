@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiManagerAi } from '../src/main/ai/manager';
 import { createApp } from '../src/main/app';
 import { createManagerAgent } from '../src/main/pipeline/managerAgent';
+import { createOperator } from '../src/main/agent/operator';
 import { Db } from '../src/main/db';
 import { DEFAULT_MANAGER } from '../src/shared/types';
 import { FakeAi, FakeEngine, FakeManager, FakeSpeech, makeMsg } from './fakes';
@@ -54,7 +55,18 @@ function setupManager() {
   })!;
   db.setSettings({ handoffNotifyTo: '@owner' });
   engine.resolveMap.set('@owner', { chatId: 777, title: 'Owner', username: 'owner', kind: 'private', memberCount: 1, description: '', isMember: true });
-  return { db, engine, ai, manager, pipeline, events, acc, project, lead };
+  const operator = createOperator({
+    db,
+    engine,
+    ai,
+    manager,
+    emit,
+    getSettings: () => db.getSettings(),
+    complete: async () => {
+      throw new Error('operator off');
+    },
+  });
+  return { db, engine, ai, manager, pipeline, events, acc, project, lead, operator };
 }
 
 describe('manager agent', () => {
@@ -66,8 +78,8 @@ describe('manager agent', () => {
   });
 
   it('replies after delay and merges bursts', async () => {
-    const { db, engine, pipeline, lead } = setupManager();
-    const agent = createManagerAgent(pipeline);
+    const { db, engine, pipeline, lead, operator } = setupManager();
+    const agent = createManagerAgent({ ...pipeline, operator });
     agent.onIncoming(lead.id);
     agent.onIncoming(lead.id);
     await vi.advanceTimersByTimeAsync(2000);
@@ -77,9 +89,9 @@ describe('manager agent', () => {
   });
 
   it('handoff notifies owner and stops further replies', async () => {
-    const { db, engine, pipeline, lead, manager } = setupManager();
+    const { db, engine, pipeline, lead, manager, operator } = setupManager();
     manager.replyResult = { reply: 'Передаю коллеге', handoff: true, reason: 'Созвон' };
-    const agent = createManagerAgent(pipeline);
+    const agent = createManagerAgent({ ...pipeline, operator });
     agent.onIncoming(lead.id);
     await vi.advanceTimersByTimeAsync(2000);
     expect(db.getLead(lead.id).handoff).toBe(true);
@@ -93,7 +105,7 @@ describe('manager agent', () => {
   });
 
   it('maxReplies triggers handoff', async () => {
-    const { db, pipeline, lead, acc, project } = setupManager();
+    const { db, pipeline, lead, acc, project, operator } = setupManager();
     db.updateProject(project.id, {
       manager: { ...DEFAULT_MANAGER, enabled: true, replyDelaySec: 2, maxReplies: 1 },
     });
@@ -119,7 +131,7 @@ describe('manager agent', () => {
       date: Date.now() - 500,
       auto: true,
     });
-    const agent = createManagerAgent(pipeline);
+    const agent = createManagerAgent({ ...pipeline, operator });
     agent.onIncoming(lead.id);
     await vi.advanceTimersByTimeAsync(2000);
     expect(db.getLead(lead.id).handoffReason).toBe('Лимит ответов ИИ');

@@ -1,3 +1,5 @@
+import type { MemoryStore } from '../memory/types';
+import type { Billing } from '../billing/types';
 import type { ChatMessage, ClientCard, Lead, Project } from '../../shared/types';
 import type { ManagerAi } from '../ai/types';
 import type { Db } from '../db';
@@ -6,8 +8,10 @@ import { sendMessage, sendVoiceMessage, type OutreachDeps } from './outreach';
 import { canSend } from './limiter';
 import { listAuthorizedProjectAccounts } from './accounts';
 import type { DialogTurn } from '../ai/types';
-import { managerServicesContext } from '../ai/manager';
 import type { ManagerTestResult } from '../../shared/types';
+import { createOperator } from '../agent/operator';
+import type { Operator, OperatorResult } from '../agent/types';
+import type { ExecutorRegistry } from '../executors/types';
 
 export interface OrdersHooks {
   handlePostManagerReply(leadId: number, result: ManagerTestResult, lastClientText: string): Promise<void>;
@@ -15,7 +19,16 @@ export interface OrdersHooks {
 
 export interface ManagerAgentDeps extends OutreachDeps {
   manager: ManagerAi;
-  orders?: OrdersHooks;
+  operator?: Operator;
+  memory?: MemoryStore; // long-term client memory for the operator's context and tools
+  getBilling?: () => Billing | undefined; // lazy: billing is created after the manager agent
+  orders?: OrdersHooks & {
+    applyManagerIntent?(leadId: number, intent: import('../../shared/types').ManagerOrderIntent): Promise<void>;
+    requestPayment?(orderId: number): Promise<import('../../shared/types').Order>;
+  };
+  dataDir?: string;
+  getSettings?: () => import('../../shared/types').Settings;
+  executors?: ExecutorRegistry;
   crm?: {
     refresh(leadId: number): Promise<ClientCard>;
     generateBrief(leadId: number): Promise<ClientCard>;
@@ -60,6 +73,7 @@ function handoffBodyFromCard(card: ClientCard, briefReady: boolean): string {
 
 export function createManagerAgent(deps: ManagerAgentDeps) {
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
+  let operatorInstance: Operator | null = deps.operator ?? null;
 
   function clearLeadTimer(leadId: number) {
     const t = timers.get(leadId);
@@ -94,6 +108,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     reason: string,
     bridgeReply: string,
     history: DialogTurn[],
+    summaryOverride?: string,
   ) {
     const updated = deps.db.updateLead(lead.id, { handoff: true, handoffReason: reason });
     deps.emit({ type: 'lead:update', lead: updated });
@@ -114,10 +129,61 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
 
     const card = deps.db.getCard(lead.id);
     const summary =
-      card.summary.trim() || card.anamnesis.task.trim()
+      summaryOverride?.trim() ||
+      (card.summary.trim() || card.anamnesis.task.trim()
         ? handoffBodyFromCard(card, briefReady)
-        : history.slice(-3).map((t) => `${t.direction === 'in' ? 'Лид' : 'Мы'}: ${t.text}`).join('\n');
+        : history.slice(-3).map((t) => `${t.direction === 'in' ? 'Лид' : 'Мы'}: ${t.text}`).join('\n'));
     await notifyOwner(project, updated, accountId, summary, reason);
+  }
+
+  function getOperator(): Operator {
+    if (!operatorInstance) {
+      operatorInstance = createOperator({
+        db: deps.db,
+        engine: deps.engine,
+        ai: deps.ai,
+        speech: deps.speech,
+        emit: deps.emit,
+        getSettings: deps.getSettings ?? (() => deps.db.getSettings()),
+        manager: deps.manager,
+        dataDir: deps.dataDir,
+        executors: deps.executors,
+        memory: deps.memory,
+        billing: deps.getBilling?.(),
+        orders: deps.orders?.applyManagerIntent
+          ? {
+              applyManagerIntent: deps.orders.applyManagerIntent.bind(deps.orders),
+              requestPayment: deps.orders.requestPayment!,
+            }
+          : undefined,
+        handoff: {
+          doHandoff: async (leadId, reason, summary, bridgeReply) => {
+            const l = deps.db.getLead(leadId);
+            const p = deps.db.getProject(l.projectId);
+            const msgs = deps.db.listMessages(leadId);
+            await doHandoff(p, l, reason, bridgeReply, buildDialogHistory(l, msgs), summary);
+          },
+        },
+      });
+    }
+    return operatorInstance;
+  }
+
+  function operatorToManagerResult(op: OperatorResult): ManagerTestResult {
+    return {
+      reply: op.reply ?? '',
+      handoff: op.handoff,
+      reason: op.reason,
+      ...(op.order !== undefined ? { order: op.order } : {}),
+    };
+  }
+
+  function replyAlreadySent(op: OperatorResult): boolean {
+    return op.steps.some((s) => s.tool === 'reply' && s.ok);
+  }
+
+  function handoffAlreadyDone(op: OperatorResult): boolean {
+    return op.steps.some((s) => s.tool === 'handoff' && s.ok);
   }
 
   async function runReply(leadId: number) {
@@ -141,18 +207,12 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     }
 
     try {
-      const card = deps.db.getCard(leadId);
-      const servicesCtx = managerServicesContext(
-        deps.db.listServices(),
-        deps.db.listOrders(leadId),
-      );
-      const mgrSettings = {
-        ...project.manager,
-        prompt: `${project.manager.prompt}\n\n${servicesCtx}`,
-      };
-      const result = await deps.manager.reply(project, lead, history, mgrSettings, card);
+      const op = await getOperator().turn(leadId);
+      const result = operatorToManagerResult(op);
       if (result.handoff) {
-        await doHandoff(project, lead, result.reason || 'Передача менеджеру', result.reply, history);
+        if (!handoffAlreadyDone(op)) {
+          await doHandoff(project, lead, result.reason || 'Передача менеджеру', result.reply, history);
+        }
         return;
       }
 
@@ -161,7 +221,7 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
         await deps.orders.handlePostManagerReply(leadId, result, lastIn?.text ?? '');
       }
 
-      if (!result.reply.trim()) return;
+      if (!result.reply.trim() || replyAlreadySent(op)) return;
 
       const now = Date.now();
       const accountId = lead.accountId ?? listAuthorizedProjectAccounts(deps.db, project.accountIds)[0]?.id;
@@ -223,5 +283,5 @@ export function createManagerAgent(deps: ManagerAgentDeps) {
     for (const id of timers.keys()) clearLeadTimer(id);
   }
 
-  return { onIncoming, stop };
+  return { onIncoming, stop, getOperator };
 }

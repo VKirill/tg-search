@@ -74,6 +74,7 @@ app.whenReady().then(async () => {
     falKey: s.falKey || process.env.FAL_KEY || '',
     glmApiKey: s.glmApiKey || process.env.ZAI_API_KEY || '',
     deepseekApiKey: s.deepseekApiKey || process.env.DEEPSEEK_API_KEY || '',
+    tavilyApiKey: s.tavilyApiKey || process.env.TAVILY_API_KEY || '',
   });
 
   const emit = (e: AppEvent) => {
