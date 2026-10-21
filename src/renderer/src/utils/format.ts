@@ -1,4 +1,4 @@
-import type { DealStage } from '../../../shared/types';
+import type { DealStage, OrderStatus, ServiceKind } from '../../../shared/types';
 
 const MONTHS = ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
 
@@ -130,4 +130,38 @@ export function foundByLabel(foundBy: string | null): string {
   if (foundBy === 'member') return 'участник';
   if (foundBy === 'csv') return 'CSV';
   return 'поиск';
+}
+
+export function orderStatusLabel(status: OrderStatus): string {
+  const map: Record<OrderStatus, string> = {
+    collecting: 'Сбор хотелок',
+    quoted: 'Цена названа',
+    awaiting_payment: 'Ждёт оплаты',
+    paid: 'Оплачен',
+    in_progress: 'В работе',
+    delivered: 'Сдан',
+    revision: 'Правки',
+    done: 'Готово',
+    cancelled: 'Отменён',
+    failed: 'Ошибка',
+  };
+  return map[status] ?? status;
+}
+
+export function serviceKindLabel(kind: ServiceKind): string {
+  const map: Record<ServiceKind, string> = {
+    homework: 'Домашка',
+    marketplace_card: 'Карточка МП',
+    image_gen: 'Нейрофото',
+    copywriting: 'Тексты',
+  };
+  return map[kind] ?? kind;
+}
+
+export function formatRub(n: number): string {
+  return `${n.toLocaleString('ru-RU')} ₽`;
+}
+
+export function formatPriceRange(min: number, max: number): string {
+  return `${min.toLocaleString('ru-RU')}–${max.toLocaleString('ru-RU')} ₽`;
 }

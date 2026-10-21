@@ -228,3 +228,14 @@ export function IconAccounts(p: IconProps) {
     </StrokeIcon>
   );
 }
+
+export function IconServices(p: IconProps) {
+  return (
+    <StrokeIcon {...p}>
+      <rect x="4" y="5" width="7" height="7" rx="1.5" />
+      <rect x="13" y="5" width="7" height="7" rx="1.5" />
+      <rect x="4" y="14" width="7" height="6" rx="1.5" />
+      <path d="M13 17h7M16.5 14v6" />
+    </StrokeIcon>
+  );
+}
