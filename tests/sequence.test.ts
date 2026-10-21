@@ -149,6 +149,7 @@ describe('chain lifecycle', () => {
   it('autopilot uses sequence step 0', async () => {
     const { db, engine, pipeline, project } = setup();
     db.updateProject(project.id, {
+      agent: '',
       autopilot: { enabled: true, aiReply: true, minScore: 50, replyTarget: 'dm' },
     });
     addLead(db, project.id, 15);

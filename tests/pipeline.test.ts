@@ -152,6 +152,7 @@ describe('autopilot', () => {
   it('replies only to leads at or above minScore', async () => {
     const { db, engine, ai, pipeline, project, acc } = setupPipeline();
     db.updateProject(project.id, {
+      agent: '',
       autopilot: { enabled: true, aiReply: true, minScore: 80, replyTarget: 'dm' },
     });
     const low = db.addLead({
@@ -197,6 +198,7 @@ describe('autopilot', () => {
     const { db, engine, pipeline, project, acc } = setupPipeline();
     db.updateAccount(acc.id, { dailyLimit: 1, pauseSec: 0 });
     db.updateProject(project.id, {
+      agent: '',
       autopilot: { enabled: true, aiReply: true, minScore: 50, replyTarget: 'dm' },
     });
     for (let i = 0; i < 2; i++) {

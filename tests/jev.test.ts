@@ -28,6 +28,7 @@ const project = (): Project => ({
   accountIds: [],
   materials: [],
   keywords: [],
+  agent: '',
   autopilot: DEFAULT_AUTOPILOT,
   createdAt: 0,
 });

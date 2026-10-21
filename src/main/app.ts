@@ -480,6 +480,23 @@ export function createApp(deps: AppDeps): AppHandlers {
       payments: async (clientId) => billing!.listPayments(clientId),
       checkPayment: async (paymentId) => billing!.check(paymentId),
     },
+    agents: {
+      list: notYet('agents worker'),
+      save: notYet('agents worker'),
+      remove: notYet('agents worker'),
+      rules: notYet('agents worker'),
+      saveRules: notYet('agents worker'),
+    },
+    skills: {
+      list: notYet('skills worker'),
+      save: notYet('skills worker'),
+      remove: notYet('skills worker'),
+      approve: notYet('skills worker'),
+    },
+    approvals: {
+      list: notYet('agents worker'),
+      decide: notYet('agents worker'),
+    },
     agent: {
       trace: async (leadId, limit) => listAgentSteps(db, leadId, limit ?? 100),
     },

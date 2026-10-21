@@ -139,7 +139,7 @@ describe('createDossier', () => {
       instructions: '',
       model: '',
       previewEnabled: false,
-      revisions: 1,
+      revisions: 1, agent: '',
     });
     const order: Order = db.createOrder(lead.id, service.id, 'Лендинг для студии');
     const withPrice = db.updateOrder(order.id, { status: 'quoted', price: 25000 });

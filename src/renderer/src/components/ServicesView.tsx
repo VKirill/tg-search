@@ -23,7 +23,7 @@ function emptyService(): Draft {
     instructions: '',
     model: '',
     previewEnabled: true,
-    revisions: 2,
+    revisions: 2, agent: '',
   };
 }
 

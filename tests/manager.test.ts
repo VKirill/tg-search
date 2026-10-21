@@ -195,6 +195,7 @@ describe('OpenAiManagerAi', () => {
       accountIds: [],
       materials: [],
       keywords: [],
+      agent: '',
       autopilot: { enabled: false, refreshSources: false, scanIntervalMin: 60, freshnessHours: 24, workingListSize: 10, aiReply: false, replyTarget: 'dm' as const, replyInNewSources: false, joinIfNeeded: false, minScore: 80, lastRunAt: null, nextRunAt: null },
       createdAt: 0,
     };

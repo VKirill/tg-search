@@ -7,6 +7,8 @@ import type {
   Asset,
   AutopilotSettings,
   Broadcast,
+  AgentDef,
+  Approval,
   Category,
   Client,
   MemoryEpisode,
@@ -26,6 +28,7 @@ import type {
   Project,
   ProjectInput,
   Settings,
+  SkillDef,
   StatsReport,
   Source,
   Subscription,
@@ -154,6 +157,7 @@ const projects: Project[] = [
       maxReplies: 12,
       voiceReplies: 'mirror',
     },
+    agent: '',
     autopilot: makeAutopilot({ enabled: true, scanIntervalMin: 60, aiReply: true, minScore: 85 }),
     createdAt: now - 30 * 86400_000,
   },
@@ -171,6 +175,7 @@ const projects: Project[] = [
     keywords: ['ищу маркетолога'],
     sequence: [],
     manager: { ...DEFAULT_MANAGER, enabled: false },
+    agent: '',
     autopilot: makeAutopilot(),
     createdAt: now - 20 * 86400_000,
   },
@@ -188,6 +193,7 @@ const projects: Project[] = [
     keywords: ['партнёрство разработка'],
     sequence: [],
     manager: DEFAULT_MANAGER,
+    agent: '',
     autopilot: makeAutopilot(),
     createdAt: now - 15 * 86400_000,
   },
@@ -545,10 +551,10 @@ function mockStats(period: StatsReport['period']): StatsReport {
 }
 
 const mockServices: Service[] = [
-  { id: 1, kind: 'homework', name: 'Домашнее задание по фото', categoryId: 4, enabled: true, priceMin: 300, priceMax: 1500, instructions: 'Решаем задачи по фото пошагово, с самопроверкой.', model: '', previewEnabled: false, revisions: 1 },
-  { id: 2, kind: 'marketplace_card', name: 'Карточка товара для маркетплейса', categoryId: 5, enabled: true, priceMin: 500, priceMax: 3000, instructions: 'SEO-название, описание, характеристики, инфографика 1–5 слайдов.', model: '', previewEnabled: true, revisions: 2 },
-  { id: 3, kind: 'image_gen', name: 'Нейрофото и генерация изображений', categoryId: 3, enabled: true, priceMin: 500, priceMax: 2500, instructions: 'Нейрофотосессии и обложки; фото клиента только с согласия.', model: '', previewEnabled: true, revisions: 1 },
-  { id: 4, kind: 'copywriting', name: 'Тексты и контент-план', categoryId: 6, enabled: true, priceMin: 300, priceMax: 3000, instructions: 'Посты и контент-план без брифа: допущения называем явно.', model: '', previewEnabled: true, revisions: 2 },
+  { id: 1, kind: 'homework', name: 'Домашнее задание по фото', categoryId: 4, enabled: true, priceMin: 300, priceMax: 1500, instructions: 'Решаем задачи по фото пошагово, с самопроверкой.', model: '', previewEnabled: false, revisions: 1, agent: '' },
+  { id: 2, kind: 'marketplace_card', name: 'Карточка товара для маркетплейса', categoryId: 5, enabled: true, priceMin: 500, priceMax: 3000, instructions: 'SEO-название, описание, характеристики, инфографика 1–5 слайдов.', model: '', previewEnabled: true, revisions: 2, agent: '' },
+  { id: 3, kind: 'image_gen', name: 'Нейрофото и генерация изображений', categoryId: 3, enabled: true, priceMin: 500, priceMax: 2500, instructions: 'Нейрофотосессии и обложки; фото клиента только с согласия.', model: '', previewEnabled: true, revisions: 1, agent: '' },
+  { id: 4, kind: 'copywriting', name: 'Тексты и контент-план', categoryId: 6, enabled: true, priceMin: 300, priceMax: 3000, instructions: 'Посты и контент-план без брифа: допущения называем явно.', model: '', previewEnabled: true, revisions: 2, agent: '' },
 ];
 
 const MOCK_IMG = {
@@ -897,6 +903,23 @@ function mockOrderPatch(id: number, patch: Partial<Order>): Order {
   return copy;
 }
 
+const mockAgents: AgentDef[] = [
+  { name: 'manager', description: 'Ведёт диалог с клиентом от имени помощника владельца, продаёт услуги и подписку', mode: 'primary', model: '', temperature: 0.4, steps: 8, permission: { '*': 'allow', request_payment: 'ask' }, prompt: 'Ты — помощник Кирилла…', builtIn: true },
+  { name: 'researcher', description: 'Поиск в интернете и исследование со списком источников', mode: 'subagent', model: 'deepseek', temperature: 0.2, steps: 12, permission: { web_search: 'allow', fetch_url: 'allow', '*': 'deny' }, prompt: 'Ты — исследователь…', builtIn: true },
+];
+
+let mockRules = '# Правила компании\n\n- Пишем коротко и по-человечески.\n- Не обещаем того, чего нет в каталоге.\n- Цены — только внутри вилки услуги.';
+
+const mockSkills: SkillDef[] = [
+  { name: 'wb-card', description: 'Карточка товара для Wildberries: SEO, характеристики, инфографика без запрещённых элементов', body: '…', status: 'active', source: 'builtin', uses: 14, updatedAt: now },
+  { name: 'content-plan-week', description: 'Контент-план на неделю для малого бизнеса по нише и ссылкам', body: '…', status: 'active', source: 'owner', uses: 6, updatedAt: now },
+  { name: 'supplier-search', description: 'Поиск поставщиков по городу и категории со сравнением цен', body: '…', status: 'draft', source: 'learned', uses: 0, updatedAt: now },
+];
+
+const mockApprovals: Approval[] = [
+  { id: 1, leadId: 1, agent: 'manager', tool: 'request_payment', input: '{"orderId":3}', summary: 'Выставить счёт 1500 ₽ за нейрофотосессию (10 образов)', status: 'pending', createdAt: now - 600_000, decidedAt: null },
+];
+
 const mockChats: ChatSummary[] = [
   { chatId: -1001, title: 'Фриланс · заказы на разработку', username: 'freelance_dev_orders', kind: 'supergroup', memberCount: 18420, isMember: true, unreadCount: 12, lastText: 'Ищу разработчика на Telegram-бота для записи клиентов, бюджет 40–60к', lastDate: now - 4 * 60_000 },
   { chatId: -1002, title: 'Предприниматели · нетворкинг', username: 'biz_networking', kind: 'supergroup', memberCount: 25539, isMember: true, unreadCount: 3, lastText: 'Кто делал интеграцию amoCRM с сайтом? Поделитесь контактом', lastDate: now - 35 * 60_000 },
@@ -1076,7 +1099,7 @@ export function createMockApi(): Api {
         return projects.map((p) => ({ ...p, autopilot: { ...p.autopilot }, manager: { ...p.manager }, sequence: [...p.sequence] }));
       },
       async create(input) {
-        const p: Project = { id: nid(), ...input, autopilot: makeAutopilot(), createdAt: Date.now() };
+        const p: Project = { id: nid(), ...input, agent: input.agent ?? '', autopilot: makeAutopilot(), createdAt: Date.now() };
         projects.push(p);
         emit({ type: 'project:update', project: { ...p } });
         return { ...p };
@@ -1618,6 +1641,59 @@ export function createMockApi(): Api {
         }
         emit({ type: 'billing:update', clientId: p.clientId });
         return { ...p };
+      },
+    },
+    agents: {
+      async list() {
+        return mockAgents.map((a) => ({ ...a, permission: { ...a.permission } }));
+      },
+      async save(def) {
+        const i = mockAgents.findIndex((a) => a.name === def.name);
+        if (i >= 0) mockAgents[i] = { ...def };
+        else mockAgents.push({ ...def });
+        return { ...def };
+      },
+      async remove(name) {
+        const i = mockAgents.findIndex((a) => a.name === name && !a.builtIn);
+        if (i >= 0) mockAgents.splice(i, 1);
+      },
+      async rules() {
+        return mockRules;
+      },
+      async saveRules(text) {
+        mockRules = text;
+        return text;
+      },
+    },
+    skills: {
+      async list() {
+        return mockSkills.map((x) => ({ ...x }));
+      },
+      async save(skill) {
+        const v = { ...skill, uses: 0, updatedAt: Date.now() };
+        const i = mockSkills.findIndex((x) => x.name === skill.name);
+        if (i >= 0) mockSkills[i] = v;
+        else mockSkills.push(v);
+        return { ...v };
+      },
+      async remove(name) {
+        const i = mockSkills.findIndex((x) => x.name === name);
+        if (i >= 0) mockSkills.splice(i, 1);
+      },
+      async approve(name) {
+        const v = mockSkills.find((x) => x.name === name)!;
+        v.status = 'active';
+        return { ...v };
+      },
+    },
+    approvals: {
+      async list(status) {
+        return mockApprovals.filter((a) => !status || a.status === status).map((a) => ({ ...a }));
+      },
+      async decide(id, approve) {
+        const a = mockApprovals.find((x) => x.id === id)!;
+        Object.assign(a, { status: approve ? 'approved' : 'denied', decidedAt: Date.now() });
+        return { ...a };
       },
     },
     agent: {

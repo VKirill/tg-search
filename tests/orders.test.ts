@@ -45,6 +45,7 @@ function makeExecutors(runFn: Executor['run'], previewFn?: Executor['preview']):
     image_gen: base,
     copywriting: base,
     assistant: base,
+    agent: base,
   };
 }
 
@@ -225,7 +226,7 @@ describe('orders pipeline', () => {
 
   it('revision limit enforced', async () => {
     const { db, lead, service } = setupDb();
-    db.updateService(service.id, { revisions: 0 });
+    db.updateService(service.id, { revisions: 0, agent: '' });
     const engine = new FakeEngine();
     const payments = new FakePayments();
     const { orders } = ordersPipeline(

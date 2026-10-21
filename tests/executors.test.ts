@@ -34,7 +34,7 @@ function sampleService(over: Partial<Service> = {}): Service {
     instructions: 'Инструкция для оценки',
     model: '',
     previewEnabled: true,
-    revisions: 1,
+    revisions: 1, agent: '',
     ...over,
   };
 }

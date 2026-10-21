@@ -13,5 +13,13 @@ export function createExecutors(getSettings: () => Settings): ExecutorRegistry {
     image_gen: createImageGenExecutor(getSettings),
     copywriting: createCopywritingExecutor(getSettings),
     assistant: createAssistantExecutor(getSettings),
+    agent: notConnected('agent'), // generic executor by an agent file: agents worker
   };
+}
+
+function notConnected(kind: string) {
+  const fail = async (): Promise<never> => {
+    throw new Error(`Исполнитель «${kind}» ещё не подключён`);
+  };
+  return { estimate: fail, preview: fail, run: fail };
 }

@@ -65,7 +65,7 @@ function setupDb() {
     instructions: 'test',
     model: '',
     previewEnabled: true,
-    revisions: 1,
+    revisions: 1, agent: '',
   });
   return { db, engine, ai, manager, emit, events, acc, project, lead, service };
 }
@@ -226,6 +226,7 @@ describe('operator agent', () => {
           preview: async () => ({ text: 'план', files: [] }),
           run: async () => ({ text: 'Результат исследования', files: [] }),
         },
+        agent: { estimate: async () => ({ price: 500, reason: '' }), preview: async () => ({ text: '', files: [] }), run: async () => ({ text: '', files: [] }) },
       },
       getSettings: () => db.getSettings(),
       complete: scriptedLlm([

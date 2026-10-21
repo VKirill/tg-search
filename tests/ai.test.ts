@@ -48,6 +48,7 @@ const sampleProject = (): Project => ({
   accountIds: [1],
   materials: [],
   keywords: [],
+  agent: '',
   autopilot: DEFAULT_AUTOPILOT,
   createdAt: 0,
 });

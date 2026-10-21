@@ -284,6 +284,7 @@ describe('OpenAiManagerAi card context', () => {
       accountIds: [],
       materials: [],
       keywords: [],
+      agent: '',
       autopilot: {
         enabled: false,
         refreshSources: false,

@@ -46,6 +46,7 @@ export function ensureAgentSchema(raw: DatabaseSync, db?: Db): void {
       model: ASSISTANT_SERVICE.model,
       previewEnabled: ASSISTANT_SERVICE.previewEnabled,
       revisions: ASSISTANT_SERVICE.revisions,
+      agent: '',
     });
   }
 }

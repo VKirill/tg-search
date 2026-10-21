@@ -41,6 +41,7 @@ function makeExecutors(runFn: Executor['run']): ExecutorRegistry {
     image_gen: base,
     copywriting: base,
     assistant: base,
+    agent: base,
   };
 }
 

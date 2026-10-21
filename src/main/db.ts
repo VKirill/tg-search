@@ -147,6 +147,7 @@ function toProject(r: Row): Project {
     geo: parse(r.geo, []), languages: parse(r.languages, []), accountIds: parse(r.account_ids, []),
     materials: parse(r.materials, []), keywords: parse(r.keywords, []), sequence: parse(r.sequence, []),
     manager: { ...DEFAULT_MANAGER, ...parse<Partial<ManagerSettings>>(r.manager, {}) },
+    agent: r.agent ?? '',
     autopilot: { ...DEFAULT_AUTOPILOT, ...parse<Partial<AutopilotSettings>>(r.autopilot, {}) },
     createdAt: r.created_at,
   };
@@ -293,6 +294,9 @@ export class Db {
     if (!projectCols.includes('criteria')) this.raw.exec("ALTER TABLE projects ADD COLUMN criteria TEXT NOT NULL DEFAULT ''");
     if (!projectCols.includes('sequence')) this.raw.exec("ALTER TABLE projects ADD COLUMN sequence TEXT NOT NULL DEFAULT '[]'");
     if (!projectCols.includes('manager')) this.raw.exec("ALTER TABLE projects ADD COLUMN manager TEXT NOT NULL DEFAULT '{}'");
+    if (!projectCols.includes('agent')) this.raw.exec("ALTER TABLE projects ADD COLUMN agent TEXT NOT NULL DEFAULT ''");
+    const serviceCols = this.all('PRAGMA table_info(services)').map((c) => c.name);
+    if (!serviceCols.includes('agent')) this.raw.exec("ALTER TABLE services ADD COLUMN agent TEXT NOT NULL DEFAULT ''");
     const messageCols = this.all('PRAGMA table_info(messages)').map((c) => c.name);
     if (!messageCols.includes('kind')) {
       this.raw.exec(`ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
@@ -388,10 +392,10 @@ export class Db {
   }
   createProject(p: ProjectInput): Project {
     const res = this.run(
-      `INSERT INTO projects(name, task, target, offer, criteria, geo, languages, account_ids, materials, keywords, sequence, manager, autopilot, created_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects(name, task, target, offer, criteria, geo, languages, account_ids, materials, keywords, sequence, manager, agent, autopilot, created_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.name, p.task, p.target, p.offer, p.criteria ?? '', json(p.geo), json(p.languages), json(p.accountIds), json(p.materials),
-      json(p.keywords), json(p.sequence ?? []), json({ ...DEFAULT_MANAGER, ...p.manager }), json(DEFAULT_AUTOPILOT), Date.now(),
+      json(p.keywords), json(p.sequence ?? []), json({ ...DEFAULT_MANAGER, ...p.manager }), p.agent ?? '', json(DEFAULT_AUTOPILOT), Date.now(),
     );
     return this.getProject(Number(res.lastInsertRowid));
   }
@@ -400,9 +404,9 @@ export class Db {
     const next = { ...cur, ...patch, autopilot: { ...cur.autopilot, ...patch.autopilot } };
     this.run(
       `UPDATE projects SET name = ?, task = ?, target = ?, offer = ?, criteria = ?, geo = ?, languages = ?, account_ids = ?,
-       materials = ?, keywords = ?, sequence = ?, manager = ?, autopilot = ? WHERE id = ?`,
+       materials = ?, keywords = ?, sequence = ?, manager = ?, agent = ?, autopilot = ? WHERE id = ?`,
       next.name, next.task, next.target, next.offer, next.criteria, json(next.geo), json(next.languages), json(next.accountIds),
-      json(next.materials), json(next.keywords), json(next.sequence), json(next.manager), json(next.autopilot), id,
+      json(next.materials), json(next.keywords), json(next.sequence), json(next.manager), next.agent ?? '', json(next.autopilot), id,
     );
     return this.getProject(id);
   }
@@ -679,9 +683,9 @@ export class Db {
   }
   createService(v: Omit<Service, 'id'>): Service {
     const res = this.run(
-      `INSERT INTO services(kind, name, category_id, enabled, price_min, price_max, instructions, model, preview_enabled, revisions)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions,
+      `INSERT INTO services(kind, name, category_id, enabled, price_min, price_max, instructions, model, preview_enabled, revisions, agent)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions, v.agent ?? '',
     );
     return this.getService(Number(res.lastInsertRowid));
   }
@@ -689,8 +693,8 @@ export class Db {
     const v = { ...this.getService(id), ...patch };
     this.run(
       `UPDATE services SET kind = ?, name = ?, category_id = ?, enabled = ?, price_min = ?, price_max = ?, instructions = ?, model = ?,
-       preview_enabled = ?, revisions = ? WHERE id = ?`,
-      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions, id,
+       preview_enabled = ?, revisions = ?, agent = ? WHERE id = ?`,
+      v.kind, v.name, v.categoryId, Number(v.enabled), v.priceMin, v.priceMax, v.instructions, v.model, Number(v.previewEnabled), v.revisions, v.agent ?? '', id,
     );
     return this.getService(id);
   }
@@ -726,7 +730,7 @@ export class Db {
 function toService(r: Row): Service {
   return {
     id: r.id, kind: r.kind, name: r.name, categoryId: r.category_id, enabled: !!r.enabled, priceMin: r.price_min, priceMax: r.price_max,
-    instructions: r.instructions, model: r.model, previewEnabled: !!r.preview_enabled, revisions: r.revisions,
+    instructions: r.instructions, model: r.model, previewEnabled: !!r.preview_enabled, revisions: r.revisions, agent: r.agent ?? '',
   };
 }
 

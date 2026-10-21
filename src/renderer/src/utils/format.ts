@@ -162,6 +162,7 @@ export function serviceKindLabel(kind: ServiceKind): string {
     image_gen: 'Нейрофото',
     copywriting: 'Тексты',
     assistant: 'Ассистент',
+    agent: 'Агент',
   };
   return map[kind] ?? kind;
 }

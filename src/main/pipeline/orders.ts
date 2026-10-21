@@ -380,5 +380,6 @@ export function stubExecutorRegistry(): ExecutorRegistry {
     image_gen: stub,
     copywriting: stub,
     assistant: stub,
+    agent: stub,
   };
 }

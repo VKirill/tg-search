@@ -74,6 +74,7 @@ export interface Project {
   keywords: string[];
   sequence: SequenceStep[];
   manager: ManagerSettings;
+  agent: string; // primary agent for this topic's client sessions ('' = 'manager')
   autopilot: AutopilotSettings;
   createdAt: number;
 }
@@ -81,7 +82,7 @@ export interface Project {
 export type ProjectInput = Pick<
   Project,
   'name' | 'task' | 'target' | 'offer' | 'criteria' | 'geo' | 'languages' | 'accountIds' | 'materials' | 'keywords' | 'sequence' | 'manager'
->;
+> & { agent?: string };
 
 export type AccountStatus = 'authorized' | 'wait_code' | 'wait_password' | 'logged_out' | 'error';
 
@@ -312,7 +313,7 @@ export interface AgentStep {
 }
 
 // «Исполнители»: services the AI manager sells and performs itself end to end.
-export type ServiceKind = 'homework' | 'marketplace_card' | 'image_gen' | 'copywriting' | 'assistant'; // assistant: web search, research, errands
+export type ServiceKind = 'homework' | 'marketplace_card' | 'image_gen' | 'copywriting' | 'assistant' | 'agent'; // assistant: web research; agent: any task by an agent file (Service.agent)
 
 export interface Service {
   id: number;
@@ -326,6 +327,46 @@ export interface Service {
   model: string; // LLM for this executor ('' = executor default)
   previewEnabled: boolean; // a free sample (covers, one image, plan outline) before payment to sell the order
   revisions: number; // free revisions after delivery
+  agent: string; // for kind 'agent': the subagent file that performs it ('' otherwise)
+}
+
+// Agents in the opencode format (docs/architecture-agent.md): every client session runs under a primary agent;
+// subagents perform delegated work. Files: userData/agents/<name>.md (front matter + system prompt body).
+export type ToolPermission = 'allow' | 'ask' | 'deny'; // ask: the owner approves in «Согласования» before it runs
+
+export interface AgentDef {
+  name: string; // file name without .md
+  description: string; // what it does and when to use it (the router and the primary agent read this)
+  mode: 'primary' | 'subagent';
+  model: string; // 'glm' | 'deepseek' | '<provider>/<model>' | '' (= operator provider switch)
+  temperature: number | null;
+  steps: number; // max tool iterations per turn; at the limit the agent summarizes what is left
+  permission: Record<string, ToolPermission>; // tool name or glob ('*', 'order_*') → permission; last match wins
+  prompt: string; // the body: role, how to talk, what to do and never do
+  builtIn: boolean; // shipped default (editable; «Сбросить» restores it)
+}
+
+// Skills in the SKILL.md format (opencode / Claude Code compatible): loaded on demand with load_skill.
+export interface SkillDef {
+  name: string; // lowercase-hyphen, matches the folder
+  description: string; // when to use it (shown to the agent and to the Jev router)
+  body: string; // the instructions
+  status: 'active' | 'draft' | 'disabled'; // drafts (learned from repeated tasks) wait for the owner's approval
+  source: 'builtin' | 'owner' | 'learned';
+  uses: number;
+  updatedAt: number;
+}
+
+export interface Approval {
+  id: number;
+  leadId: number;
+  agent: string;
+  tool: string;
+  input: string; // JSON arguments
+  summary: string; // human-readable: what the agent wants to do and why
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: number;
+  decidedAt: number | null;
 }
 
 export type OrderStatus =
@@ -502,6 +543,7 @@ export type AppEvent =
   | { type: 'memory:update'; clientId: number }
   | { type: 'billing:update'; clientId: number }
   | { type: 'agent:step'; step: AgentStep }
+  | { type: 'approval:update'; approval: Approval }
   | { type: 'job'; projectId: number; stage: string; done: boolean; error?: string };
 
 // The API exposed to the renderer as window.api (see src/preload/index.ts).
@@ -630,6 +672,23 @@ export interface Api {
   };
   agent: {
     trace(leadId: number, limit?: number): Promise<AgentStep[]>;
+  };
+  agents: {
+    list(): Promise<AgentDef[]>;
+    save(def: AgentDef): Promise<AgentDef>;
+    remove(name: string): Promise<void>; // built-ins are reset to default instead
+    rules(): Promise<string>; // RULES.md: company rules every agent follows (AGENTS.md analog)
+    saveRules(text: string): Promise<string>;
+  };
+  skills: {
+    list(): Promise<SkillDef[]>;
+    save(skill: Omit<SkillDef, 'uses' | 'updatedAt'>): Promise<SkillDef>;
+    remove(name: string): Promise<void>;
+    approve(name: string): Promise<SkillDef>; // draft → active
+  };
+  approvals: {
+    list(status?: Approval['status']): Promise<Approval[]>;
+    decide(id: number, approve: boolean): Promise<Approval>; // approved → the tool runs and the agent continues the dialog
   };
   services: {
     list(): Promise<Service[]>;
