@@ -37,7 +37,8 @@ const EFFORT: Record<ModelRole, string[]> = {
 // can't see or control, so they are never used.
 export const isFreeModel = (m: { providerID: string; id: string }) => m.providerID === 'openrouter' && m.id.endsWith(':free');
 
-// The owner's subscriptions (Z.ai, OpenLux, 9router…): no price per token, so they share the first line with free ones
+// The owner's subscriptions (Z.ai, OpenLux, 9router…): no price per token, so the ticked ones share the first line
+// with free models
 export const isSubscriptionModel = (m: { providerID: string; costIn: number; costOut: number }) =>
   m.providerID !== 'openrouter' && !m.costIn && !m.costOut;
 
@@ -94,10 +95,11 @@ export interface RouteOptions {
   poolOrder?: string[]; // refs of the first line as Jev ranked them for this very task
 }
 
-// The first line for a job — subscriptions and (if allowed) free models that can do it, not resting — best first by
-// their profiles. Jev re-orders the top of this list per task.
+// The first line for a job — ticked subscriptions (and the main model) and, if allowed, free models that can do it,
+// not resting — best first by their profiles. Jev re-orders the top of this list per task.
 export function poolModels(
   catalog: CatalogModel[],
+  choice: { main: string; helpers: string[] },
   role: ModelRole,
   need: { tools?: boolean; vision?: boolean } = {},
   opts: RouteOptions = {},
@@ -105,14 +107,16 @@ export function poolModels(
   if (role === 'chat') return [];
   const wantsVision = need.vision || role === 'vision';
   const cooling = opts.cooling ?? (() => false);
+  const ticked = new Set([choice.main, ...choice.helpers]); // the owner allowed only these of the subscriptions
   return rankPool(
-    catalog.filter((m) => m.enabled && (!need.tools || m.tools) && (!wantsVision || m.vision) && (isSubscriptionModel(m) || (opts.useFree && isFreeModel(m)))),
+    catalog.filter((m) => m.enabled && (!need.tools || m.tools) && (!wantsVision || m.vision)
+      && ((isSubscriptionModel(m) && ticked.has(refString(m))) || (opts.useFree && isFreeModel(m)))),
     role, opts.needs?.length ? opts.needs : ROLE_NEEDS[role], opts.profile ?? (() => undefined),
   ).filter((m) => !cooling(refString(m)));
 }
 
 // Every model that can do the job, in the order to try them. Client chat stays on the main model (the owner's
-// choice); helper jobs try the subscriptions and free models that fit the job best, then the ticked priced ones —
+// choice); helper jobs try the ticked subscriptions and free models that fit the job best, then the ticked priced ones —
 // cheapest for quick jobs, strongest for hard ones.
 export function rankModels(
   catalog: CatalogModel[],
@@ -133,7 +137,7 @@ export function rankModels(
   else paid = [...ticked].sort((a, b) => price(a) - price(b)); // quick jobs and vision: the cheapest first
   const cooling = opts.cooling ?? (() => false);
   // first line: a few of the pool (Jev's order when it ranked them), so a priced model is always within the attempts
-  let pool = poolModels(catalog, role, need, opts);
+  let pool = poolModels(catalog, choice, role, need, opts);
   if (opts.poolOrder) {
     const pos = new Map(opts.poolOrder.map((r, i) => [r, i]));
     pool = [...pool].sort((a, b) => (pos.get(refString(a)) ?? 1e9) - (pos.get(refString(b)) ?? 1e9));

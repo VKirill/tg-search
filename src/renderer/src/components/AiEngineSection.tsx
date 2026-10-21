@@ -19,8 +19,6 @@ const KNOWN: Record<string, string> = { openrouter: 'OpenRouter', deepseek: 'Dee
 const plural = (n: number, one: string, few: string, many: string) =>
   n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
 const modelsLabel = (n: number) => `${n} ${plural(n, 'модель', 'модели', 'моделей')}`;
-// subscriptions (no price per token) take part in routing by themselves, like free models
-const isSubscription = (m: AiModel) => m.providerID !== 'openrouter' && !m.costIn && !m.costOut;
 const contextLabel = (n: number) => (n >= 1_000_000 ? `${Math.round(n / 100_000) / 10}M` : `${Math.round(n / 1000)}K`);
 
 // «Gemini 4 Argon (OpenLux)» inside the OpenLux group reads as «Gemini 4 Argon»
@@ -166,9 +164,9 @@ export function AiEngineSection() {
       <section className="settings-card">
         <h2 className="settings-card__title">Вспомогательные модели</h2>
         <p className="field-hint">
-          Приложение само выбирает, кому что поручить и насколько думать. Первыми идут модели по подписке (без цены за токены) и бесплатные:
-          задача уходит той, чьи сильные стороны по описанию совпадают с нуждами агента. Отмеченные платные — запасные: сложное — самой сильной,
-          простое — самой дешёвой.
+          Приложение само выбирает, кому что поручить и насколько думать. Работу получают только отмеченные модели и бесплатные OpenRouter.
+          Первыми идут отмеченные подписочные (без цены за токены) и бесплатные: Jev отдаёт задачу той, чьё описание лучше подходит под неё.
+          Отмеченные платные — запасные: сложное — самой сильной, простое — самой дешёвой.
         </p>
         {freeCount > 0 && (
           <label className="ai-free">
@@ -203,7 +201,7 @@ export function AiEngineSection() {
                   <ul className="ai-models">
                     {list.slice(0, 300).map((m) => {
                       const isMain = m.ref === view?.main;
-                      const auto = (m.free && !!view?.useFree) || isSubscription(m);
+                      const auto = m.free && !!view?.useFree;
                       const checked = isMain || auto || !!view?.helpers.includes(m.ref);
                       return (
                         <li key={m.ref}>

@@ -181,7 +181,7 @@ export function createAiEngine(deps: {
   async function candidates(role: ModelRole, need: { tools?: boolean; vision?: boolean }, needs?: Skill[], task?: string): Promise<ModelRef[]> {
     const opts = routeOpts(needs);
     let poolOrder: string[] | undefined;
-    const pool = task && deps.getSettings().jevApiKey.trim() ? poolModels(catalog, role, need, opts).slice(0, 10) : [];
+    const pool = task && deps.getSettings().jevApiKey.trim() ? poolModels(catalog, choice(), role, need, opts).slice(0, 10) : [];
     if (pool.length > 1) {
       try {
         const ranked = await jevRankModels(deps.getSettings, task!, needs?.length ? needs : ROLE_NEEDS[role], pool.map((m) => ({ ref: refString(m), text: modelText(m) })));
@@ -325,7 +325,7 @@ export function createAiEngine(deps: {
       const needs = agentNeeds(agentName) ?? [];
       const need = { tools: true };
       const opts = routeOpts(needs);
-      const pool = poolModels(catalog, role, need, opts).slice(0, 10);
+      const pool = poolModels(catalog, choice(), role, need, opts).slice(0, 10);
       const byRef = new Map(catalog.map((m) => [refString(m), m]));
       let ranked: { ref: string; p: number | null }[] = pool.map((m) => ({ ref: refString(m), p: null }));
       if (pool.length > 1 && deps.getSettings().jevApiKey.trim()) {

@@ -120,4 +120,12 @@ describe('model routing', () => {
     expect(twin('grok-4.7', 'Grok 4.7 (OpenLux)')).toBe('x-ai/grok-4.7');
     expect(twin('qwen3.8-flash', 'Qwen 3.8 Flash')).toBeNull();
   });
+
+  it('a subscription model works only when ticked; the main model counts as ticked', () => {
+    const withSub = [...catalog, m('openlux-gpt', 'gpt-6-sol', { variants: ['high'] })];
+    const order = (helpers: string[]) => refs(rankModels(withSub, { ...choice, helpers }, 'fast', {}, { useFree: false }));
+    expect(order(choice.helpers)).not.toContain('openlux-gpt/gpt-6-sol');
+    expect(order([...choice.helpers, 'openlux-gpt/gpt-6-sol'])).toContain('openlux-gpt/gpt-6-sol');
+    expect(order(choice.helpers)[0]).toBe('zai-coding-plan/glm-5.3-flash');
+  });
 });
