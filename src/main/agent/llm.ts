@@ -104,6 +104,7 @@ async function postOnce(
   settings: Settings,
   messages: AgentChatMessage[],
   tools: AgentToolDef[],
+  temperature = 0.3,
 ): Promise<AgentCompletionResult> {
   const url = `${settings.llmBaseUrl.replace(/\/$/, '')}/chat/completions`;
   const body: Record<string, unknown> = {
@@ -111,7 +112,7 @@ async function postOnce(
     messages: messages.map(toApiMessage),
     tools,
     tool_choice: 'auto',
-    temperature: 0.3,
+    temperature,
     thinking: { type: 'disabled' },
   };
   if (settings.llmBaseUrl.includes('openrouter.ai')) body.usage = { include: true };
@@ -165,6 +166,7 @@ export async function agentChatCompletion(
   tools: AgentToolDef[],
   mgr?: ManagerSettings,
   override?: OperatorLlmOverride,
+  temperature = 0.3,
 ): Promise<AgentCompletionResult> {
   const settings = operatorSettings(getSettings, mgr, override);
   requireApiKey(settings);
@@ -172,7 +174,7 @@ export async function agentChatCompletion(
   let lastErr: unknown;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return await postOnce(settings, messages, tools);
+      return await postOnce(settings, messages, tools, temperature);
     } catch (e) {
       lastErr = e;
       const status = (e as { status?: number }).status;

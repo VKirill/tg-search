@@ -8,7 +8,7 @@ export interface OperatorEndpoint {
   model: string;
 }
 
-const PRESETS = {
+export const PRESETS = {
   glm: { baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3-flash' },
   deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' },
 } as const;
