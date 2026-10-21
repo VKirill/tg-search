@@ -37,6 +37,7 @@ import { createOrders, stubExecutorRegistry } from './pipeline/orders';
 import { createDossier } from './dossier';
 import { createBilling } from './billing/billing';
 import type { BillingApi } from './billing/billing';
+import { createMemoryStore } from './memory/store';
 
 export interface AppDeps {
   db: Db;
@@ -62,18 +63,32 @@ export function createApp(deps: AppDeps): AppHandlers {
   const manager = deps.manager ?? stubManagerAi();
   const crmAi = deps.crmAi ?? stubCrmAi();
   const dossier = createDossier({ db, dataDir, settings: () => db.getSettings() });
+  const memory = createMemoryStore({
+    db,
+    engine,
+    dataDir,
+    settings: () => db.getSettings(),
+    emit: deps.emit,
+  });
   const crm = createCrm({ db, crmAi, emit: deps.emit });
   const emit = (e: AppEvent) => {
     deps.emit(e);
     if (e.type === 'message:new') {
       crm.onMessage(e.message);
       dossier.onMessage(e.message);
+      memory.onMessage(e.message);
+    }
+    if (e.type === 'lead:new') {
+      memory.ensureClient(e.lead);
     }
     if (e.type === 'lead:update') {
       crm.onLeadUpdate(e.lead);
       dossier.onLeadUpdate(e.lead);
     }
-    if (e.type === 'order:update') dossier.onOrder(e.order);
+    if (e.type === 'order:update') {
+      dossier.onOrder(e.order);
+      memory.onOrder(e.order);
+    }
   };
   const spinner = deps.spinner ?? passthroughSpinner;
   let billing: BillingApi | undefined;
@@ -87,6 +102,7 @@ export function createApp(deps: AppDeps): AppHandlers {
     manager,
     categorizer: deps.categorizer,
     dossier,
+    memory,
     get billing() {
       return billing;
     },
@@ -166,6 +182,12 @@ export function createApp(deps: AppDeps): AppHandlers {
             kind = 'voice';
           } else if (msg.photo || msg.document) {
             await orders.ingestPrivateMedia(lead.id, accountId, msg);
+            const fileId = msg.photo?.fileId ?? msg.document?.fileId;
+            if (fileId != null) {
+              const downloaded = await engine.downloadFile(accountId, fileId);
+              const ext = msg.photo ? '.jpg' : '';
+              mediaPath = storeMediaCopy(dataDir, downloaded, `in-${msg.chatId}-${msg.messageId}${ext}`);
+            }
             if (!text.trim() && msg.photo) text = '[фото]';
             if (!text.trim() && msg.document) text = `[файл: ${msg.document.name}]`;
           }
@@ -207,6 +229,7 @@ export function createApp(deps: AppDeps): AppHandlers {
       autopilot.stop();
       crm.stop();
       dossier.stop();
+      memory.stop();
       await engine.close();
     },
 
@@ -407,17 +430,19 @@ export function createApp(deps: AppDeps): AppHandlers {
       runNow: (id) => broadcaster.runNow(id),
     },
     clients: {
-      list: notYet('memory worker'),
-      get: notYet('memory worker'),
-      byLead: notYet('memory worker'),
+      list: async (search) => memory.listClients(search),
+      get: async (clientId) => memory.getClient(clientId),
+      byLead: async (leadId) => memory.clientForLead(leadId),
     },
     memory: {
-      facts: notYet('memory worker'),
-      addFact: notYet('memory worker'),
-      removeFact: notYet('memory worker'),
-      episodes: notYet('memory worker'),
-      assets: notYet('memory worker'),
-      sendAsset: notYet('memory worker'),
+      facts: async (clientId) => memory.listFacts(clientId).filter((f) => f.active),
+      addFact: async (clientId, kind, text) => memory.remember(clientId, kind, text, 'owner'),
+      removeFact: async (factId) => {
+        memory.removeFact(factId);
+      },
+      episodes: async (clientId) => memory.listEpisodes(clientId),
+      assets: async (clientId, query) => memory.listAssets(clientId, query),
+      sendAsset: (leadId, assetId) => memory.sendAsset(leadId, assetId),
     },
     billing: {
       plans: async () => billing!.listPlans(),
