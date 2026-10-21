@@ -2589,3 +2589,261 @@ button.chip:hover {
   width: 88px;
   flex-shrink: 0;
 }
+
+.nav-rail__icon {
+  position: relative;
+}
+
+.nav-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.nav-badge--inline {
+  position: static;
+  display: inline-flex;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.page-view__head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.page-view__intro {
+  margin: 0 0 var(--space-4);
+  max-width: 720px;
+}
+
+.editor-sheet--wide {
+  width: min(920px, 100%);
+}
+
+.editor-sheet__head {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.code-editor {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  min-height: 120px;
+}
+
+.field-inline-input {
+  margin-top: 6px;
+  width: 100%;
+}
+
+.perm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: var(--space-2);
+}
+
+.perm-table th,
+.perm-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.perm-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.perm-add input {
+  flex: 1;
+}
+
+.agents-grid,
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.agent-card,
+.skill-card {
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.agent-card:hover,
+.skill-card:hover {
+  border-color: var(--border);
+}
+
+.agent-card__name,
+.skill-card__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.agent-card__head,
+.skill-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.agent-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-card__desc,
+.skill-card__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: var(--space-2) 0;
+}
+
+.agent-card__meta,
+.skill-card__meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.skill-card--draft {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-dim);
+}
+
+.skill-card__draft-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: var(--space-3);
+}
+
+.skills-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+}
+
+.skills-tab-count {
+  margin-left: 6px;
+  opacity: 0.7;
+}
+
+.approval-list,
+.spam-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 800px;
+}
+
+.approval-card,
+.spam-card {
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.approval-card__head,
+.spam-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.approval-card__lead {
+  font-weight: 600;
+}
+
+.approval-card__summary,
+.spam-card__sample {
+  font-size: 13px;
+  margin: 0 0 var(--space-2);
+}
+
+.approval-card__actions,
+.spam-card__actions,
+.approval-card__status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.spam-card__stats {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: var(--space-2);
+}
+
+.tag--accent {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.tag--muted {
+  color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+}
+
+.tag--ok {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+}
+
+.btn--xs {
+  padding: 2px 6px;
+  font-size: 11px;
+  min-height: 22px;
+}
+
+.bubble--highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--accent-dim);
+}
+
+.chats-publication-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
